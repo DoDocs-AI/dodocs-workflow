@@ -18,7 +18,7 @@ bash ~/.claude/../dodocs-workflow/install.sh
 ```
 Or from remote:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dodocs/dodocs-workflow/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install.sh | bash
 ```
 
 Parse `$ARGUMENTS` to determine which subcommand to run.

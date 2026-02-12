@@ -6,14 +6,14 @@ Scrum Team workflow for Claude Code. Spawns a 13-agent autonomous development te
 
 **From a local clone:**
 ```bash
-git clone https://github.com/dodocs/dodocs-workflow.git
+git clone https://github.com/DoDocs-AI/dodocs-workflow.git
 cd dodocs-workflow
 bash install.sh
 ```
 
 **From GitHub (one-liner):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dodocs/dodocs-workflow/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install.sh | bash
 ```
 
 ## Setup Per Project
@@ -91,7 +91,7 @@ cd dodocs-workflow && git pull && bash install.sh
 
 Or from remote:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dodocs/dodocs-workflow/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install.sh | bash
 ```
 
 ## Uninstall

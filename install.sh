@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for Claude Code
 
-REPO_URL="https://raw.githubusercontent.com/dodocs/dodocs-workflow/main"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main"
 CLAUDE_DIR="$HOME/.claude"
 VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
 

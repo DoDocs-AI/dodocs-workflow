@@ -1,0 +1,150 @@
+Create an agent team for developing new features on this project. Use delegate mode — the lead only coordinates, never writes code.
+
+The team follows a Scrum workflow and must work fully autonomously. Human only needs to provide requirements.
+
+<boot>
+BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
+If the file does not exist, STOP immediately and tell the user:
+"No scrum-team config found for this project. Run `dodocs-workflow init` or copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+Extract: ALL sections — you need App Identity, Tech Stack, Ports & URLs, and all paths/commands.
+</boot>
+
+## Team Agents
+
+Spawn these teammates using their agent definitions from `~/.claude/agents/`:
+
+| Name | Agent Type | Notes |
+|------|-----------|-------|
+| product-owner | `product-owner` | |
+| ux-designer | `ux-designer` | |
+| architect | `architect` | Use `mode: "plan"` — require plan approval |
+| scrum-master | `scrum-master` | |
+| code-reviewer | `code-reviewer` | |
+| frontend-dev-1 | `frontend-dev` | |
+| frontend-dev-2 | `frontend-dev` | Coordinates with frontend-dev-1 to avoid file conflicts |
+| backend-dev-1 | `backend-dev` | Owns all database migrations |
+| backend-dev-2 | `backend-dev` | Coordinates with backend-dev-1, never creates migrations |
+| tech-lead | `tech-lead` | |
+| qa-engineer | `qa-engineer` | |
+| qa-automation | `qa-automation` | |
+| manual-tester | `manual-tester` | |
+
+Models are defined in each agent's `.md` file (opus for planning/review roles, sonnet for execution roles).
+
+## Full Workflow
+
+### Phase 1: Requirements + Early UX Research (PARALLEL)
+Spawn product-owner and ux-designer simultaneously:
+- **product-owner** talks to the user, gathers requirements, produces **FEATURE-BRIEF.md**
+- **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
+
+### Phase 2: UX Design + User Validation
+- **ux-designer** reads the Feature Brief and produces **UX-DESIGN.md** (combining research from Phase 1 with the brief)
+- **USER CHECKPOINT**: Present the UX flows to the user and ask: "Do these user flows look right? Any changes before we proceed to architecture?" Wait for user approval before continuing.
+
+### Phase 3: Architecture (with plan approval)
+- **architect** reads Brief + UX Design, designs the technical solution, produces **ARCHITECTURE.md**
+- Architect runs with `mode: "plan"` — lead must approve the architecture plan
+
+### Phase 4: Task Breakdown + Git Setup
+- **tech-lead** creates a feature branch: `git checkout -b feature/<feature-name>`
+- **scrum-master** reads the Architecture doc and creates all tasks with these rules:
+  - **Migration ownership**: Only `backend-dev-1` creates database migrations. `backend-dev-2` tasks that need migrations are blocked by `backend-dev-1`'s migration tasks
+  - **No file conflicts**: No two developers edit the same file
+  - **Task dependencies**: Set `blockedBy` relationships where needed
+  - Assigns tasks to all devs and QA
+
+### Phase 5: Build + Incremental Test (ALL PARALLEL)
+Spawn ALL these agents simultaneously:
+- **frontend-dev-1** + **frontend-dev-2**: work on assigned tasks, make atomic git commit per completed task
+- **backend-dev-1** + **backend-dev-2**: work on assigned tasks, make atomic git commit per completed task
+- **qa-engineer**: writes test case `.md` files
+- **code-reviewer**: watches for completed developer tasks, reviews each one
+- **tech-lead**: runs compile gate (compile backend + frontend + lint), starts the app, monitors for build/runtime issues
+- **manual-tester**: waits for tech-lead to confirm app is running, then begins testing INCREMENTALLY — tests each feature area as soon as code-reviewer approves it
+- **qa-automation**: writes E2E tests incrementally — as manual-tester passes each test scenario, qa-automation writes the Playwright test for it
+
+### Phase 5 Flow (per task):
+```
+Developer completes task -> atomic commit
+       |
+       v
+Code-reviewer reviews
+       |
+       +- Approve -> tech-lead verifies it runs -> manual-tester tests it
+       |                                                |
+       |                                         pass -> qa-automation writes E2E
+       |                                         fail -> bug task -> developer fixes
+       |
+       +- Request changes -> developer fixes -> code-reviewer re-reviews
+```
+
+### Phase 6: Integration Verification
+After all tasks are complete, reviewed, and tested:
+- **tech-lead**: full app restart, regression check
+- **qa-automation**: runs the full E2E test suite
+- **manual-tester**: final smoke test of the complete feature flow end-to-end
+- **code-reviewer**: reviews the full feature diff (all changes from feature branch)
+
+### Phase 7: Ship
+- **tech-lead**: creates a PR from the feature branch to main
+- Team lead reports completion to the user with a summary
+
+## Parallel Execution Rules
+
+- From Phase 5 onward, tech-lead, code-reviewer, manual-tester, qa-automation, and all developers MUST run in parallel
+- **Incremental testing**: manual-tester does NOT wait for all tasks to be done — tests each area as code-reviewer approves it
+- **Incremental E2E**: qa-automation does NOT wait for all manual tests to pass — writes E2E tests as each scenario passes
+- When manual-tester or tech-lead files a bug, the assigned developer picks it up and fixes it immediately — no waiting
+- After a developer fixes a bug, code-reviewer reviews the fix, then manual-tester retests
+- This review-test-fix-retest loop continues until all test cases pass
+
+## Compile Gate
+
+Before manual-tester begins testing, tech-lead MUST confirm:
+1. Backend compiles without errors
+2. Frontend compiles without errors
+3. No lint errors
+4. App starts and is accessible
+Only then does tech-lead signal "app ready" for testing to begin.
+
+## Git Strategy
+
+- **Feature branch**: `feature/<feature-name>` created at Phase 4
+- **Atomic commits**: Each completed task = one commit with descriptive message
+- **Commit format**: `<scope>: <description>` (e.g., `backend: add User entity and migration`)
+- **PR**: Created at Phase 7 by tech-lead after all verification passes
+
+## Retest Mode
+
+If `$ARGUMENTS` starts with `--retest`, enter retest mode instead of the full workflow:
+
+1. **Parse arguments**: Extract the feature name (e.g., `--retest user-settings`)
+2. **Skip Phases 1-4 entirely** — do NOT spawn product-owner, ux-designer, architect, scrum-master, frontend-dev-2, backend-dev-2, qa-engineer, or qa-automation
+3. **Read existing context**:
+   - Test cases from the **Test Cases** path in the project config relevant to the feature
+   - Feature docs from the **Feature Docs** path in the project config for `<feature-name>/`
+4. **Spawn ALL these agents in parallel**:
+
+| Name | Agent Type | Retest Role |
+|------|-----------|-------------|
+| tech-lead | `tech-lead` | Starts full environment, compile gate, verifies app runs |
+| code-reviewer | `code-reviewer` | Reviews any fixes made during retest |
+| manual-tester | `manual-tester` | Tests ALL scenarios from existing test cases |
+| frontend-dev-1 | `frontend-dev` | Ready to pick up and fix UI bugs immediately |
+| backend-dev-1 | `backend-dev` | Ready to pick up and fix API/DB bugs immediately |
+
+### Retest Phases
+
+- **Phase R1**: All 5 agents spawn in parallel. Tech-lead starts the app and runs compile gate
+- **Phase R2**: manual-tester tests ALL scenarios from existing test cases. Developers stand by for bug tasks
+- **Phase R3** (continuous loop): manual-tester files bugs -> developers fix -> code-reviewer reviews fix -> manual-tester retests -> repeat until all test cases pass
+- **Done**: when manual-tester confirms all test cases pass with no remaining bugs
+
+## Agent Execution
+
+**CRITICAL**: All agents MUST be spawned with `mode: "bypassPermissions"` to ensure uninterrupted autonomous execution. Exception: architect uses `mode: "plan"` for architecture approval.
+
+Spawn all agents automatically as their phase begins — do NOT ask the user for permission to spawn any agent.
+
+The feature to implement/retest: $ARGUMENTS

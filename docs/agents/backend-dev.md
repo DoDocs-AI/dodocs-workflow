@@ -23,6 +23,10 @@ Implements backend tasks â€” controllers, entities, services, DTOs, migrations â
 6. Atomic git commit: `backend: <description>`.
 7. Mark task completed, check TaskList for next assignment.
 
+## Progress Tracking
+
+After completing each task, updates the Development Tasks table in `PROGRESS.md` (sets task status to Done) and adds a timeline entry.
+
 ## Migration Ownership Rules
 
 | Developer | Can Create Migrations | Can Create Entities | Can Create Services/Endpoints |

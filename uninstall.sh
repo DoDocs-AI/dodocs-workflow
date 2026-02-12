@@ -32,6 +32,16 @@ AGENTS=(
     "scrum-master"
     "tech-lead"
     "ux-designer"
+    "security-auditor"
+    "performance-engineer"
+    "accessibility-auditor"
+    "seo-analyst"
+    "devops-engineer"
+    "error-handler"
+    "dependency-auditor"
+    "api-documenter"
+    "db-analyst"
+    "load-tester"
 )
 
 for agent in "${AGENTS[@]}"; do
@@ -39,6 +49,7 @@ for agent in "${AGENTS[@]}"; do
 done
 
 rm -f "$CLAUDE_DIR/commands/scrum-team.md"
+rm -f "$CLAUDE_DIR/commands/prepare-for-production.md"
 rm -f "$CLAUDE_DIR/scrum-team-config.template.md"
 rm -f "$VERSION_FILE"
 

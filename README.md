@@ -1,6 +1,6 @@
 # dodocs-workflow
 
-A Scrum Team workflow for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Spawns a **13-agent autonomous development team** that takes a feature from requirements gathering through architecture, implementation, code review, testing, and PR creation — with minimal human intervention.
+A Scrum Team workflow for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Spawns a **13-agent autonomous development team** that takes a feature from requirements gathering through architecture, implementation, code review, testing, and PR creation — with minimal human intervention. Also includes a **10-agent production readiness audit** that identifies security, performance, accessibility, and infrastructure issues before you ship.
 
 ```
 /scrum-team add user billing dashboard
@@ -18,6 +18,7 @@ That single command launches the full team. You answer a few product questions, 
 - [Usage](#usage)
 - [Workflow Phases](#workflow-phases)
 - [Team Roles](#team-roles)
+- [Prepare for Production](#prepare-for-production)
 - [Architecture](#architecture)
 - [Project Config Reference](#project-config-reference)
 - [Upgrade](#upgrade)
@@ -29,7 +30,7 @@ That single command launches the full team. You answer a few product questions, 
 
 ## How It Works
 
-dodocs-workflow is a set of **agent definitions** and a **slash command** for Claude Code. When you run `/scrum-team`, it orchestrates 13 specialized agents that collaborate through a shared task list, message passing, and a phased workflow:
+dodocs-workflow is a set of **agent definitions** and **slash commands** for Claude Code. When you run `/scrum-team`, it orchestrates 13 specialized agents that collaborate through a shared task list, message passing, and a phased workflow:
 
 ```
 You describe the feature
@@ -54,10 +55,10 @@ You describe the feature
   Phase 5: ALL agents work in parallel:
            - 4 developers build (atomic commits per task)
            - Code Reviewer reviews each task
-           - QA Engineer writes test cases
+           - QA Engineer writes test cases (organized by user story)
            - Tech Lead runs compile gate + starts app
-           - Manual Tester tests incrementally
-           - QA Automation writes E2E tests incrementally
+           - Manual Tester tests full feature story by story (after all reviews + test cases ready)
+           - QA Automation writes E2E tests per user story
         |
         v
   Phase 6: Integration verification
@@ -68,7 +69,7 @@ You describe the feature
            Team lead reports summary to you
 ```
 
-The key insight is **incremental parallelism** in Phase 5: testing starts as soon as the first task is code-reviewed, not after all development is done. Bugs are filed and fixed in real-time while other tasks continue.
+The key insight is **feature-level testing** in Phase 5: manual testing starts after all dev tasks are code-reviewed and QA engineer's test cases are ready. The manual-tester tests the full feature story by story, and qa-automation writes E2E tests per user story as each story passes. Bugs are filed and fixed in real-time.
 
 ---
 
@@ -99,8 +100,8 @@ The installer copies files to `~/.claude/` (Claude Code's global config director
 
 | Destination | Files | Description |
 |-------------|-------|-------------|
-| `~/.claude/agents/` | 11 `.md` files | Agent role definitions |
-| `~/.claude/commands/` | `scrum-team.md` | The `/scrum-team` slash command |
+| `~/.claude/agents/` | 21 `.md` files | Agent role definitions (11 scrum + 10 production audit) |
+| `~/.claude/commands/` | `scrum-team.md`, `prepare-for-production.md` | Slash commands |
 | `~/.claude/` | `scrum-team-config.template.md` | Config template for new projects |
 | `~/.claude/` | `.dodocs-workflow-version` | Installed version tracker |
 
@@ -278,39 +279,44 @@ The architect reads the Brief and UX Design, studies your existing codebase patt
 
 The tech-lead creates a feature branch. The scrum-master reads the Architecture doc and creates all tasks with proper assignment, dependencies, and migration ownership rules.
 
-### Phase 5: Build + Incremental Test
+### Phase 5: Build + Test
 
 **Agents**: ALL 13 agents in parallel
 
-This is where the magic happens. All agents work simultaneously:
+This is where the magic happens. All agents work simultaneously, updating `PROGRESS.md` as they go:
 
 - **Developers** implement their assigned tasks and make atomic commits
 - **Code reviewer** watches for completed tasks and reviews each one
-- **QA engineer** writes test cases
+- **QA engineer** writes test cases organized by user story
 - **Tech lead** runs compile gate, starts the app, monitors for issues
-- **Manual tester** tests each feature area as soon as code-reviewer approves it
-- **QA automation** writes E2E tests as each manual test scenario passes
+- **Manual tester** waits for all dev tasks to be code-reviewed and test cases to be ready, then tests the full feature story by story
+- **QA automation** writes E2E tests per user story after manual-tester passes all scenarios for that story
 
-The flow per task:
+The flow:
 ```
-Developer completes task -> atomic commit
+Developers complete tasks -> atomic commits
        |
        v
-Code-reviewer reviews
+Code-reviewer reviews each task individually
        |
-       +- Approve -> tech-lead verifies -> manual-tester tests
-       |                                        |
-       |                                 pass -> qa-automation writes E2E
-       |                                 fail -> bug task -> developer fixes
+       v
+QA-engineer writes test cases organized by user story (parallel with devs)
        |
-       +- Request changes -> developer fixes -> re-review
+       v
+ALL tasks reviewed + test cases ready
+       |
+       v
+Manual-tester tests the full feature story by story
+       |
+       +-- pass -> qa-automation writes E2E for that user story
+       +-- fail -> bug task -> developer fixes -> code-reviewer reviews -> manual-tester retests
 ```
 
 ### Phase 6: Integration Verification
 
 **Agents**: tech-lead, qa-automation, manual-tester, code-reviewer
 
-After all individual tasks are complete:
+After all user stories pass testing:
 - Tech lead does a full app restart and regression check
 - QA automation runs the complete E2E test suite
 - Manual tester does a final smoke test of the end-to-end flow
@@ -326,7 +332,7 @@ The tech lead creates a PR from the feature branch to main with a comprehensive 
 
 ## Team Roles
 
-The team uses 11 agent definitions that are instantiated into 13 running agents (frontend-dev and backend-dev are each used twice).
+The scrum team uses 11 agent definitions that are instantiated into 13 running agents (frontend-dev and backend-dev are each used twice). An additional 10 agents are used by `/prepare-for-production`.
 
 | Agent | Model | Phase | Role |
 |-------|-------|-------|------|
@@ -348,6 +354,113 @@ See the [docs/agents/](docs/agents/) directory for detailed documentation of eac
 
 ---
 
+## Prepare for Production
+
+The `/prepare-for-production` command fills the gap between "feature complete" and "production ready." While `/scrum-team` builds features, `/prepare-for-production` audits the entire codebase for production readiness across 10 dimensions.
+
+### Quick Start
+
+```
+/prepare-for-production
+```
+
+Or run only specific auditors:
+
+```
+/prepare-for-production --only security,performance,db
+```
+
+### How It Works
+
+```
+Phase 1: Parallel Audit (10 auditors run simultaneously)
+    security-auditor ──────┐
+    performance-engineer ──┤
+    accessibility-auditor ─┤
+    seo-analyst ───────────┤  All produce REPORT.md
+    devops-engineer ───────┤  in docs/production-audit/
+    error-handler ─────────┤
+    dependency-auditor ────┤
+    api-documenter ────────┤
+    db-analyst ────────────┤
+    load-tester ───────────┘
+         |
+         v
+Phase 2: Triage + Task Creation
+    Read all reports, deduplicate, classify by severity,
+    create fix tasks assigned to developers
+         |
+         v
+Phase 3: Fix + Review
+    Developers fix Critical/High issues,
+    code-reviewer reviews, tech-lead verifies
+         |
+         v
+Phase 4: Re-audit + Sign-off
+    Re-run auditors that found Critical/High issues,
+    produce SUMMARY.md with pass/fail per area
+```
+
+### Auditor Agents
+
+| Agent | Model | What It Checks |
+|-------|-------|---------------|
+| [security-auditor](docs/agents/security-auditor.md) | opus | OWASP top 10, auth on every endpoint, hardcoded secrets, dependency CVEs |
+| [performance-engineer](docs/agents/performance-engineer.md) | opus | N+1 queries, missing DB indexes, frontend bundle size, caching |
+| [accessibility-auditor](docs/agents/accessibility-auditor.md) | sonnet | WCAG 2.1 AA, keyboard nav, ARIA, color contrast, screen reader |
+| [seo-analyst](docs/agents/seo-analyst.md) | sonnet | Meta tags, Open Graph, sitemap, robots.txt, structured data |
+| [devops-engineer](docs/agents/devops-engineer.md) | sonnet | Dockerfile, docker-compose, health checks, CI/CD, env config |
+| [error-handler](docs/agents/error-handler.md) | sonnet | Consistent error responses, error boundaries, logging coverage |
+| [dependency-auditor](docs/agents/dependency-auditor.md) | sonnet | npm audit, Maven dependency check, outdated packages, licenses |
+| [api-documenter](docs/agents/api-documenter.md) | sonnet | OpenAPI spec coverage, endpoint inventory, API reference docs |
+| [db-analyst](docs/agents/db-analyst.md) | opus | Schema review, missing indexes/constraints, migration hygiene |
+| [load-tester](docs/agents/load-tester.md) | sonnet | Load test scenarios, capacity estimates, breaking points |
+
+### Selective Mode
+
+Run only the auditors you need:
+
+| Short Name | Agent |
+|-----------|-------|
+| `security` | security-auditor |
+| `performance` | performance-engineer |
+| `accessibility` | accessibility-auditor |
+| `seo` | seo-analyst |
+| `devops` | devops-engineer |
+| `error-handler` | error-handler |
+| `dependency` | dependency-auditor |
+| `api-docs` | api-documenter |
+| `db` | db-analyst |
+| `load-test` | load-tester |
+
+### Output
+
+All reports are written to `docs/production-audit/`:
+
+```
+docs/production-audit/
+├── security-auditor-REPORT.md
+├── performance-engineer-REPORT.md
+├── accessibility-auditor-REPORT.md
+├── seo-analyst-REPORT.md
+├── devops-engineer-REPORT.md
+├── error-handler-REPORT.md
+├── dependency-auditor-REPORT.md
+├── api-documenter-REPORT.md
+├── db-analyst-REPORT.md
+├── load-tester-REPORT.md
+├── TRIAGE.md              # Consolidated findings by severity
+└── SUMMARY.md             # Final pass/fail sign-off
+```
+
+### Pass Criteria
+
+- **PASS**: Zero Critical, zero High findings remaining
+- **PASS WITH WARNINGS**: Zero Critical, some High with documented justification
+- **FAIL**: Any Critical findings remaining
+
+---
+
 ## Architecture
 
 ### File Layout
@@ -355,7 +468,7 @@ See the [docs/agents/](docs/agents/) directory for detailed documentation of eac
 ```
 dodocs-workflow/
 ├── agents/                              # Agent definitions (installed to ~/.claude/agents/)
-│   ├── architect.md
+│   ├── architect.md                     #   Scrum team agents (11)
 │   ├── backend-dev.md
 │   ├── code-reviewer.md
 │   ├── frontend-dev.md
@@ -365,12 +478,23 @@ dodocs-workflow/
 │   ├── qa-engineer.md
 │   ├── scrum-master.md
 │   ├── tech-lead.md
-│   └── ux-designer.md
+│   ├── ux-designer.md
+│   ├── security-auditor.md              #   Production audit agents (10)
+│   ├── performance-engineer.md
+│   ├── accessibility-auditor.md
+│   ├── seo-analyst.md
+│   ├── devops-engineer.md
+│   ├── error-handler.md
+│   ├── dependency-auditor.md
+│   ├── api-documenter.md
+│   ├── db-analyst.md
+│   └── load-tester.md
 ├── commands/                            # Slash commands (installed to ~/.claude/commands/)
-│   ├── scrum-team.md                    # Main /scrum-team command
+│   ├── scrum-team.md                    # /scrum-team — build features
+│   ├── prepare-for-production.md        # /prepare-for-production — audit readiness
 │   └── dodocs-workflow.md               # Helper /dodocs-workflow command
 ├── docs/                                # Documentation
-│   └── agents/                          # Per-agent documentation
+│   └── agents/                          # Per-agent documentation (21 files)
 ├── templates/
 │   └── scrum-team-config.template.md    # Per-project config template
 ├── install.sh                           # Install/upgrade script
@@ -386,6 +510,7 @@ Agents coordinate through three mechanisms:
 1. **Shared Task List** — Tasks are created, assigned, blocked, and completed through Claude Code's task system. All agents see the same list.
 2. **Direct Messages** — Agents send messages to specific teammates (e.g., code-reviewer notifies tech-lead after approving a task).
 3. **Shared Files** — Feature Brief, UX Design, Architecture docs, and test cases are written to disk and read by downstream agents.
+4. **Progress File** — A shared `PROGRESS.md` file at `docs/features/<feature>/PROGRESS.md` tracks phase status, artifact completion, development tasks, code reviews, testing, E2E automation, bugs, and a timeline. All agents update it at key milestones, providing a single-file dashboard of workflow progress.
 
 ### Key Design Decisions
 
@@ -393,7 +518,7 @@ Agents coordinate through three mechanisms:
 
 **Migration ownership**: Database migrations are a common source of conflicts when multiple developers work in parallel. Only `backend-dev-1` creates migrations. `backend-dev-2` works on services and endpoints that depend on those migrations.
 
-**Incremental testing**: Traditional workflows wait for all development to finish before testing. This workflow starts testing as soon as the first code-reviewed task is ready, catching bugs earlier and keeping developers busy with fixes while other tasks continue.
+**Feature-level testing**: Testing starts after all dev tasks are code-reviewed and QA engineer's test cases are ready. The manual-tester tests the full feature story by story using the test cases, and qa-automation writes E2E tests per user story as each story passes. This ensures complete test coverage with well-structured test cases rather than ad-hoc incremental testing.
 
 **Atomic commits**: Each completed task = one commit. This makes code review easier, git history cleaner, and rollbacks possible at the task level.
 
@@ -454,8 +579,8 @@ bash ~/path/to/dodocs-workflow/uninstall.sh
 ```
 
 This removes:
-- All 11 agent definitions from `~/.claude/agents/`
-- The `/scrum-team` command from `~/.claude/commands/`
+- All 21 agent definitions from `~/.claude/agents/`
+- The `/scrum-team` and `/prepare-for-production` commands from `~/.claude/commands/`
 - The config template from `~/.claude/`
 - The version file
 

@@ -31,8 +31,9 @@ Implements frontend tasks — pages, components, services, types, routes — fol
 ## Post-Task Flow
 
 After marking task complete:
+- Updates the Development Tasks table in `PROGRESS.md` (sets task status to Done) and adds a timeline entry.
 - Code-reviewer reviews the code.
-- If approved: moves to testing.
+- If approved: review is complete. Testing begins after all tasks are reviewed and test cases are ready.
 - If changes requested: developer fixes and re-commits.
 
 ## Config Sections Used

@@ -64,6 +64,7 @@ The user can request revisions before the workflow moves to Phase 3.
 - Starts pattern research in **parallel** with Product Owner (Phase 1)
 - Waits for the Feature Brief before producing the UX Design (Phase 2)
 - The architect reads the UX Design to begin Phase 3
+- After completing the UX Design, updates `PROGRESS.md`: marks the UX-DESIGN.md artifact as Done and adds a timeline entry
 
 ## When It Runs
 

@@ -38,6 +38,12 @@ Your job is to implement assigned frontend tasks following the existing codebase
 7. **Mark task completed** when done, then check TaskList for next assignment
 </responsibilities>
 
+<progress_tracking>
+After completing each task, update `<feature-docs>/<feature-name>/PROGRESS.md`:
+1. In the **Development Tasks** table, set your task's status to `Done`
+2. Append to the **Timeline** section: `- [timestamp] frontend-dev: Completed [task name]`
+</progress_tracking>
+
 <routing>
 All workspace routes use the **Route Prefix** from the project config. Check the router file for the exact pattern.
 </routing>
@@ -45,5 +51,5 @@ All workspace routes use the **Route Prefix** from the project config. Check the
 <coordination>
 - If you are one of multiple frontend developers, coordinate to avoid editing the same files
 - If you discover you need to edit a file assigned to another developer, create a new task describing the conflict and notify via SendMessage
-- After you mark a task complete, the code-reviewer will review your code. If they request changes, fix them promptly and make a new commit
+- After you mark a task complete, the code-reviewer will review your code. If they request changes, fix them promptly and make a new commit. Testing begins after all tasks are reviewed.
 </coordination>

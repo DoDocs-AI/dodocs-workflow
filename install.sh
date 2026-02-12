@@ -66,6 +66,16 @@ AGENTS=(
     "scrum-master"
     "tech-lead"
     "ux-designer"
+    "security-auditor"
+    "performance-engineer"
+    "accessibility-auditor"
+    "seo-analyst"
+    "devops-engineer"
+    "error-handler"
+    "dependency-auditor"
+    "api-documenter"
+    "db-analyst"
+    "load-tester"
 )
 
 # Install agent files
@@ -79,14 +89,21 @@ for agent in "${AGENTS[@]}"; do
     print_success "  $agent"
 done
 
-# Install command file
-print_info "Installing scrum-team command..."
-if [ "$SOURCE" = "local" ]; then
-    cp "$SOURCE_DIR/commands/scrum-team.md" "$CLAUDE_DIR/commands/scrum-team.md"
-else
-    curl -fsSL "$REPO_URL/commands/scrum-team.md" -o "$CLAUDE_DIR/commands/scrum-team.md"
-fi
-print_success "  scrum-team command"
+# Install command files
+COMMANDS=(
+    "scrum-team"
+    "prepare-for-production"
+)
+
+print_info "Installing commands..."
+for cmd in "${COMMANDS[@]}"; do
+    if [ "$SOURCE" = "local" ]; then
+        cp "$SOURCE_DIR/commands/$cmd.md" "$CLAUDE_DIR/commands/$cmd.md"
+    else
+        curl -fsSL "$REPO_URL/commands/$cmd.md" -o "$CLAUDE_DIR/commands/$cmd.md"
+    fi
+    print_success "  $cmd command"
+done
 
 # Install config template
 print_info "Installing config template..."
@@ -118,8 +135,8 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 11 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team command"
+echo "  ~/.claude/agents/          - 21 agent definitions"
+echo "  ~/.claude/commands/        - scrum-team + prepare-for-production commands"
 echo "  ~/.claude/scrum-team-config.template.md"
 echo ""
 
@@ -128,6 +145,7 @@ if [ "$UPGRADE" = false ]; then
     echo "  1. Copy the template to your project:"
     echo "     cp ~/.claude/scrum-team-config.template.md <project>/.claude/scrum-team-config.md"
     echo "  2. Edit the config with your project's values"
-    echo "  3. Use /scrum-team <feature-name> in Claude Code"
+    echo "  3. Use /scrum-team <feature-name> to build features"
+    echo "     Use /prepare-for-production to audit production readiness"
     echo ""
 fi

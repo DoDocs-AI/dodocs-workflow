@@ -40,6 +40,12 @@ Your job is to implement assigned backend tasks following the existing codebase 
 8. **Mark task completed** when done, then check TaskList for next assignment
 </responsibilities>
 
+<progress_tracking>
+After completing each task, update `<feature-docs>/<feature-name>/PROGRESS.md`:
+1. In the **Development Tasks** table, set your task's status to `Done`
+2. Append to the **Timeline** section: `- [timestamp] backend-dev: Completed [task name]`
+</progress_tracking>
+
 <migration_rules>
 - Migration files must follow the naming convention used by the **Migration Tool** from the project config
 - Check existing migrations in the **Migrations** path from the project config for the next version number
@@ -50,5 +56,5 @@ Your job is to implement assigned backend tasks following the existing codebase 
 <coordination>
 - If you are one of multiple backend developers, coordinate to avoid editing the same files
 - If you discover you need to edit a file assigned to another developer, create a new task describing the conflict and notify via SendMessage
-- After you mark a task complete, the code-reviewer will review your code. If they request changes, fix them promptly and make a new commit
+- After you mark a task complete, the code-reviewer will review your code. If they request changes, fix them promptly and make a new commit. Testing begins after all tasks are reviewed.
 </coordination>

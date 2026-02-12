@@ -1,6 +1,6 @@
 # QA Engineer
 
-Writes manual test cases as `.md` files covering happy paths, error paths, and edge cases. Produces test cases early so manual-tester and qa-automation can use them during incremental testing.
+Writes manual test cases as `.md` files organized by user story, covering happy paths, error paths, and edge cases. Produces test cases early — manual-tester cannot begin testing until test cases are ready.
 
 ## Spec
 
@@ -16,13 +16,14 @@ Writes manual test cases as `.md` files covering happy paths, error paths, and e
 
 1. Reads existing test case files to match format exactly.
 2. Reads the Feature Brief, UX Design, and Architecture docs.
-3. Writes test cases covering:
+3. **Organizes test cases by user story** — each test case file maps to a user story so manual-tester can execute story by story and qa-automation can write E2E tests per story.
+4. Writes test cases covering:
    - **Happy paths** — normal successful user workflows.
    - **Error paths** — invalid inputs, server errors, network failures.
    - **Edge cases** — boundary values, empty states, concurrent actions.
    - **Security** — unauthorized access attempts, input validation.
-4. Names files descriptively (e.g., `user-settings-testcases.md`).
-5. Notifies team lead when test cases are ready.
+5. Names files by user story (e.g., `US01-user-profile-settings-testcases.md`, `US02-notification-preferences-testcases.md`).
+6. Notifies team lead when test cases are ready.
 
 ## Test Case Format
 
@@ -37,7 +38,7 @@ Follows existing format in the project. Each test case includes:
 
 ## Timing
 
-Test cases are needed by manual-tester and qa-automation during Phase 5. The QA engineer produces them as early as possible — ideally before the first developer task is code-reviewed.
+Test cases are needed by manual-tester and qa-automation during Phase 5. The QA engineer produces them as early as possible — manual-tester cannot begin testing until test cases are ready.
 
 ## Config Sections Used
 
@@ -46,9 +47,10 @@ Test cases are needed by manual-tester and qa-automation during Phase 5. The QA 
 
 ## Coordination
 
-- manual-tester reads these test cases to execute browser testing.
-- qa-automation references them when writing Playwright E2E tests.
+- manual-tester reads these test cases (organized by user story) to execute browser testing story by story.
+- qa-automation references them when writing Playwright E2E tests per user story.
 - Notifies team lead when test cases are available.
+- After completing test cases for each user story, updates the Test Cases section of `PROGRESS.md` and adds a timeline entry.
 
 ## When It Runs
 

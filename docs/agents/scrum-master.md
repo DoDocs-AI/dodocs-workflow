@@ -16,7 +16,7 @@ The Scrum Master translates the Architecture document into actionable tasks. The
 
 1. **Reads the Architecture doc** — Understands every endpoint, entity, component, and route to be built.
 
-2. **Creates tasks** — Breaks the architecture into granular tasks using `TaskCreate`, each with:
+2. **Creates tasks grouped by user story** — Breaks the architecture into user stories and granular subtasks using `TaskCreate`. Each dev task is prefixed with its user story (e.g., `[US01]`). Each task includes:
    - Clear description with exact file paths
    - Acceptance criteria
    - Assignment to a specific developer or QA agent
@@ -41,9 +41,9 @@ The Scrum Master translates the Architecture document into actionable tasks. The
 | Page components | `frontend-dev-1` |
 | Sub-components | `frontend-dev-2` |
 | Routes | `frontend-dev-1` (blocked by page tasks) |
-| Test case writing | `qa-engineer` |
-| E2E test writing | `qa-automation` |
-| Manual testing | `manual-tester` |
+| Test case writing (by user story) | `qa-engineer` |
+| E2E test writing (per user story) | `qa-automation` |
+| Manual testing (story by story) | `manual-tester` |
 
 ## Dependency Chain Example
 
@@ -82,6 +82,7 @@ frontend-dev-1: Create types + API service (blocked by resource)
 - Reads the Architecture doc produced by the Architect
 - Creates tasks that developers, QA engineer, manual-tester, and qa-automation work on
 - Code review tasks are NOT created — the code-reviewer monitors completed tasks automatically
+- After creating all tasks, populates the Development Tasks table in `PROGRESS.md` and adds a timeline entry
 
 ## When It Runs
 

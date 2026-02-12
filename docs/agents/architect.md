@@ -67,6 +67,7 @@ The architect is the only agent that runs with `mode: "plan"`. This means:
 - Reads Feature Brief (from Product Owner) and UX Design (from UX Designer)
 - The Scrum Master reads the Architecture doc to create tasks (Phase 4)
 - Developers reference the Architecture doc while implementing
+- After completing the Architecture doc, updates `PROGRESS.md`: marks the ARCHITECTURE.md artifact as Done and adds a timeline entry
 
 ## When It Runs
 

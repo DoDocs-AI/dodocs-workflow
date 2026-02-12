@@ -34,7 +34,9 @@ Models are defined in each agent's `.md` file (opus for planning/review roles, s
 ## Full Workflow
 
 ### Phase 1: Requirements + Early UX Research (PARALLEL)
-Spawn product-owner and ux-designer simultaneously:
+**First**: Create the initial `PROGRESS.md` at `<feature-docs>/<feature-name>/PROGRESS.md` using the template from the Progress Tracking section.
+
+Then spawn product-owner and ux-designer simultaneously:
 - **product-owner** talks to the user, gathers requirements, produces **FEATURE-BRIEF.md**
 - **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
 
@@ -54,29 +56,34 @@ Spawn product-owner and ux-designer simultaneously:
   - **Task dependencies**: Set `blockedBy` relationships where needed
   - Assigns tasks to all devs and QA
 
-### Phase 5: Build + Incremental Test (ALL PARALLEL)
+### Phase 5: Build + Test (ALL PARALLEL)
 Spawn ALL these agents simultaneously:
 - **frontend-dev-1** + **frontend-dev-2**: work on assigned tasks, make atomic git commit per completed task
 - **backend-dev-1** + **backend-dev-2**: work on assigned tasks, make atomic git commit per completed task
-- **qa-engineer**: writes test case `.md` files
+- **qa-engineer**: writes test case `.md` files organized by user story
 - **code-reviewer**: watches for completed developer tasks, reviews each one
 - **tech-lead**: runs compile gate (compile backend + frontend + lint), starts the app, monitors for build/runtime issues
-- **manual-tester**: waits for tech-lead to confirm app is running, then begins testing INCREMENTALLY — tests each feature area as soon as code-reviewer approves it
-- **qa-automation**: writes E2E tests incrementally — as manual-tester passes each test scenario, qa-automation writes the Playwright test for it
+- **manual-tester**: waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready, then tests the full feature story by story using the test cases
+- **qa-automation**: writes E2E tests per user story — after manual-tester passes all scenarios for a user story, qa-automation writes the Playwright tests for that story
 
-### Phase 5 Flow (per task):
+### Phase 5 Flow:
 ```
-Developer completes task -> atomic commit
+Developers complete tasks -> atomic commits (unchanged)
        |
        v
-Code-reviewer reviews
+Code-reviewer reviews each task individually (unchanged)
        |
-       +- Approve -> tech-lead verifies it runs -> manual-tester tests it
-       |                                                |
-       |                                         pass -> qa-automation writes E2E
-       |                                         fail -> bug task -> developer fixes
+       v
+QA-engineer writes test cases organized by user story (parallel with devs)
        |
-       +- Request changes -> developer fixes -> code-reviewer re-reviews
+       v
+ALL tasks reviewed + test cases ready
+       |
+       v
+Manual-tester tests the full feature using QA engineer's test cases (story by story)
+       |
+       +-- pass -> qa-automation writes E2E for that user story
+       +-- fail -> bug task -> developer fixes -> code-reviewer reviews -> manual-tester retests
 ```
 
 ### Phase 6: Integration Verification
@@ -93,10 +100,10 @@ After all tasks are complete, reviewed, and tested:
 ## Parallel Execution Rules
 
 - From Phase 5 onward, tech-lead, code-reviewer, manual-tester, qa-automation, and all developers MUST run in parallel
-- **Incremental testing**: manual-tester does NOT wait for all tasks to be done — tests each area as code-reviewer approves it
-- **Incremental E2E**: qa-automation does NOT wait for all manual tests to pass — writes E2E tests as each scenario passes
+- **Feature-level testing**: manual-tester waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready before beginning testing. Then tests the full feature story by story.
+- **Story-level E2E**: qa-automation writes E2E tests per user story — after manual-tester passes all scenarios for a story, qa-automation writes the E2E tests for that story
 - When manual-tester or tech-lead files a bug, the assigned developer picks it up and fixes it immediately — no waiting
-- After a developer fixes a bug, code-reviewer reviews the fix, then manual-tester retests
+- After a developer fixes a bug, code-reviewer reviews the fix, then manual-tester retests that story
 - This review-test-fix-retest loop continues until all test cases pass
 
 ## Compile Gate
@@ -114,6 +121,64 @@ Only then does tech-lead signal "app ready" for testing to begin.
 - **Atomic commits**: Each completed task = one commit with descriptive message
 - **Commit format**: `<scope>: <description>` (e.g., `backend: add User entity and migration`)
 - **PR**: Created at Phase 7 by tech-lead after all verification passes
+
+## Progress Tracking
+
+The team maintains a shared **PROGRESS.md** file at `<feature-docs>/<feature-name>/PROGRESS.md` that provides a single-file view of overall workflow status. All agents update this file at key milestones.
+
+- **Created by**: Team lead at the start of Phase 1
+- **Updated by**: Every agent at their key milestones (artifact completion, task creation, reviews, testing, etc.)
+- **Purpose**: Human-readable progress dashboard — useful for both the team lead and the human user
+
+The team lead creates the initial PROGRESS.md using this template:
+
+```markdown
+# Progress: <feature-name>
+
+## Current Phase
+Phase 1 — Requirements + UX Research
+
+## Phase Status
+
+| Phase | Status | Agent(s) |
+|-------|--------|----------|
+| Phase 1: Requirements + UX Research | In Progress | product-owner, ux-designer |
+| Phase 2: UX Design + Validation | Pending | ux-designer |
+| Phase 3: Architecture | Pending | architect |
+| Phase 4: Task Breakdown + Git | Pending | scrum-master, tech-lead |
+| Phase 5: Build + Test | Pending | all |
+| Phase 6: Integration Verification | Pending | — |
+| Phase 7: Ship | Pending | — |
+
+## Artifacts
+
+| Document | Status | Author |
+|----------|--------|--------|
+| FEATURE-BRIEF.md | Pending | product-owner |
+| UX-DESIGN.md | Pending | ux-designer |
+| ARCHITECTURE.md | Pending | architect |
+
+## Development Tasks
+<!-- scrum-master populates this after Phase 4 -->
+
+## Code Reviews
+<!-- code-reviewer updates this -->
+
+## Test Cases
+<!-- qa-engineer updates this -->
+
+## Testing
+<!-- manual-tester updates this -->
+
+## E2E Automation
+<!-- qa-automation updates this -->
+
+## Bugs
+<!-- manual-tester / tech-lead add bugs here -->
+
+## Timeline
+<!-- all agents append entries -->
+```
 
 ## Retest Mode
 

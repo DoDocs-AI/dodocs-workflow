@@ -35,6 +35,12 @@ Note: The UX designer starts researching existing UI patterns in parallel with y
 5. **Notify team**: Once the brief is written, send a message to the team lead so the UX designer can proceed to Phase 2
 </responsibilities>
 
+<progress_tracking>
+After completing the Feature Brief, update `<feature-docs>/<feature-name>/PROGRESS.md`:
+1. In the **Artifacts** table, set FEATURE-BRIEF.md status to `Done`
+2. Append to the **Timeline** section: `- [timestamp] product-owner: Feature Brief completed`
+</progress_tracking>
+
 <feature_brief_format>
 The Feature Brief must include:
 - **Problem Statement**: What user problem this solves

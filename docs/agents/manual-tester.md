@@ -1,6 +1,6 @@
 # Manual Tester
 
-Tests features incrementally using the `/playwright-cli` skill for all browser interactions. Starts testing each area as soon as code-reviewer approves it. Files bugs with reproduction steps and screenshots, retests fixes until all test cases pass.
+Tests full features using the `/playwright-cli` skill for all browser interactions. Waits for all tasks to be code-reviewed and test cases to be ready, then tests the full feature story by story. Files bugs with reproduction steps and screenshots, retests fixes until all test cases pass.
 
 ## Spec
 
@@ -8,20 +8,20 @@ Tests features incrementally using the `/playwright-cli` skill for all browser i
 |----------|-------|
 | **Agent file** | `agents/manual-tester.md` |
 | **Model** | sonnet |
-| **Active in phases** | 5 (incremental testing), 6 (smoke test) |
+| **Active in phases** | 5 (feature testing), 6 (smoke test) |
 | **Tools** | Read, Write, Edit, Bash, Grep, Glob |
 | **Inputs** | Test case `.md` files, "app ready" signal from tech-lead |
 | **Outputs** | Bug tasks, test evidence screenshots |
 
-## Incremental Testing Flow
+## Feature Testing Flow
 
-Does NOT wait for all development to finish:
+Waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready:
 
 1. **Wait for "app ready"** from tech-lead (compile gate passed, app running).
-2. **Monitor TaskList** for tasks that are completed by a developer AND approved by code-reviewer.
-3. **Test incrementally** — begins testing each feature area as soon as approved code exists.
-4. **File bugs immediately** — each bug as a separate task, so developers fix while testing continues.
-5. **Retest fixes** — after developer fixes and code-reviewer approves, re-run the exact failing scenario.
+2. **Wait for readiness** — monitor TaskList until ALL developer tasks are completed and approved by code-reviewer, and qa-engineer's test cases are available.
+3. **Test the full feature story by story** — using qa-engineer's test cases (organized by user story), test each user story completely before moving to the next.
+4. **File bugs immediately** — each bug as a separate task, so developers fix while testing continues on other stories.
+5. **Retest story** — after developer fixes and code-reviewer approves, retest the affected story.
 6. **Loop** until all test cases pass.
 
 ## Browser Interaction
@@ -62,11 +62,12 @@ Final smoke test of the complete feature flow end-to-end after all individual ta
 ## Coordination
 
 - Waits for tech-lead "app ready" signal.
-- Watches code-reviewer approvals to know when to test.
-- Notifies qa-automation when test scenarios pass (so E2E tests can be written).
+- Waits for ALL dev tasks to be code-reviewed and qa-engineer's test cases to be ready before starting.
+- Notifies qa-automation when all scenarios for a user story pass (so E2E tests can be written for that story).
 - Files bugs assigned to the responsible developer.
+- Updates `PROGRESS.md` during testing: adds entries to the Testing section (per user story results), the Bugs section (when filing bugs), and timeline entries.
 
 ## When It Runs
 
-- **Full workflow**: Phase 5 (incremental) + Phase 6 (smoke test)
+- **Full workflow**: Phase 5 (feature testing) + Phase 6 (smoke test)
 - **Retest mode**: Tests ALL scenarios from existing test cases, files bugs, retests fixes

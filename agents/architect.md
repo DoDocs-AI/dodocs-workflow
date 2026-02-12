@@ -35,6 +35,12 @@ The platform uses a fixed architecture — read the **Tech Stack** section from 
 3. **Produce Architecture doc**: Write at the Feature Docs path: `<feature-docs>/<feature-name>/ARCHITECTURE.md`
 </responsibilities>
 
+<progress_tracking>
+After completing the Architecture document, update `<feature-docs>/<feature-name>/PROGRESS.md`:
+1. In the **Artifacts** table, set ARCHITECTURE.md status to `Done`
+2. Append to the **Timeline** section: `- [timestamp] architect: Architecture document completed`
+</progress_tracking>
+
 <architecture_doc_format>
 The Architecture document must include:
 - **Backend Endpoints**: HTTP method, path, request/response bodies, auth requirements

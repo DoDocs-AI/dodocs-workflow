@@ -8,7 +8,7 @@ Reviews completed developer code for pattern adherence, security issues, logic e
 |----------|-------|
 | **Agent file** | `agents/code-reviewer.md` |
 | **Model** | opus |
-| **Active in phases** | 5 (incremental review), 6 (full-diff review) |
+| **Active in phases** | 5 (per-task review), 6 (full-diff review) |
 | **Tools** | Read, Grep, Glob, Bash |
 | **Inputs** | Completed developer tasks, Architecture doc |
 | **Outputs** | Approve verdict OR rework task with issues |
@@ -22,7 +22,7 @@ Reviews completed developer code for pattern adherence, security issues, logic e
    - Reads ALL files created or modified by the developer.
 3. Checks: pattern adherence, security (SQL injection, XSS, missing auth), logic errors, edge cases, API contract match, type safety, missing pieces.
 4. Verdict:
-   - **Approve** — notifies team lead that task is ready for testing.
+   - **Approve** — notifies team lead that this task's review is complete. When all tasks in a user story are approved, notes that the story is review-complete.
    - **Request changes** — creates a rework task with file paths, line references, severity, suggested fix. Assigns to the original developer.
 
 ## Review Format (when requesting changes)
@@ -45,11 +45,12 @@ Does a full-diff review of the entire feature branch (all changes from branch po
 ## Coordination
 
 - Sends message to team lead after each review verdict.
-- Approve unblocks manual-tester for that feature area.
+- When all tasks in a user story are approved, notifies team lead that the story is review-complete. Manual-tester begins testing only after ALL tasks are reviewed and test cases are ready.
 - Request changes sends developer back to fix, then re-review cycle.
 - In retest mode: reviews bug fixes made by developers.
+- After each review verdict, updates the Code Reviews section of `PROGRESS.md` and adds a timeline entry.
 
 ## When It Runs
 
-- **Full workflow**: Phase 5 (incremental) + Phase 6 (full diff)
+- **Full workflow**: Phase 5 (per-task review) + Phase 6 (full diff)
 - **Retest mode**: Reviews bug fixes

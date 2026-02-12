@@ -25,7 +25,7 @@ Creates feature branches, runs compile gates, starts the full application, monit
 2. **Start environment**:
    - Start DB, Start Storage, Start Backend, Start Frontend (using Commands from config).
 3. **Signal "app ready"** — message to team lead unblocks manual-tester.
-4. **Incremental verification** — as tasks complete, checks backend logs for exceptions, frontend console for errors.
+4. **Continuous monitoring** — as tasks complete, checks backend logs for exceptions, frontend console for errors.
 5. **File bugs** — creates tasks with reproduction steps, error logs, assigns to responsible developer.
 
 ### Phase 6 — Integration Verification
@@ -37,6 +37,14 @@ Creates feature branches, runs compile gates, starts the full application, monit
 - `gh pr create` from feature branch to main.
 - Includes summary of all changes.
 - Signals completion to team lead.
+
+## Progress Tracking
+
+Updates `PROGRESS.md` at key milestones:
+- Branch created (Phase 4)
+- Compile gate passed / app ready (Phase 5)
+- Integration verification passed (Phase 6)
+- PR created (Phase 7)
 
 ## Bug Task Format
 

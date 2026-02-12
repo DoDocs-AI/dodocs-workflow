@@ -48,6 +48,12 @@ You work in two phases:
 4. **Support user validation**: The team lead will present your UX flows to the user for approval. Be prepared to revise based on user feedback.
 </responsibilities>
 
+<progress_tracking>
+After completing the UX Design document, update `<feature-docs>/<feature-name>/PROGRESS.md`:
+1. In the **Artifacts** table, set UX-DESIGN.md status to `Done`
+2. Append to the **Timeline** section: `- [timestamp] ux-designer: UX Design completed`
+</progress_tracking>
+
 <ux_design_format>
 The UX Design document must include:
 - **Existing Patterns Referenced**: Which existing pages/components were used as reference

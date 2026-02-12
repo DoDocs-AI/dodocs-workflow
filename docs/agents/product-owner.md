@@ -52,6 +52,7 @@ The output document includes:
 - Runs **in parallel** with the UX designer's early research phase
 - Sends a message to the team lead when the brief is complete
 - The UX designer reads the brief to begin Phase 2 (UX Design)
+- After completing the Feature Brief, updates `PROGRESS.md`: marks the FEATURE-BRIEF.md artifact as Done and adds a timeline entry
 
 ## When It Runs
 

@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for Claude Code
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0"
 CLAUDE_DIR="$HOME/.claude"
 VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
 
@@ -116,7 +116,7 @@ print_success "  scrum-team-config.template.md"
 
 # Write version
 if [ "$SOURCE" = "local" ]; then
-    VERSION=$(cat "$SOURCE_DIR/VERSION" | tr -d '[:space:]')
+    VERSION=$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')
 else
     VERSION=$(curl -fsSL "$REPO_URL/VERSION" | tr -d '[:space:]')
 fi

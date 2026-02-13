@@ -25,6 +25,7 @@ That single command launches the full team. You answer a few product questions, 
 - [Upgrade](#upgrade)
 - [Uninstall](#uninstall)
 - [Troubleshooting](#troubleshooting)
+- [Releases](#releases)
 - [Contributing](#contributing)
 
 ---
@@ -91,8 +92,10 @@ bash install.sh
 
 ### One-Liner from GitHub
 
+Installs the latest stable release (not HEAD):
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install.sh | bash
 ```
 
 ### What Gets Installed
@@ -122,8 +125,10 @@ bash install-opencode.sh
 
 ### One-Liner from GitHub
 
+Installs the latest stable release (not HEAD):
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install-opencode.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install-opencode.sh | bash
 ```
 
 ### What Gets Installed
@@ -514,7 +519,9 @@ dodocs-workflow/
 ├── uninstall.sh                         # Claude Code uninstall
 ├── install-opencode.sh                  # OpenCode install/upgrade
 ├── uninstall-opencode.sh                # OpenCode uninstall
+├── release.sh                           # Release script (tag + changelog + GitHub release)
 ├── VERSION                              # Current version
+├── CHANGELOG.md                         # Release history
 └── README.md
 ```
 
@@ -573,8 +580,10 @@ The installer detects the existing installation and shows `Upgraded: v1.0.0 -> v
 
 ### From GitHub
 
+Check the [latest release](https://github.com/DoDocs-AI/dodocs-workflow/releases) and run the one-liner from the release notes, or use the tag URL directly:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install.sh | bash
 ```
 
 ### Check Current Version
@@ -591,7 +600,7 @@ bash install-opencode.sh
 Or from GitHub:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install-opencode.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install-opencode.sh | bash
 ```
 
 OpenCode stores the installed version in `~/.opencode/.dodocs-workflow-version`.
@@ -660,6 +669,41 @@ The tech-lead will report compilation errors. Usually this means a developer int
 ### Tests fail after all code is reviewed
 
 This is expected and part of the workflow. The manual-tester files bug tasks, developers fix them, code-reviewer re-reviews, and manual-tester retests. The cycle continues until all tests pass.
+
+---
+
+## Releases
+
+dodocs-workflow uses tagged releases so install scripts always pull from a stable version, not HEAD.
+
+### Creating a Release
+
+```bash
+# Release the current VERSION as-is
+bash release.sh
+
+# Bump and release
+bash release.sh patch   # 1.2.0 -> 1.2.1
+bash release.sh minor   # 1.2.0 -> 1.3.0
+bash release.sh major   # 1.2.0 -> 2.0.0
+```
+
+The release script:
+1. Bumps `VERSION` (if a bump type is given)
+2. Prompts for a changelog entry
+3. Updates `CHANGELOG.md`
+4. Updates `REPO_URL` in `install.sh` and `install-opencode.sh` to point to the new tag
+5. Commits, tags, and pushes
+6. Creates a GitHub release via `gh release create`
+
+### How Install Scripts Work
+
+Remote installs (`curl | bash`) pull from a pinned tag URL, e.g.:
+```
+https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/...
+```
+
+Local installs (`git clone` + `bash install.sh`) copy files from disk, so they always use whatever version is checked out.
 
 ---
 

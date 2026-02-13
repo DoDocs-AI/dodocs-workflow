@@ -1,6 +1,6 @@
 # dodocs-workflow
 
-A Scrum Team workflow for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Spawns a **13-agent autonomous development team** that takes a feature from requirements gathering through architecture, implementation, code review, testing, and PR creation — with minimal human intervention. Also includes a **10-agent production readiness audit** that identifies security, performance, accessibility, and infrastructure issues before you ship.
+A Scrum Team workflow for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and OpenCode. Spawns a **13-agent autonomous development team** that takes a feature from requirements gathering through architecture, implementation, code review, testing, and PR creation — with minimal human intervention. Also includes a **10-agent production readiness audit** that identifies security, performance, accessibility, and infrastructure issues before you ship.
 
 ```
 /scrum-team add user billing dashboard
@@ -14,6 +14,7 @@ That single command launches the full team. You answer a few product questions, 
 
 - [How It Works](#how-it-works)
 - [Installation](#installation)
+- [OpenCode Installation](#opencode-installation)
 - [Project Setup](#project-setup)
 - [Usage](#usage)
 - [Workflow Phases](#workflow-phases)
@@ -30,7 +31,7 @@ That single command launches the full team. You answer a few product questions, 
 
 ## How It Works
 
-dodocs-workflow is a set of **agent definitions** and **slash commands** for Claude Code. When you run `/scrum-team`, it orchestrates 13 specialized agents that collaborate through a shared task list, message passing, and a phased workflow:
+dodocs-workflow is a set of **agent definitions** and **slash commands** for Claude Code and OpenCode. When you run `/scrum-team`, it orchestrates 13 specialized agents that collaborate through a shared task list, message passing, and a phased workflow:
 
 ```
 You describe the feature
@@ -77,7 +78,7 @@ The key insight is **feature-level testing** in Phase 5: manual testing starts a
 
 ### Prerequisites
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and configured
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or OpenCode installed and configured
 - Git
 
 ### From a Local Clone (recommended)
@@ -109,6 +110,35 @@ Nothing is installed into your project directories. Project-specific configurati
 
 ---
 
+## OpenCode Installation
+
+### From a Local Clone (recommended)
+
+```bash
+git clone https://github.com/DoDocs-AI/dodocs-workflow.git
+cd dodocs-workflow
+bash install-opencode.sh
+```
+
+### One-Liner from GitHub
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install-opencode.sh | bash
+```
+
+### What Gets Installed
+
+The OpenCode installer copies files to `~/.opencode/` (OpenCode's global config directory):
+
+| Destination | Files | Description |
+|-------------|-------|-------------|
+| `~/.opencode/agents/` | 21 `.md` files | Agent role definitions (11 scrum + 10 production audit) |
+| `~/.opencode/commands/` | `scrum-team.md`, `prepare-for-production.md` | Slash commands |
+| `~/.opencode/` | `scrum-team-config.template.md` | Config template for new projects |
+| `~/.opencode/` | `.dodocs-workflow-version` | Installed version tracker |
+
+Nothing is installed into your project directories. Project-specific configuration is done separately (see below).
+
 ## Project Setup
 
 Each project needs a **config file** that tells the agents about your tech stack, file paths, and commands.
@@ -116,13 +146,16 @@ Each project needs a **config file** that tells the agents about your tech stack
 ### 1. Copy the Template
 
 ```bash
-# From your project root
+# From your project root (Claude Code)
 cp ~/.claude/scrum-team-config.template.md .claude/scrum-team-config.md
+
+# From your project root (OpenCode)
+cp ~/.opencode/scrum-team-config.template.md .opencode/scrum-team-config.md
 ```
 
 ### 2. Fill In Your Project Values
 
-Edit `.claude/scrum-team-config.md` with your project-specific settings. Every section matters — agents read this file before doing any work.
+Edit `.claude/scrum-team-config.md` (Claude Code) or `.opencode/scrum-team-config.md` (OpenCode) with your project-specific settings. Every section matters — agents read this file before doing any work.
 
 Here's an example for a Quarkus + React project:
 
@@ -200,7 +233,7 @@ Here's an example for a Quarkus + React project:
 
 ### 3. Verify
 
-Open Claude Code in your project and type `/scrum-team test`. If the config is found, the workflow starts. If not, you'll get a clear error message telling you what's missing.
+Open Claude Code or OpenCode in your project and type `/scrum-team test`. If the config is found, the workflow starts. If not, you'll get a clear error message telling you what's missing.
 
 ---
 
@@ -336,21 +369,21 @@ The scrum team uses 11 agent definitions that are instantiated into 13 running a
 
 | Agent | Model | Phase | Role |
 |-------|-------|-------|------|
-| [product-owner](docs/agents/product-owner.md) | opus | 1 | Gathers requirements, produces Feature Brief |
-| [ux-designer](docs/agents/ux-designer.md) | opus | 1-2 | Researches UI patterns, designs user flows |
-| [architect](docs/agents/architect.md) | opus | 3 | Designs technical solution, produces Architecture doc |
-| [scrum-master](docs/agents/scrum-master.md) | opus | 4 | Breaks architecture into tasks, assigns to team |
-| [code-reviewer](docs/agents/code-reviewer.md) | opus | 5-6 | Reviews all code for quality, security, correctness |
-| [tech-lead](docs/agents/tech-lead.md) | sonnet | 4-7 | Git, compile gate, app startup, bug filing, PR creation |
-| [frontend-dev](docs/agents/frontend-dev.md) | sonnet | 5 | Implements frontend tasks (2 instances) |
-| [backend-dev](docs/agents/backend-dev.md) | sonnet | 5 | Implements backend tasks (2 instances) |
-| [qa-engineer](docs/agents/qa-engineer.md) | sonnet | 5 | Writes manual test case documents |
-| [manual-tester](docs/agents/manual-tester.md) | sonnet | 5-6 | Tests features in browser via Playwright |
-| [qa-automation](docs/agents/qa-automation.md) | sonnet | 5-6 | Writes Playwright E2E tests |
+| [product-owner](claude/docs/agents/product-owner.md) | opus | 1 | Gathers requirements, produces Feature Brief |
+| [ux-designer](claude/docs/agents/ux-designer.md) | opus | 1-2 | Researches UI patterns, designs user flows |
+| [architect](claude/docs/agents/architect.md) | opus | 3 | Designs technical solution, produces Architecture doc |
+| [scrum-master](claude/docs/agents/scrum-master.md) | opus | 4 | Breaks architecture into tasks, assigns to team |
+| [code-reviewer](claude/docs/agents/code-reviewer.md) | opus | 5-6 | Reviews all code for quality, security, correctness |
+| [tech-lead](claude/docs/agents/tech-lead.md) | sonnet | 4-7 | Git, compile gate, app startup, bug filing, PR creation |
+| [frontend-dev](claude/docs/agents/frontend-dev.md) | sonnet | 5 | Implements frontend tasks (2 instances) |
+| [backend-dev](claude/docs/agents/backend-dev.md) | sonnet | 5 | Implements backend tasks (2 instances) |
+| [qa-engineer](claude/docs/agents/qa-engineer.md) | sonnet | 5 | Writes manual test case documents |
+| [manual-tester](claude/docs/agents/manual-tester.md) | sonnet | 5-6 | Tests features in browser via Playwright |
+| [qa-automation](claude/docs/agents/qa-automation.md) | sonnet | 5-6 | Writes Playwright E2E tests |
 
 **Model strategy**: Planning and review roles use **opus** (higher reasoning capability). Execution roles use **sonnet** (faster, more cost-effective for code generation).
 
-See the [docs/agents/](docs/agents/) directory for detailed documentation of each agent.
+See the `claude/docs/agents/` directory for detailed documentation of each agent.
 
 ---
 
@@ -405,16 +438,16 @@ Phase 4: Re-audit + Sign-off
 
 | Agent | Model | What It Checks |
 |-------|-------|---------------|
-| [security-auditor](docs/agents/security-auditor.md) | opus | OWASP top 10, auth on every endpoint, hardcoded secrets, dependency CVEs |
-| [performance-engineer](docs/agents/performance-engineer.md) | opus | N+1 queries, missing DB indexes, frontend bundle size, caching |
-| [accessibility-auditor](docs/agents/accessibility-auditor.md) | sonnet | WCAG 2.1 AA, keyboard nav, ARIA, color contrast, screen reader |
-| [seo-analyst](docs/agents/seo-analyst.md) | sonnet | Meta tags, Open Graph, sitemap, robots.txt, structured data |
-| [devops-engineer](docs/agents/devops-engineer.md) | sonnet | Dockerfile, docker-compose, health checks, CI/CD, env config |
-| [error-handler](docs/agents/error-handler.md) | sonnet | Consistent error responses, error boundaries, logging coverage |
-| [dependency-auditor](docs/agents/dependency-auditor.md) | sonnet | npm audit, Maven dependency check, outdated packages, licenses |
-| [api-documenter](docs/agents/api-documenter.md) | sonnet | OpenAPI spec coverage, endpoint inventory, API reference docs |
-| [db-analyst](docs/agents/db-analyst.md) | opus | Schema review, missing indexes/constraints, migration hygiene |
-| [load-tester](docs/agents/load-tester.md) | sonnet | Load test scenarios, capacity estimates, breaking points |
+| [security-auditor](claude/docs/agents/security-auditor.md) | opus | OWASP top 10, auth on every endpoint, hardcoded secrets, dependency CVEs |
+| [performance-engineer](claude/docs/agents/performance-engineer.md) | opus | N+1 queries, missing DB indexes, frontend bundle size, caching |
+| [accessibility-auditor](claude/docs/agents/accessibility-auditor.md) | sonnet | WCAG 2.1 AA, keyboard nav, ARIA, color contrast, screen reader |
+| [seo-analyst](claude/docs/agents/seo-analyst.md) | sonnet | Meta tags, Open Graph, sitemap, robots.txt, structured data |
+| [devops-engineer](claude/docs/agents/devops-engineer.md) | sonnet | Dockerfile, docker-compose, health checks, CI/CD, env config |
+| [error-handler](claude/docs/agents/error-handler.md) | sonnet | Consistent error responses, error boundaries, logging coverage |
+| [dependency-auditor](claude/docs/agents/dependency-auditor.md) | sonnet | npm audit, Maven dependency check, outdated packages, licenses |
+| [api-documenter](claude/docs/agents/api-documenter.md) | sonnet | OpenAPI spec coverage, endpoint inventory, API reference docs |
+| [db-analyst](claude/docs/agents/db-analyst.md) | opus | Schema review, missing indexes/constraints, migration hygiene |
+| [load-tester](claude/docs/agents/load-tester.md) | sonnet | Load test scenarios, capacity estimates, breaking points |
 
 ### Selective Mode
 
@@ -467,38 +500,20 @@ docs/production-audit/
 
 ```
 dodocs-workflow/
-├── agents/                              # Agent definitions (installed to ~/.claude/agents/)
-│   ├── architect.md                     #   Scrum team agents (11)
-│   ├── backend-dev.md
-│   ├── code-reviewer.md
-│   ├── frontend-dev.md
-│   ├── manual-tester.md
-│   ├── product-owner.md
-│   ├── qa-automation.md
-│   ├── qa-engineer.md
-│   ├── scrum-master.md
-│   ├── tech-lead.md
-│   ├── ux-designer.md
-│   ├── security-auditor.md              #   Production audit agents (10)
-│   ├── performance-engineer.md
-│   ├── accessibility-auditor.md
-│   ├── seo-analyst.md
-│   ├── devops-engineer.md
-│   ├── error-handler.md
-│   ├── dependency-auditor.md
-│   ├── api-documenter.md
-│   ├── db-analyst.md
-│   └── load-tester.md
-├── commands/                            # Slash commands (installed to ~/.claude/commands/)
-│   ├── scrum-team.md                    # /scrum-team — build features
-│   ├── prepare-for-production.md        # /prepare-for-production — audit readiness
-│   └── dodocs-workflow.md               # Helper /dodocs-workflow command
-├── docs/                                # Documentation
-│   └── agents/                          # Per-agent documentation (21 files)
-├── templates/
-│   └── scrum-team-config.template.md    # Per-project config template
-├── install.sh                           # Install/upgrade script
-├── uninstall.sh                         # Clean uninstall script
+├── claude/                              # Claude Code workflow
+│   ├── agents/                          #   Agent definitions (installed to ~/.claude/agents/)
+│   ├── commands/                        #   Slash commands (installed to ~/.claude/commands/)
+│   ├── docs/                            #   Agent documentation
+│   └── templates/                       #   Config template
+├── opencode/                            # OpenCode workflow
+│   ├── agents/                          #   Agent definitions (installed to ~/.opencode/agents/)
+│   ├── commands/                        #   Slash commands (installed to ~/.opencode/commands/)
+│   ├── docs/                            #   Agent documentation
+│   └── templates/                       #   Config template
+├── install.sh                           # Claude Code install/upgrade
+├── uninstall.sh                         # Claude Code uninstall
+├── install-opencode.sh                  # OpenCode install/upgrade
+├── uninstall-opencode.sh                # OpenCode uninstall
 ├── VERSION                              # Current version
 └── README.md
 ```
@@ -507,7 +522,7 @@ dodocs-workflow/
 
 Agents coordinate through three mechanisms:
 
-1. **Shared Task List** — Tasks are created, assigned, blocked, and completed through Claude Code's task system. All agents see the same list.
+1. **Shared Task List** — Tasks are created, assigned, blocked, and completed through Claude Code or OpenCode's task system. All agents see the same list.
 2. **Direct Messages** — Agents send messages to specific teammates (e.g., code-reviewer notifies tech-lead after approving a task).
 3. **Shared Files** — Feature Brief, UX Design, Architecture docs, and test cases are written to disk and read by downstream agents.
 4. **Progress File** — A shared `PROGRESS.md` file at `docs/features/<feature>/PROGRESS.md` tracks phase status, artifact completion, development tasks, code reviews, testing, E2E automation, bugs, and a timeline. All agents update it at key milestones, providing a single-file dashboard of workflow progress.
@@ -526,7 +541,7 @@ Agents coordinate through three mechanisms:
 
 ## Project Config Reference
 
-The `.claude/scrum-team-config.md` file is the single source of truth that all agents read. Every section is required.
+The `.claude/scrum-team-config.md` (Claude Code) or `.opencode/scrum-team-config.md` (OpenCode) file is the single source of truth that all agents read. Every section is required.
 
 | Section | Used By | Purpose |
 |---------|---------|---------|
@@ -540,7 +555,7 @@ The `.claude/scrum-team-config.md` file is the single source of truth that all a
 | **Routing** | architect, frontend-dev, qa-automation | Route prefix for workspace pages |
 | **Testing** | manual-tester | Playwright session name and flags |
 
-See the [template file](templates/scrum-team-config.template.md) for the full structure with examples.
+See the template file in `claude/templates/scrum-team-config.template.md` or `opencode/templates/scrum-team-config.template.md` for the full structure with examples.
 
 ---
 
@@ -566,6 +581,21 @@ curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/inst
 
 The installed version is stored in `~/.claude/.dodocs-workflow-version`.
 
+### OpenCode Upgrade
+
+```bash
+cd dodocs-workflow
+bash install-opencode.sh
+```
+
+Or from GitHub:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install-opencode.sh | bash
+```
+
+OpenCode stores the installed version in `~/.opencode/.dodocs-workflow-version`.
+
 ---
 
 ## Uninstall
@@ -586,13 +616,31 @@ This removes:
 
 Project-specific `.claude/scrum-team-config.md` files are **not** removed.
 
+### OpenCode Uninstall
+
+```bash
+# From the repo directory
+bash uninstall-opencode.sh
+
+# Or directly
+bash ~/path/to/dodocs-workflow/uninstall-opencode.sh
+```
+
+This removes:
+- All 21 agent definitions from `~/.opencode/agents/`
+- The `/scrum-team` and `/prepare-for-production` commands from `~/.opencode/commands/`
+- The config template from `~/.opencode/`
+- The version file
+
+Project-specific `.opencode/scrum-team-config.md` files are **not** removed.
+
 ---
 
 ## Troubleshooting
 
 ### "No scrum-team config found for this project"
 
-You need to create `.claude/scrum-team-config.md` in your project. See [Project Setup](#project-setup).
+You need to create `.claude/scrum-team-config.md` (Claude Code) or `.opencode/scrum-team-config.md` (OpenCode) in your project. See [Project Setup](#project-setup).
 
 ### Agents can't find files or commands fail
 

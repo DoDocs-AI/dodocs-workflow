@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # dodocs-workflow installer
-# Installs the Scrum Team workflow for Claude Code
+# Installs the Scrum Team workflow for OpenCode
 
 REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main"
-CLAUDE_DIR="$HOME/.claude"
-VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
+OPENCODE_DIR="$HOME/.opencode"
+VERSION_FILE="$OPENCODE_DIR/.dodocs-workflow-version"
 
 # Colors
 RED='\033[0;31m'
@@ -30,9 +30,9 @@ print_info()    { echo -e "${BLUE}[*]${NC} $1"; }
 
 # Determine source: local clone or remote
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/VERSION" ] && [ -d "$SCRIPT_DIR/claude/agents" ]; then
+if [ -f "$SCRIPT_DIR/VERSION" ] && [ -d "$SCRIPT_DIR/opencode/agents" ]; then
     SOURCE="local"
-    SOURCE_DIR="$SCRIPT_DIR/claude"
+    SOURCE_DIR="$SCRIPT_DIR/opencode"
     print_info "Installing from local directory: $SOURCE_DIR"
 else
     SOURCE="remote"
@@ -50,8 +50,8 @@ if [ -f "$VERSION_FILE" ]; then
 fi
 
 # Create directories
-mkdir -p "$CLAUDE_DIR/agents"
-mkdir -p "$CLAUDE_DIR/commands"
+mkdir -p "$OPENCODE_DIR/agents"
+mkdir -p "$OPENCODE_DIR/commands"
 
 # Agent files to install
 AGENTS=(
@@ -82,9 +82,9 @@ AGENTS=(
 print_info "Installing agent definitions..."
 for agent in "${AGENTS[@]}"; do
     if [ "$SOURCE" = "local" ]; then
-        cp "$SOURCE_DIR/agents/$agent.md" "$CLAUDE_DIR/agents/$agent.md"
+        cp "$SOURCE_DIR/agents/$agent.md" "$OPENCODE_DIR/agents/$agent.md"
     else
-        curl -fsSL "$REPO_URL/claude/agents/$agent.md" -o "$CLAUDE_DIR/agents/$agent.md"
+        curl -fsSL "$REPO_URL/opencode/agents/$agent.md" -o "$OPENCODE_DIR/agents/$agent.md"
     fi
     print_success "  $agent"
 done
@@ -98,9 +98,9 @@ COMMANDS=(
 print_info "Installing commands..."
 for cmd in "${COMMANDS[@]}"; do
     if [ "$SOURCE" = "local" ]; then
-        cp "$SOURCE_DIR/commands/$cmd.md" "$CLAUDE_DIR/commands/$cmd.md"
+        cp "$SOURCE_DIR/commands/$cmd.md" "$OPENCODE_DIR/commands/$cmd.md"
     else
-        curl -fsSL "$REPO_URL/claude/commands/$cmd.md" -o "$CLAUDE_DIR/commands/$cmd.md"
+        curl -fsSL "$REPO_URL/opencode/commands/$cmd.md" -o "$OPENCODE_DIR/commands/$cmd.md"
     fi
     print_success "  $cmd command"
 done
@@ -108,15 +108,15 @@ done
 # Install config template
 print_info "Installing config template..."
 if [ "$SOURCE" = "local" ]; then
-    cp "$SOURCE_DIR/templates/scrum-team-config.template.md" "$CLAUDE_DIR/scrum-team-config.template.md"
+    cp "$SOURCE_DIR/templates/scrum-team-config.template.md" "$OPENCODE_DIR/scrum-team-config.template.md"
 else
-    curl -fsSL "$REPO_URL/claude/templates/scrum-team-config.template.md" -o "$CLAUDE_DIR/scrum-team-config.template.md"
+    curl -fsSL "$REPO_URL/opencode/templates/scrum-team-config.template.md" -o "$OPENCODE_DIR/scrum-team-config.template.md"
 fi
 print_success "  scrum-team-config.template.md"
 
 # Write version
 if [ "$SOURCE" = "local" ]; then
-    VERSION=$(cat "$SOURCE_DIR/VERSION" | tr -d '[:space:]')
+    VERSION=$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')
 else
     VERSION=$(curl -fsSL "$REPO_URL/VERSION" | tr -d '[:space:]')
 fi
@@ -132,18 +132,18 @@ else
 fi
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "Installed to: $CLAUDE_DIR"
+echo "Installed to: $OPENCODE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 21 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + prepare-for-production commands"
-echo "  ~/.claude/scrum-team-config.template.md"
+echo "  ~/.opencode/agents/          - 21 agent definitions"
+echo "  ~/.opencode/commands/        - scrum-team + prepare-for-production commands"
+echo "  ~/.opencode/scrum-team-config.template.md"
 echo ""
 
 if [ "$UPGRADE" = false ]; then
     echo -e "${YELLOW}Next steps:${NC}"
     echo "  1. Copy the template to your project:"
-    echo "     cp ~/.claude/scrum-team-config.template.md <project>/.claude/scrum-team-config.md"
+    echo "     cp ~/.opencode/scrum-team-config.template.md <project>/.opencode/scrum-team-config.md"
     echo "  2. Edit the config with your project's values"
     echo "  3. Use /scrum-team <feature-name> to build features"
     echo "     Use /prepare-for-production to audit production readiness"

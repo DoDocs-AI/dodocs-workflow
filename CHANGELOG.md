@@ -2,6 +2,11 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.2.2] - 2026-02-14
+
+- Added autonomous execution block to manual-tester agent for approval-free command execution
+- Switched planning/review roles (code-reviewer, product-owner, scrum-master, ux-designer, db-analyst, performance-engineer) from opus to sonnet model
+
 ## [v1.2.1] - 2026-02-14
 
 - Fixed agents prompting for permissions despite bypassPermissions flag

@@ -2,6 +2,17 @@ Create an agent team for developing new features on this project. Use delegate m
 
 The team follows a Scrum workflow and must work fully autonomously. Human only needs to provide requirements.
 
+## MANDATORY: Agent Execution Mode
+
+**CRITICAL — READ THIS FIRST**: Every agent you spawn via the Task tool MUST use `mode: "bypassPermissions"` to ensure fully autonomous execution with no permission prompts. The ONLY exception is `architect`, which uses `mode: "plan"` for architecture approval.
+
+When calling the Task tool, ALWAYS include `mode: "bypassPermissions"` in the parameters. Example:
+```
+Task(subagent_type="frontend-dev", mode="bypassPermissions", ...)
+```
+
+Spawn all agents automatically as their phase begins — do NOT ask the user for permission to spawn any agent.
+
 <boot>
 BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
 If the file does not exist, STOP immediately and tell the user:
@@ -11,23 +22,23 @@ Extract: ALL sections — you need App Identity, Tech Stack, Ports & URLs, and a
 
 ## Team Agents
 
-Spawn these teammates using their agent definitions from `~/.claude/agents/`:
+Spawn these teammates using their agent definitions from `~/.claude/agents/`. **All agents use `mode: "bypassPermissions"` unless noted otherwise.**
 
-| Name | Agent Type | Notes |
-|------|-----------|-------|
-| product-owner | `product-owner` | |
-| ux-designer | `ux-designer` | |
-| architect | `architect` | Use `mode: "plan"` — require plan approval |
-| scrum-master | `scrum-master` | |
-| code-reviewer | `code-reviewer` | |
-| frontend-dev-1 | `frontend-dev` | |
-| frontend-dev-2 | `frontend-dev` | Coordinates with frontend-dev-1 to avoid file conflicts |
-| backend-dev-1 | `backend-dev` | Owns all database migrations |
-| backend-dev-2 | `backend-dev` | Coordinates with backend-dev-1, never creates migrations |
-| tech-lead | `tech-lead` | |
-| qa-engineer | `qa-engineer` | |
-| qa-automation | `qa-automation` | |
-| manual-tester | `manual-tester` | |
+| Name | Agent Type | Mode | Notes |
+|------|-----------|------|-------|
+| product-owner | `product-owner` | `bypassPermissions` | |
+| ux-designer | `ux-designer` | `bypassPermissions` | |
+| architect | `architect` | `plan` | Require plan approval |
+| scrum-master | `scrum-master` | `bypassPermissions` | |
+| code-reviewer | `code-reviewer` | `bypassPermissions` | |
+| frontend-dev-1 | `frontend-dev` | `bypassPermissions` | |
+| frontend-dev-2 | `frontend-dev` | `bypassPermissions` | Coordinates with frontend-dev-1 to avoid file conflicts |
+| backend-dev-1 | `backend-dev` | `bypassPermissions` | Owns all database migrations |
+| backend-dev-2 | `backend-dev` | `bypassPermissions` | Coordinates with backend-dev-1, never creates migrations |
+| tech-lead | `tech-lead` | `bypassPermissions` | |
+| qa-engineer | `qa-engineer` | `bypassPermissions` | |
+| qa-automation | `qa-automation` | `bypassPermissions` | |
+| manual-tester | `manual-tester` | `bypassPermissions` | |
 
 Models are defined in each agent's `.md` file (opus for planning/review roles, sonnet for execution roles).
 
@@ -36,7 +47,7 @@ Models are defined in each agent's `.md` file (opus for planning/review roles, s
 ### Phase 1: Requirements + Early UX Research (PARALLEL)
 **First**: Create the initial `PROGRESS.md` at `<feature-docs>/<feature-name>/PROGRESS.md` using the template from the Progress Tracking section.
 
-Then spawn product-owner and ux-designer simultaneously:
+Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypassPermissions"`):
 - **product-owner** talks to the user, gathers requirements, produces **FEATURE-BRIEF.md**
 - **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
 
@@ -46,9 +57,10 @@ Then spawn product-owner and ux-designer simultaneously:
 
 ### Phase 3: Architecture (with plan approval)
 - **architect** reads Brief + UX Design, designs the technical solution, produces **ARCHITECTURE.md**
-- Architect runs with `mode: "plan"` — lead must approve the architecture plan
+- Architect is the ONLY agent spawned with `mode: "plan"` — lead must approve the architecture plan
 
 ### Phase 4: Task Breakdown + Git Setup
+Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
 - **tech-lead** creates a feature branch: `git checkout -b feature/<feature-name>`
 - **scrum-master** reads the Architecture doc and creates all tasks with these rules:
   - **Migration ownership**: Only `backend-dev-1` creates database migrations. `backend-dev-2` tasks that need migrations are blocked by `backend-dev-1`'s migration tasks
@@ -57,7 +69,7 @@ Then spawn product-owner and ux-designer simultaneously:
   - Assigns tasks to all devs and QA
 
 ### Phase 5: Build + Test (ALL PARALLEL)
-Spawn ALL these agents simultaneously:
+Spawn ALL these agents simultaneously, every one with `mode: "bypassPermissions"`:
 - **frontend-dev-1** + **frontend-dev-2**: work on assigned tasks, make atomic git commit per completed task
 - **backend-dev-1** + **backend-dev-2**: work on assigned tasks, make atomic git commit per completed task
 - **qa-engineer**: writes test case `.md` files organized by user story
@@ -189,15 +201,15 @@ If `$ARGUMENTS` starts with `--retest`, enter retest mode instead of the full wo
 3. **Read existing context**:
    - Test cases from the **Test Cases** path in the project config relevant to the feature
    - Feature docs from the **Feature Docs** path in the project config for `<feature-name>/`
-4. **Spawn ALL these agents in parallel**:
+4. **Spawn ALL these agents in parallel** (all with `mode: "bypassPermissions"`):
 
-| Name | Agent Type | Retest Role |
-|------|-----------|-------------|
-| tech-lead | `tech-lead` | Starts full environment, compile gate, verifies app runs |
-| code-reviewer | `code-reviewer` | Reviews any fixes made during retest |
-| manual-tester | `manual-tester` | Tests ALL scenarios from existing test cases |
-| frontend-dev-1 | `frontend-dev` | Ready to pick up and fix UI bugs immediately |
-| backend-dev-1 | `backend-dev` | Ready to pick up and fix API/DB bugs immediately |
+| Name | Agent Type | Mode | Retest Role |
+|------|-----------|------|-------------|
+| tech-lead | `tech-lead` | `bypassPermissions` | Starts full environment, compile gate, verifies app runs |
+| code-reviewer | `code-reviewer` | `bypassPermissions` | Reviews any fixes made during retest |
+| manual-tester | `manual-tester` | `bypassPermissions` | Tests ALL scenarios from existing test cases |
+| frontend-dev-1 | `frontend-dev` | `bypassPermissions` | Ready to pick up and fix UI bugs immediately |
+| backend-dev-1 | `backend-dev` | `bypassPermissions` | Ready to pick up and fix API/DB bugs immediately |
 
 ### Retest Phases
 
@@ -205,11 +217,5 @@ If `$ARGUMENTS` starts with `--retest`, enter retest mode instead of the full wo
 - **Phase R2**: manual-tester tests ALL scenarios from existing test cases. Developers stand by for bug tasks
 - **Phase R3** (continuous loop): manual-tester files bugs -> developers fix -> code-reviewer reviews fix -> manual-tester retests -> repeat until all test cases pass
 - **Done**: when manual-tester confirms all test cases pass with no remaining bugs
-
-## Agent Execution
-
-**CRITICAL**: All agents MUST be spawned with `mode: "bypassPermissions"` to ensure uninterrupted autonomous execution. Exception: architect uses `mode: "plan"` for architecture approval.
-
-Spawn all agents automatically as their phase begins — do NOT ask the user for permission to spawn any agent.
 
 The feature to implement/retest: $ARGUMENTS

@@ -14,6 +14,12 @@ Run a comprehensive production-readiness audit of the codebase using 10 speciali
 
 - `--only <auditors>` — Comma-separated list of specific auditors to run. Valid values: `security`, `performance`, `accessibility`, `seo`, `devops`, `error-handler`, `dependency`, `api-docs`, `db`, `load-test`. If omitted, all 10 auditors run.
 
+## MANDATORY: Agent Execution Mode
+
+**CRITICAL — READ THIS FIRST**: Every agent you spawn via the Task tool MUST use `mode: "bypassPermissions"` to ensure fully autonomous execution with no permission prompts. This applies to ALL auditor agents and ALL developer agents in every phase.
+
+When calling the Task tool, ALWAYS include `mode: "bypassPermissions"` in the parameters.
+
 ## Workflow
 
 You are the **orchestrator** for the production-readiness audit. Follow these 4 phases exactly.
@@ -47,6 +53,7 @@ If `--only` is provided, only spawn those agents. Otherwise spawn all 10.
 
 **Spawn each auditor using the Task tool** with these settings:
 - `subagent_type`: Use the agent name (e.g., `security-auditor`)
+- `mode`: `"bypassPermissions"` — REQUIRED for all agents
 - `prompt`: "Read `.claude/scrum-team-config.md` for project context. Perform your full audit checklist against the codebase. Write your report to `docs/production-audit/<agent-name>-REPORT.md`. Be thorough — check every file, every endpoint, every pattern."
 - `model`: Use the model specified in the agent definition (opus for security, performance, db; sonnet for others)
 - `run_in_background`: true (so all 10 run in parallel)

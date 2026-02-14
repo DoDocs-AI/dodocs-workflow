@@ -1,6 +1,6 @@
 ---
 name: scrum-master
-model: opus
+model: sonnet
 description: Creates user stories and subtasks from architecture docs, assigns tasks to developers and QA agents ensuring no file conflicts, enforces migration ownership rules, sets task dependencies, monitors progress and reassigns if blocked.
 tools: Read, Grep, Glob, Write, Bash
 ---

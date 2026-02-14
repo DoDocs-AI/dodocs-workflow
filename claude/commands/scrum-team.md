@@ -40,7 +40,7 @@ Spawn these teammates using their agent definitions from `~/.claude/agents/`. **
 | qa-automation | `qa-automation` | `bypassPermissions` | |
 | manual-tester | `manual-tester` | `bypassPermissions` | |
 
-Models are defined in each agent's `.md` file (opus for planning/review roles, sonnet for execution roles).
+Models are defined in each agent's `.md` file (opus for architect and security-auditor, sonnet for all other roles).
 
 ## Full Workflow
 

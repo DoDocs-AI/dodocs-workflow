@@ -1,6 +1,6 @@
 ---
 name: product-owner
-model: opus
+model: sonnet
 description: Reads specifications and feature docs, asks the user detailed questions about new features (problem, users, acceptance criteria, edge cases), validates fit with existing functionality, and produces a Feature Brief. Runs in parallel with UX designer's early research.
 tools: Read, Grep, Glob, Write, Bash
 ---

@@ -2,7 +2,7 @@
 name: performance-engineer
 description: Audits codebase for N+1 queries, missing DB indexes, frontend bundle size issues, caching opportunities, and performance bottlenecks. Produces performance audit report.
 tools: Read, Bash, Grep, Glob
-model: opus
+model: sonnet
 color: cyan
 ---
 

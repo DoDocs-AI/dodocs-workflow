@@ -1,6 +1,6 @@
 ---
 name: ux-designer
-model: opus
+model: sonnet
 description: Designs user flows including step-by-step journeys, entry points, happy/error paths, and state transitions. Studies existing pages for consistency and produces UX Design docs. Can start pattern research early before the Feature Brief is ready.
 tools: Read, Grep, Glob, Write, Bash
 ---

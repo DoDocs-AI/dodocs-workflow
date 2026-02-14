@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-model: opus
+model: sonnet
 description: Reviews completed developer code for pattern adherence, security issues, logic errors, and edge cases. Approves or requests changes before code moves to testing.
 tools: Read, Grep, Glob, Bash
 ---

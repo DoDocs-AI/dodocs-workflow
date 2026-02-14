@@ -2,7 +2,7 @@
 name: db-analyst
 description: Reviews database schema, missing indexes and constraints, query optimization opportunities, and migration hygiene. Produces database audit report.
 tools: Read, Bash, Grep, Glob
-model: opus
+model: sonnet
 color: cyan
 ---
 

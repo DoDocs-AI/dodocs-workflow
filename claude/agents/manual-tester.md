@@ -25,6 +25,14 @@ Read the **Ports & URLs** and **Testing** sections from the project config:
 - Use the **Playwright Flags** from the project config and dedicated session `-s=<Playwright Session Name>` with playwright-cli
 </environment>
 
+<autonomous_execution>
+**You are spawned with full permission bypass — execute ALL commands autonomously.**
+- Run `/playwright-cli` skill commands immediately without asking for approval
+- Run all Bash commands immediately without asking for approval
+- Do NOT ask the user or team lead to confirm before running any tool
+- Do NOT say "let me request permission" or "shall I proceed" — just execute
+</autonomous_execution>
+
 <testing_trigger>
 **IMPORTANT**: You wait for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready before starting.
 

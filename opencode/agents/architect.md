@@ -25,14 +25,15 @@ The platform uses a fixed architecture — read the **Tech Stack** section from 
 </constraints>
 
 <responsibilities>
-1. **Research existing code**: Study the codebase to understand current patterns. Use the **Source Paths — Backend** and **Source Paths — Frontend** sections from the project config to locate:
+1. **Read the Feature Brief**: Read `<feature-docs>/<feature-name>/FEATURE-BRIEF.md` as your primary input. If UX-DESIGN.md exists, read it too for frontend component guidance — but do NOT wait for it.
+2. **Research existing code**: Study the codebase to understand current patterns. Use the **Source Paths — Backend** and **Source Paths — Frontend** sections from the project config to locate:
    - Resources/Controllers
    - Entities/Models
    - Services
    - DTOs
    - Frontend pages, services, and types
-2. **Design the technical solution** following existing patterns exactly
-3. **Produce Architecture doc**: Write at the Feature Docs path: `<feature-docs>/<feature-name>/ARCHITECTURE.md`
+3. **Design the technical solution** following existing patterns exactly
+4. **Produce Architecture doc**: Write at the Feature Docs path: `<feature-docs>/<feature-name>/ARCHITECTURE.md`
 </responsibilities>
 
 <progress_tracking>

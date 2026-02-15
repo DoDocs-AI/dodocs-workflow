@@ -51,15 +51,16 @@ Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypas
 - **product-owner** talks to the user, gathers requirements, produces **FEATURE-BRIEF.md**
 - **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
 
-### Phase 2: UX Design + User Validation
-- **ux-designer** reads the Feature Brief and produces **UX-DESIGN.md** (combining research from Phase 1 with the brief)
-- **USER CHECKPOINT**: Present the UX flows to the user and ask: "Do these user flows look right? Any changes before we proceed to architecture?" Wait for user approval before continuing.
+### Phase 2: UX Design + Architecture (PARALLEL)
+Spawn ux-designer and architect simultaneously once the Feature Brief is ready:
+- **ux-designer** reads the Feature Brief and produces **UX-DESIGN.md** (combining research from Phase 1 with the brief) — spawned with `mode: "bypassPermissions"`
+- **architect** reads the Feature Brief, researches existing code patterns, designs the technical solution, produces **ARCHITECTURE.md** — spawned with `mode: "plan"` (lead must approve the architecture plan)
 
-### Phase 3: Architecture (with plan approval)
-- **architect** reads Brief + UX Design, designs the technical solution, produces **ARCHITECTURE.md**
-- Architect is the ONLY agent spawned with `mode: "plan"` — lead must approve the architecture plan
+Both agents work from the Feature Brief in parallel. The architect does NOT need to wait for UX Design.
 
-### Phase 4: Task Breakdown + Git Setup
+- **USER CHECKPOINT**: After both UX-DESIGN.md and ARCHITECTURE.md are complete, present both to the user and ask: "Do the UX flows and architecture look right? Any changes before we proceed to development?" Wait for user approval before continuing.
+
+### Phase 3: Task Breakdown + Git Setup
 Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
 - **tech-lead** creates a feature branch: `git checkout -b feature/<feature-name>`
 - **scrum-master** reads the Architecture doc and creates all tasks with these rules:
@@ -68,7 +69,7 @@ Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
   - **Task dependencies**: Set `blockedBy` relationships where needed
   - Assigns tasks to all devs and QA
 
-### Phase 5: Build + Test (ALL PARALLEL)
+### Phase 4: Build + Test (ALL PARALLEL)
 Spawn ALL these agents simultaneously, every one with `mode: "bypassPermissions"`:
 - **frontend-dev-1** + **frontend-dev-2**: work on assigned tasks, make atomic git commit per completed task
 - **backend-dev-1** + **backend-dev-2**: work on assigned tasks, make atomic git commit per completed task
@@ -78,7 +79,7 @@ Spawn ALL these agents simultaneously, every one with `mode: "bypassPermissions"
 - **manual-tester**: waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready, then tests the full feature story by story using the test cases
 - **qa-automation**: writes E2E tests per user story — after manual-tester passes all scenarios for a user story, qa-automation writes the Playwright tests for that story
 
-### Phase 5 Flow:
+### Phase 4 Flow:
 ```
 Developers complete tasks -> atomic commits (unchanged)
        |
@@ -98,20 +99,20 @@ Manual-tester tests the full feature using QA engineer's test cases (story by st
        +-- fail -> bug task -> developer fixes -> code-reviewer reviews -> manual-tester retests
 ```
 
-### Phase 6: Integration Verification
+### Phase 5: Integration Verification
 After all tasks are complete, reviewed, and tested:
 - **tech-lead**: full app restart, regression check
 - **qa-automation**: runs the full E2E test suite
 - **manual-tester**: final smoke test of the complete feature flow end-to-end
 - **code-reviewer**: reviews the full feature diff (all changes from feature branch)
 
-### Phase 7: Ship
+### Phase 6: Ship
 - **tech-lead**: creates a PR from the feature branch to main
 - Team lead reports completion to the user with a summary
 
 ## Parallel Execution Rules
 
-- From Phase 5 onward, tech-lead, code-reviewer, manual-tester, qa-automation, and all developers MUST run in parallel
+- From Phase 4 onward, tech-lead, code-reviewer, manual-tester, qa-automation, and all developers MUST run in parallel
 - **Feature-level testing**: manual-tester waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready before beginning testing. Then tests the full feature story by story.
 - **Story-level E2E**: qa-automation writes E2E tests per user story — after manual-tester passes all scenarios for a story, qa-automation writes the E2E tests for that story
 - When manual-tester or tech-lead files a bug, the assigned developer picks it up and fixes it immediately — no waiting
@@ -129,10 +130,10 @@ Only then does tech-lead signal "app ready" for testing to begin.
 
 ## Git Strategy
 
-- **Feature branch**: `feature/<feature-name>` created at Phase 4
+- **Feature branch**: `feature/<feature-name>` created at Phase 3
 - **Atomic commits**: Each completed task = one commit with descriptive message
 - **Commit format**: `<scope>: <description>` (e.g., `backend: add User entity and migration`)
-- **PR**: Created at Phase 7 by tech-lead after all verification passes
+- **PR**: Created at Phase 6 by tech-lead after all verification passes
 
 ## Progress Tracking
 
@@ -155,12 +156,11 @@ Phase 1 — Requirements + UX Research
 | Phase | Status | Agent(s) |
 |-------|--------|----------|
 | Phase 1: Requirements + UX Research | In Progress | product-owner, ux-designer |
-| Phase 2: UX Design + Validation | Pending | ux-designer |
-| Phase 3: Architecture | Pending | architect |
-| Phase 4: Task Breakdown + Git | Pending | scrum-master, tech-lead |
-| Phase 5: Build + Test | Pending | all |
-| Phase 6: Integration Verification | Pending | — |
-| Phase 7: Ship | Pending | — |
+| Phase 2: UX Design + Architecture | Pending | ux-designer, architect |
+| Phase 3: Task Breakdown + Git | Pending | scrum-master, tech-lead |
+| Phase 4: Build + Test | Pending | all |
+| Phase 5: Integration Verification | Pending | — |
+| Phase 6: Ship | Pending | — |
 
 ## Artifacts
 
@@ -197,7 +197,7 @@ Phase 1 — Requirements + UX Research
 If `$ARGUMENTS` starts with `--retest`, enter retest mode instead of the full workflow:
 
 1. **Parse arguments**: Extract the feature name (e.g., `--retest user-settings`)
-2. **Skip Phases 1-4 entirely** — do NOT spawn product-owner, ux-designer, architect, scrum-master, frontend-dev-2, backend-dev-2, qa-engineer, or qa-automation
+2. **Skip Phases 1-3 entirely** — do NOT spawn product-owner, ux-designer, architect, scrum-master, frontend-dev-2, backend-dev-2, qa-engineer, or qa-automation
 3. **Read existing context**:
    - Test cases from the **Test Cases** path in the project config relevant to the feature
    - Feature docs from the **Feature Docs** path in the project config for `<feature-name>/`

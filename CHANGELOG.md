@@ -2,6 +2,13 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.3.0] - 2026-02-15
+
+- Parallelized UX Design and Architecture phases (formerly sequential Phase 2 + Phase 3, now single parallel Phase 2)
+- Architect now reads Feature Brief as primary input, no longer waits for UX Design
+- User checkpoint covers both UX and architecture approval together
+- Reduced workflow from 7 phases to 6 phases
+
 ## [v1.2.2] - 2026-02-14
 
 - Added autonomous execution block to manual-tester agent for approval-free command execution

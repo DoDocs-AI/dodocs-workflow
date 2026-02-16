@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.3.1] - 2026-02-16
+
+- Product-owner agent now uses AskUserQuestion for structured questions with selectable answer variants instead of plain text lists
+
 ## [v1.3.0] - 2026-02-15
 
 - Parallelized UX Design and Architecture phases (formerly sequential Phase 2 + Phase 3, now single parallel Phase 2)

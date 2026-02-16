@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.3.2] - 2026-02-16
+
+- Add WebSearch tool to architect agent for documentation lookup
+
 ## [v1.3.1] - 2026-02-16
 
 - Product-owner agent now uses AskUserQuestion for structured questions with selectable answer variants instead of plain text lists

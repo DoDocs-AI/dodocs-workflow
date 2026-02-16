@@ -39,9 +39,12 @@ Your job is to implement assigned frontend tasks following the existing codebase
 </responsibilities>
 
 <progress_tracking>
-After completing each task, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. In the **Development Tasks** table, set your task's status to `Done`
-2. Append to the **Timeline** section: `- [timestamp] frontend-dev: Completed [task name]`
+After completing each task, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. In the **Development Tasks** table, find your task row and change its status from `Pending` or `In Progress` to `Done`
+3. Append to the **Timeline** section: `- [timestamp] frontend-dev: Completed [task name]`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <routing>

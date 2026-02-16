@@ -49,14 +49,17 @@ This means you work alongside manual-tester at the user story level — as each 
 </responsibilities>
 
 <progress_tracking>
-After writing E2E tests for each user story, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. Add an entry in the **E2E Automation** section:
+After writing E2E tests for each user story, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. Add an entry in the **E2E Automation** section:
 
 | User Story | Test File | Tests | Passing | Status |
 |-----------|-----------|-------|---------|--------|
 | US01 — User Profile | user-profile.spec.ts | 8 | 8 | Done |
 
-2. Append to the **Timeline** section: `- [timestamp] qa-automation: E2E tests written for [user story]`
+3. Append to the **Timeline** section: `- [timestamp] qa-automation: E2E tests written for [user story]`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <test_patterns>

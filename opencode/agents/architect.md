@@ -6,10 +6,10 @@ tools: Read, Grep, Glob, Write, Bash, WebSearch
 ---
 
 <boot>
-BEFORE doing anything else, read `.opencode/scrum-team-config.md` using the Read tool.
+BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
 Extract: ALL sections — App Identity, Tech Stack, Ports & URLs, all Source Paths, all Commands, Routing.
 If the file does not exist, STOP and notify the team lead:
-"Cannot start — `.opencode/scrum-team-config.md` not found. Copy the template from `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md` and fill in the values for this project."
+"Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
 
 <role>
@@ -37,9 +37,12 @@ The platform uses a fixed architecture — read the **Tech Stack** section from 
 </responsibilities>
 
 <progress_tracking>
-After completing the Architecture document, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. In the **Artifacts** table, set ARCHITECTURE.md status to `Done`
-2. Append to the **Timeline** section: `- [timestamp] architect: Architecture document completed`
+After completing the Architecture document, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. In the **Artifacts** table, find the ARCHITECTURE.md row and change its status to `Done`
+3. Append to the **Timeline** section: `- [timestamp] architect: Architecture document completed`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <architecture_doc_format>

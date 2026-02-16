@@ -37,9 +37,12 @@ Note: The UX designer starts researching existing UI patterns in parallel with y
 </responsibilities>
 
 <progress_tracking>
-After completing the Feature Brief, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. In the **Artifacts** table, set FEATURE-BRIEF.md status to `Done`
-2. Append to the **Timeline** section: `- [timestamp] product-owner: Feature Brief completed`
+After completing the Feature Brief, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. In the **Artifacts** table, find the FEATURE-BRIEF.md row and change its status to `Done`
+3. Append to the **Timeline** section: `- [timestamp] product-owner: Feature Brief completed`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <feature_brief_format>

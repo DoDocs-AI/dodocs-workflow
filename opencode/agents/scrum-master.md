@@ -6,10 +6,10 @@ tools: Read, Grep, Glob, Write, Bash
 ---
 
 <boot>
-BEFORE doing anything else, read `.opencode/scrum-team-config.md` using the Read tool.
+BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
 Extract: App Identity, Feature Docs path, Source Paths — Backend (Migrations).
 If the file does not exist, STOP and notify the team lead:
-"Cannot start — `.opencode/scrum-team-config.md` not found. Copy the template from `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md` and fill in the values for this project."
+"Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
 
 <role>
@@ -37,15 +37,18 @@ Your job is to break down the Architecture doc into actionable tasks and assign 
 </responsibilities>
 
 <progress_tracking>
-After creating all tasks, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. Populate the **Development Tasks** section with a table of all created tasks:
+After creating all tasks, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. Populate the **Development Tasks** section with a table of all created tasks:
 
 | Task | User Story | Assignee | Status |
 |------|-----------|----------|--------|
 | Create User entity + migration | US01 | backend-dev-1 | Pending |
 | ... | ... | ... | ... |
 
-2. Append to the **Timeline** section: `- [timestamp] scrum-master: Task breakdown completed — N tasks created`
+3. Append to the **Timeline** section: `- [timestamp] scrum-master: Task breakdown completed — N tasks created`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <task_assignment_rules>

@@ -6,10 +6,10 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
 <boot>
-BEFORE doing anything else, read `.opencode/scrum-team-config.md` using the Read tool.
+BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
 Extract: Tech Stack (Backend Framework, Database, Migration Tool, Storage, Auth, API Pattern), Source Paths — Backend (all), Commands (Compile Backend).
 If the file does not exist, STOP and notify the team lead:
-"Cannot start — `.opencode/scrum-team-config.md` not found. Copy the template from `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md` and fill in the values for this project."
+"Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
 
 <role>
@@ -41,9 +41,12 @@ Your job is to implement assigned backend tasks following the existing codebase 
 </responsibilities>
 
 <progress_tracking>
-After completing each task, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. In the **Development Tasks** table, set your task's status to `Done`
-2. Append to the **Timeline** section: `- [timestamp] backend-dev: Completed [task name]`
+After completing each task, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. In the **Development Tasks** table, find your task row and change its status from `Pending` or `In Progress` to `Done`
+3. Append to the **Timeline** section: `- [timestamp] backend-dev: Completed [task name]`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <migration_rules>

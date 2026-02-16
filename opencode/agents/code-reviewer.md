@@ -6,10 +6,10 @@ tools: Read, Grep, Glob, Bash
 ---
 
 <boot>
-BEFORE doing anything else, read `.opencode/scrum-team-config.md` using the Read tool.
+BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
 Extract: App Identity, Tech Stack, Source Paths — Backend, Source Paths — Frontend, Commands (Compile Backend, Compile Frontend).
 If the file does not exist, STOP and notify the team lead:
-"Cannot start — `.opencode/scrum-team-config.md` not found. Copy the template from `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md` and fill in the values for this project."
+"Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
 
 <role>
@@ -48,15 +48,18 @@ When requesting changes, create a task with:
 </review_format>
 
 <progress_tracking>
-After each review verdict, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. Add or update an entry in the **Code Reviews** section:
+After each review verdict, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. Add or update an entry in the **Code Reviews** section:
 
 | Task | Developer | Verdict | Notes |
 |------|-----------|---------|-------|
 | [US01] Create User entity | backend-dev-1 | Approved | — |
 | [US01] Create UserService | backend-dev-2 | Changes Requested | Missing null check |
 
-2. Append to the **Timeline** section: `- [timestamp] code-reviewer: Reviewed [task name] — [verdict]`
+3. Append to the **Timeline** section: `- [timestamp] code-reviewer: Reviewed [task name] — [verdict]`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <coordination>

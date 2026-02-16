@@ -37,9 +37,12 @@ The platform uses a fixed architecture — read the **Tech Stack** section from 
 </responsibilities>
 
 <progress_tracking>
-After completing the Architecture document, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. In the **Artifacts** table, set ARCHITECTURE.md status to `Done`
-2. Append to the **Timeline** section: `- [timestamp] architect: Architecture document completed`
+After completing the Architecture document, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. In the **Artifacts** table, find the ARCHITECTURE.md row and change its status to `Done`
+3. Append to the **Timeline** section: `- [timestamp] architect: Architecture document completed`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <architecture_doc_format>

@@ -49,9 +49,12 @@ You work in two phases:
 </responsibilities>
 
 <progress_tracking>
-After completing the UX Design document, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. In the **Artifacts** table, set UX-DESIGN.md status to `Done`
-2. Append to the **Timeline** section: `- [timestamp] ux-designer: UX Design completed`
+After completing the UX Design document, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. In the **Artifacts** table, find the UX-DESIGN.md row and change its status to `Done`
+3. Append to the **Timeline** section: `- [timestamp] ux-designer: UX Design completed`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <ux_design_format>

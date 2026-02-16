@@ -35,14 +35,17 @@ Your job is to write comprehensive manual test cases for new features. Your test
 </responsibilities>
 
 <progress_tracking>
-After completing test cases for each user story, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. Add an entry in the **Test Cases** section:
+After completing test cases for each user story, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. Add an entry in the **Test Cases** section:
 
 | User Story | Test Case File | Scenarios | Status |
 |-----------|---------------|-----------|--------|
 | US01 — User Profile | US01-user-profile-testcases.md | 8 | Ready |
 
-2. Append to the **Timeline** section: `- [timestamp] qa-engineer: Test cases ready for [user story]`
+3. Append to the **Timeline** section: `- [timestamp] qa-engineer: Test cases ready for [user story]`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <test_case_format>

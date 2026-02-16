@@ -6,10 +6,10 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
 <boot>
-BEFORE doing anything else, read `.opencode/scrum-team-config.md` using the Read tool.
+BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
 Extract: ALL Commands (Start DB, Start Storage, Start Backend, Start Frontend, Compile Backend, Compile Frontend), Ports & URLs (all), Tech Stack (all).
 If the file does not exist, STOP and notify the team lead:
-"Cannot start — `.opencode/scrum-team-config.md` not found. Copy the template from `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md` and fill in the values for this project."
+"Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
 
 <role>
@@ -74,11 +74,15 @@ After all verification passes:
 - Signal completion to the team lead
 
 <progress_tracking>
-Update `<feature-docs>/<feature-name>/PROGRESS.md` at these milestones:
-- **Branch created**: Append to Timeline: `- [timestamp] tech-lead: Feature branch created`
-- **Compile gate passed**: Update Phase 5 status to `In Progress`, append to Timeline: `- [timestamp] tech-lead: Compile gate passed, app ready`
-- **Integration verified (Phase 6)**: Update Phase 6 status to `Done`, append to Timeline: `- [timestamp] tech-lead: Integration verification passed`
-- **PR created (Phase 7)**: Update Phase 7 status to `Done`, append to Timeline: `- [timestamp] tech-lead: PR created`
+Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool at these milestones:
+1. Read the PROGRESS.md file first using the Read tool before each update
+2. Make updates at these milestones:
+   - **Branch created**: Append to Timeline: `- [timestamp] tech-lead: Feature branch created`
+   - **Compile gate passed**: Update Phase 5 status to `In Progress`, append to Timeline: `- [timestamp] tech-lead: Compile gate passed, app ready`
+   - **Integration verified (Phase 6)**: Update Phase 6 status to `Done`, append to Timeline: `- [timestamp] tech-lead: Integration verification passed`
+   - **PR created (Phase 7)**: Update Phase 7 status to `Done`, append to Timeline: `- [timestamp] tech-lead: PR created`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 </responsibilities>

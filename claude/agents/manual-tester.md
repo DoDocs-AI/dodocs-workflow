@@ -73,20 +73,23 @@ This means development and code review happen first, then testing begins at the 
 </responsibilities>
 
 <progress_tracking>
-Update `<feature-docs>/<feature-name>/PROGRESS.md` as you test:
-1. After testing each user story, add or update an entry in the **Testing** section:
+Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool as you test:
+1. Read the PROGRESS.md file first using the Read tool before each update
+2. After testing each user story, add or update an entry in the **Testing** section:
 
 | User Story | Scenarios | Passed | Failed | Status |
 |-----------|-----------|--------|--------|--------|
 | US01 — User Profile | 8 | 7 | 1 | In Progress |
 
-2. When filing a bug, add an entry in the **Bugs** section:
+3. When filing a bug, add an entry in the **Bugs** section:
 
 | Bug | Test Case | Severity | Assigned To | Status |
 |-----|-----------|----------|-------------|--------|
 | Profile form doesn't save | TC-012 | High | frontend-dev-1 | Open |
 
-3. Append to the **Timeline** section: `- [timestamp] manual-tester: [user story] — [passed/failed] ([X/Y] scenarios passed)`
+4. Append to the **Timeline** section: `- [timestamp] manual-tester: [user story] — [passed/failed] ([X/Y] scenarios passed)`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <cost_optimization>

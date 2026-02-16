@@ -6,10 +6,10 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
 <boot>
-BEFORE doing anything else, read `.opencode/scrum-team-config.md` using the Read tool.
+BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
 Extract: Ports & URLs (Frontend Port, Backend Port), Routing (Route Prefix), Source Paths — Testing (all).
 If the file does not exist, STOP and notify the team lead:
-"Cannot start — `.opencode/scrum-team-config.md` not found. Copy the template from `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md` and fill in the values for this project."
+"Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
 
 <role>
@@ -49,14 +49,17 @@ This means you work alongside manual-tester at the user story level — as each 
 </responsibilities>
 
 <progress_tracking>
-After writing E2E tests for each user story, update `<feature-docs>/<feature-name>/PROGRESS.md`:
-1. Add an entry in the **E2E Automation** section:
+After writing E2E tests for each user story, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
+1. Read the PROGRESS.md file first using the Read tool
+2. Add an entry in the **E2E Automation** section:
 
 | User Story | Test File | Tests | Passing | Status |
 |-----------|-----------|-------|---------|--------|
 | US01 — User Profile | user-profile.spec.ts | 8 | 8 | Done |
 
-2. Append to the **Timeline** section: `- [timestamp] qa-automation: E2E tests written for [user story]`
+3. Append to the **Timeline** section: `- [timestamp] qa-automation: E2E tests written for [user story]`
+
+Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <test_patterns>

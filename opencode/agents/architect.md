@@ -2,7 +2,7 @@
 name: architect
 model: opus
 description: Designs technical solutions for new features without changing existing architecture. Produces Architecture docs with backend endpoints, entities, services, frontend components, and API contracts.
-tools: Read, Grep, Glob, Write, Bash
+tools: Read, Grep, Glob, Write, Bash, WebSearch
 ---
 
 <boot>

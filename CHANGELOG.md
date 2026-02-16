@@ -2,6 +2,13 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.3.3] - 2026-02-16
+
+- Product-owner agent upgraded from sonnet to opus model for better reasoning
+- Added comprehensive environment-specific questions (environments, config, dependencies, behaviors, test data, security)
+- Enhanced Feature Brief format with Environment Configuration section
+- Added AskUserQuestion tool to OpenCode product-owner
+
 ## [v1.3.2] - 2026-02-16
 
 - Add WebSearch tool to architect agent for documentation lookup

@@ -25,6 +25,23 @@ Read the **Ports & URLs** and **Testing** sections from the project config:
 - Use the **Playwright Flags** from the project config and dedicated session `-s=<Playwright Session Name>` with playwright-cli
 </environment>
 
+<playwright_cli_usage>
+**CRITICAL: How to use playwright-cli correctly**
+
+`playwright-cli` is a **skill**, NOT a command-line tool.
+
+**CORRECT way to invoke it:**
+- Use the Skill tool: `Skill(skill="playwright-cli", args="...")`
+- Example: `Skill(skill="playwright-cli", args="navigate https://localhost:3000")`
+
+**INCORRECT ways (DO NOT USE):**
+- ❌ `npx playwright-cli ...` (playwright-cli is not an npm package)
+- ❌ `playwright-cli ...` (playwright-cli is not installed as a CLI tool)
+- ❌ Running it via Bash tool
+
+Always invoke playwright-cli through the Skill tool.
+</playwright_cli_usage>
+
 <autonomous_execution>
 **You are spawned with full permission bypass — execute ALL commands autonomously.**
 - Run `/playwright-cli` skill commands immediately without asking for approval

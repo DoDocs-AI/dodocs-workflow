@@ -15,6 +15,7 @@ That single command launches the full team. You answer a few product questions, 
 - [How It Works](#how-it-works)
 - [Installation](#installation)
 - [OpenCode Installation](#opencode-installation)
+- [Automatic Update Notifications](#automatic-update-notifications)
 - [Project Setup](#project-setup)
 - [Usage](#usage)
 - [Workflow Phases](#workflow-phases)
@@ -143,6 +144,147 @@ The OpenCode installer copies files to `~/.opencode/` (OpenCode's global config 
 | `~/.opencode/` | `.dodocs-workflow-version` | Installed version tracker |
 
 Nothing is installed into your project directories. Project-specific configuration is done separately (see below).
+
+---
+
+## Automatic Update Notifications
+
+dodocs-workflow includes a status line integration that displays update notifications when a new version is available on GitHub. The status line also shows session information like context usage, cost, and duration.
+
+### Status Line Display
+
+The status line shows two lines of information:
+
+**Line 1**: Session info and update status
+- Model name (Opus, Sonnet, or Haiku)
+- Current project folder (directory name only)
+- Git branch (if in a git repository)
+- Update notification (only when update available)
+
+**Line 2**: Context window visualization
+- Colored progress bar showing context usage
+- Percentage occupied
+- Cost tracking (in USD)
+- Session duration
+
+**Example output** when update is available:
+```
+[Opus] 📁 dodocs-workflow | 🌿 main | ⬆️ v1.3.4 available
+▓▓▓░░░░░░░ 25% | $0.15 | ⏱️ 8m 42s
+```
+
+**Example output** when up-to-date:
+```
+[Opus] 📁 dodocs-workflow | 🌿 main
+▓▓▓░░░░░░░ 25% | $0.15 | ⏱️ 8m 42s
+```
+
+**Color coding** for the context bar:
+- Green (< 70%): Normal usage
+- Yellow (70-89%): Approaching limit
+- Red (≥ 90%): Near maximum capacity
+
+### Enable the Status Line
+
+Add this configuration to your `~/.claude/settings.json` (Claude Code) or `~/.opencode/settings.json` (OpenCode):
+
+**Claude Code**:
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline-dodocs-workflow.sh"
+  }
+}
+```
+
+**OpenCode**:
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.opencode/statusline-dodocs-workflow.sh"
+  }
+}
+```
+
+The status line will automatically refresh on each interaction.
+
+### How Update Checks Work
+
+- **Frequency**: Checks GitHub for new releases once per day (24-hour cache)
+- **API**: Uses `gh api repos/DoDocs-AI/dodocs-workflow/releases/latest` to query the latest release
+- **Cache**: Stores result in `/tmp/dodocs-workflow-update-check` to avoid rate limits
+- **Git info**: Caches git branch for 5 seconds to avoid performance lag
+- **Requirement**: Requires `gh` CLI to be installed (brew install gh on macOS)
+
+If `gh` CLI is not available or the API call fails, the status line continues to work but skips the update check.
+
+### Upgrade to Latest Version
+
+When you see an update notification, run:
+
+**Claude Code**:
+```bash
+/dodocs-workflow upgrade
+```
+
+**OpenCode**:
+```bash
+/dodocs-workflow upgrade
+```
+
+The upgrade command will:
+1. Query GitHub for the latest release version
+2. Show your current version
+3. Download and execute the install script from the latest tag
+4. Clear the update check cache
+5. Show the before/after versions
+
+**Manual upgrade** (if `gh` CLI is not installed):
+```bash
+# Claude Code
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install.sh | bash
+
+# OpenCode
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/main/install-opencode.sh | bash
+```
+
+### Check Current Version
+
+**Claude Code**:
+```bash
+/dodocs-workflow version
+```
+
+**OpenCode**:
+```bash
+/dodocs-workflow version
+```
+
+Or read the version file directly:
+```bash
+cat ~/.claude/.dodocs-workflow-version     # Claude Code
+cat ~/.opencode/.dodocs-workflow-version   # OpenCode
+```
+
+### Troubleshooting
+
+**Update notification not showing?**
+- Make sure `gh` CLI is installed: `brew install gh` (macOS) or visit https://cli.github.com/
+- Clear the cache to force a refresh: `rm /tmp/dodocs-workflow-update-check*`
+- Check GitHub API access: `gh api repos/DoDocs-AI/dodocs-workflow/releases/latest --jq '.tag_name'`
+
+**Status line not displaying?**
+- Verify the script is installed: `ls -la ~/.claude/statusline-dodocs-workflow.sh`
+- Check it's executable: `chmod +x ~/.claude/statusline-dodocs-workflow.sh`
+- Test the script manually: `echo '{"model":{"display_name":"Opus"},"workspace":{"current_dir":"'$(pwd)'"},"context_window":{"used_percentage":25},"cost":{"total_cost_usd":0.15,"total_duration_ms":522000}}' | ~/.claude/statusline-dodocs-workflow.sh`
+
+**Git branch not showing?**
+- Make sure you're in a git repository: `git status`
+- The cache refreshes every 5 seconds automatically
+
+---
 
 ## Project Setup
 
@@ -568,42 +710,65 @@ See the template file in `claude/templates/scrum-team-config.template.md` or `op
 
 ## Upgrade
 
+### Automatic Upgrade (Recommended)
+
+Use the built-in upgrade command to automatically fetch and install the latest release:
+
+**Claude Code**:
+```bash
+/dodocs-workflow upgrade
+```
+
+**OpenCode**:
+```bash
+/dodocs-workflow upgrade
+```
+
+This command:
+- Queries GitHub for the latest release
+- Downloads the install script from the latest tag
+- Runs the installation
+- Shows before/after versions
+
+**Requires**: `gh` CLI installed (`brew install gh` on macOS)
+
 ### From a Local Clone
 
 ```bash
 cd dodocs-workflow
 git pull
-bash install.sh
+bash install.sh              # Claude Code
+bash install-opencode.sh     # OpenCode
 ```
 
 The installer detects the existing installation and shows `Upgraded: v1.0.0 -> v1.1.0`.
 
-### From GitHub
+### From GitHub (Manual)
 
 Check the [latest release](https://github.com/DoDocs-AI/dodocs-workflow/releases) and run the one-liner from the release notes, or use the tag URL directly:
 
+**Claude Code**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.3.3/install.sh | bash
+```
+
+**OpenCode**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.3.3/install-opencode.sh | bash
 ```
 
 ### Check Current Version
 
-The installed version is stored in `~/.claude/.dodocs-workflow-version`.
-
-### OpenCode Upgrade
-
+**Using the command**:
 ```bash
-cd dodocs-workflow
-bash install-opencode.sh
+/dodocs-workflow version     # Claude Code or OpenCode
 ```
 
-Or from GitHub:
-
+**Reading the version file**:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install-opencode.sh | bash
+cat ~/.claude/.dodocs-workflow-version      # Claude Code
+cat ~/.opencode/.dodocs-workflow-version    # OpenCode
 ```
-
-OpenCode stores the installed version in `~/.opencode/.dodocs-workflow-version`.
 
 ---
 

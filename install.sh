@@ -93,6 +93,7 @@ done
 COMMANDS=(
     "scrum-team"
     "prepare-for-production"
+    "dodocs-workflow"
 )
 
 print_info "Installing commands..."
@@ -104,6 +105,16 @@ for cmd in "${COMMANDS[@]}"; do
     fi
     print_success "  $cmd command"
 done
+
+# Install status line script
+print_info "Installing status line script..."
+if [ "$SOURCE" = "local" ]; then
+    cp "$SOURCE_DIR/statusline/statusline-dodocs-workflow.sh" "$CLAUDE_DIR/statusline-dodocs-workflow.sh"
+else
+    curl -fsSL "$REPO_URL/claude/statusline/statusline-dodocs-workflow.sh" -o "$CLAUDE_DIR/statusline-dodocs-workflow.sh"
+fi
+chmod +x "$CLAUDE_DIR/statusline-dodocs-workflow.sh"
+print_success "  statusline-dodocs-workflow.sh"
 
 # Install config template
 print_info "Installing config template..."
@@ -136,7 +147,8 @@ echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
 echo "  ~/.claude/agents/          - 21 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + prepare-for-production commands"
+echo "  ~/.claude/commands/        - scrum-team + prepare-for-production + dodocs-workflow commands"
+echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"
 echo ""
 

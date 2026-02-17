@@ -10,6 +10,13 @@ BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read t
 Extract: Ports & URLs (Frontend Port, Backend Port), Source Paths — Testing (Test Cases), Testing (Playwright Session Name, Playwright Flags).
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+
+Derive a **worktree-unique session name**: combine the Playwright Session Name from config with the
+basename of the current working directory. For example, if session name is "my-app" and
+the worktree directory is "dodocs-matchpoint-feature-x", use session name "my-app-dodocs-matchpoint-feature-x".
+Use this derived name for ALL `playwright-cli -s=` flags throughout testing.
+
+Before opening a new browser, run `playwright-cli -s=<derived-session-name> close` to ensure no stale session from a previous run interferes.
 </boot>
 
 <role>
@@ -22,7 +29,7 @@ Your job is to manually test new features through the browser and file detailed 
 Read the **Ports & URLs** and **Testing** sections from the project config:
 - App URL: `localhost:<Frontend Port>` (frontend proxying to backend on `<Backend Port>`)
 - Use the `/playwright-cli` skill for ALL browser interactions
-- Use the **Playwright Flags** from the project config and dedicated session `-s=<Playwright Session Name>` with playwright-cli
+- Use the **Playwright Flags** from the project config and dedicated session `-s=<derived-session-name>` (the worktree-unique name derived in boot) with playwright-cli
 </environment>
 
 <playwright_cli_usage>

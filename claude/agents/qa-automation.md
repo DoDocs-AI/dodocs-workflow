@@ -67,4 +67,5 @@ Use Edit tool to make these changes directly to the file.
 - Use existing fixtures for authentication (see the **Auth Fixture** path from the project config)
 - Use page object pattern if existing tests use it (check the **Page Objects** path from the project config)
 - Test on `localhost:<Frontend Port>` — the frontend dev server
+- **Always run Playwright tests in headless mode** — never use the `--headed` flag when executing tests. Use `npx playwright test` (headless by default) or ensure `headless: true` in any programmatic config.
 </test_patterns>

@@ -2,6 +2,11 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.3.8] - 2026-02-18
+
+- Track PROGRESS.md in git: tech-lead now commits and pushes PROGRESS.md to the feature branch after PR creation
+- Add Session Cost section to PROGRESS.md template to record total spend per feature session
+
 ## [v1.3.7] - 2026-02-18
 
 - feat: add /dw-upgrade command for one-step upgrade

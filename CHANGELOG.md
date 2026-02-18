@@ -2,6 +2,11 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.4.0] - 2026-02-18
+
+- Add remote dev environment testing support: manual-tester and qa-automation now register a fresh tenant before testing, use it throughout, and delete it after all tests complete
+- Add Remote Testing section to scrum-team-config template (Remote Dev URL, Tenant Registration URL, Tenant Admin URL)
+
 ## [v1.3.9] - 2026-02-18
 
 - Enforce headless mode for all Playwright E2E tests in qa-automation agent (never use --headed flag)

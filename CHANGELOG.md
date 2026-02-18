@@ -2,6 +2,11 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.3.7] - 2026-02-18
+
+- feat: add /dw-upgrade command for one-step upgrade
+- feat: show installed version in statusline (dw v1.3.x) with ⬆️ indicator when update available
+
 ## [v1.3.3] - 2026-02-16
 
 - Product-owner agent upgraded from sonnet to opus model for better reasoning

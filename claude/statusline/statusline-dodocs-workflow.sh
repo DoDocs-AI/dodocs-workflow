@@ -76,6 +76,12 @@ if [ -d ".git" ]; then
     fi
 fi
 
+# Always read installed version
+INSTALLED_VERSION=""
+if [ -f "$HOME/.claude/.dodocs-workflow-version" ]; then
+    INSTALLED_VERSION=$(cat "$HOME/.claude/.dodocs-workflow-version" | tr -d '[:space:]' | tr -d 'v')
+fi
+
 # Check for updates (with 24-hour caching)
 UPDATE_MSG=""
 if command -v gh &> /dev/null; then
@@ -91,12 +97,7 @@ if command -v gh &> /dev/null; then
 
     # Refresh cache if needed
     if [ "$CACHE_VALID" = false ]; then
-        INSTALLED_VERSION=""
         LATEST_VERSION=""
-
-        if [ -f "$HOME/.claude/.dodocs-workflow-version" ]; then
-            INSTALLED_VERSION=$(cat "$HOME/.claude/.dodocs-workflow-version" | tr -d '[:space:]' | tr -d 'v')
-        fi
 
         LATEST_VERSION=$(gh api repos/DoDocs-AI/dodocs-workflow/releases/latest --jq '.tag_name' 2>/dev/null | tr -d '[:space:]' | tr -d 'v')
 
@@ -111,13 +112,14 @@ if command -v gh &> /dev/null; then
     if [ -f "$UPDATE_CACHE" ]; then
         UPDATE_AVAILABLE=$(cut -d'|' -f4 "$UPDATE_CACHE")
         if [ "$UPDATE_AVAILABLE" = "true" ]; then
-            LATEST=$(cut -d'|' -f3 "$UPDATE_CACHE")
-            UPDATE_MSG=" | ⬆️  v$LATEST available"
+            UPDATE_MSG=" ⬆️"
         fi
     fi
 fi
 
-LINE1="$LINE1$UPDATE_MSG"
+if [ -n "$INSTALLED_VERSION" ]; then
+    LINE1="$LINE1 | dw v$INSTALLED_VERSION$UPDATE_MSG"
+fi
 
 # Line 2: Context window visualization
 # Convert context percentage to integer for calculations

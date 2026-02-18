@@ -94,6 +94,7 @@ COMMANDS=(
     "scrum-team"
     "prepare-for-production"
     "dodocs-workflow"
+    "dw-upgrade"
 )
 
 print_info "Installing commands..."

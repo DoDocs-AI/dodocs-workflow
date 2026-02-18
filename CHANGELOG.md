@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.3.9] - 2026-02-18
+
+- Enforce headless mode for all Playwright E2E tests in qa-automation agent (never use --headed flag)
+
 ## [v1.3.8] - 2026-02-18
 
 - Track PROGRESS.md in git: tech-lead now commits and pushes PROGRESS.md to the feature branch after PR creation

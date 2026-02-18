@@ -190,6 +190,14 @@ Phase 1 — Requirements + UX Research
 
 ## Timeline
 <!-- all agents append entries -->
+
+## Session Cost
+
+| Item | Value |
+|------|-------|
+| Total Cost (USD) | $0.00 — update from statusline before merging |
+| Feature Branch | feature/<feature-name> |
+| Completed | <!-- tech-lead: fill with completion date --> |
 ```
 
 ## Retest Mode

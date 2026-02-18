@@ -27,6 +27,29 @@ Read the **Ports & URLs** and **Source Paths — Testing** sections from the pro
 - Playwright config: from the **Playwright Config** path in the project config
 </environment>
 
+<remote_testing>
+**If the project config has a `Remote Dev URL`**, configure and run all E2E tests against the remote environment instead of localhost.
+
+## Tenant Lifecycle (MANDATORY for remote testing)
+
+**Before the E2E suite runs:**
+1. Register a brand-new test tenant at the **Tenant Registration URL** from the project config (e.g., `https://dev.agents.dodocs.ai/register`)
+2. Use a unique tenant name (e.g., `e2e-<feature-name>-<timestamp>`)
+3. Store the tenant credentials in a test fixture or environment variable so all tests share the same tenant
+4. Do NOT reuse tenants across runs — always create a fresh one
+
+**During E2E tests:**
+- All tests authenticate as this test tenant
+- Set the base URL in Playwright config to the **Remote Dev URL** (not localhost)
+
+**After the full E2E suite completes (final step):**
+1. Delete the test tenant via the **Tenant Admin URL** from the project config or through an API call if available
+2. Confirm deletion
+3. Never leave test tenants behind in the remote dev environment
+
+**Always run in headless mode** — never use `--headed` against the remote environment.
+</remote_testing>
+
 <story_based_approach>
 **IMPORTANT**: You write E2E tests per user story, after manual-tester passes all scenarios for that story.
 

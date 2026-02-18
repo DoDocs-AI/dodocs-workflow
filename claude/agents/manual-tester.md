@@ -32,6 +32,30 @@ Read the **Ports & URLs** and **Testing** sections from the project config:
 - Use the **Playwright Flags** from the project config and dedicated session `-s=<derived-session-name>` (the worktree-unique name derived in boot) with playwright-cli
 </environment>
 
+<remote_testing>
+**If the project config has a `Remote Dev URL`**, run all manual tests against the remote environment instead of localhost.
+
+## Tenant Lifecycle (MANDATORY for remote testing)
+
+**Before testing begins:**
+1. Navigate to the **Tenant Registration URL** from the project config (e.g., `https://dev.agents.dodocs.ai/register`)
+2. Register a brand-new test tenant with a unique name (e.g., `test-<feature-name>-<timestamp>`)
+3. Record the tenant credentials (email, password, tenant ID) — use them for ALL test scenarios
+4. Do NOT reuse an existing tenant — always create a fresh one to ensure test isolation
+
+**During testing:**
+- Log in as the test tenant for every test scenario
+- All test data created belongs to this tenant
+
+**After ALL testing is complete (final step before signaling done):**
+1. Log in to the **Tenant Admin URL** from the project config (or use the admin panel)
+2. Delete the test tenant and all its data
+3. Confirm deletion before reporting test completion
+4. Append to PROGRESS.md Timeline: `- [timestamp] manual-tester: test tenant deleted from remote dev environment`
+
+**Never leave test tenants behind** — always clean up after testing.
+</remote_testing>
+
 <playwright_cli_usage>
 **CRITICAL: How to use playwright-cli correctly**
 

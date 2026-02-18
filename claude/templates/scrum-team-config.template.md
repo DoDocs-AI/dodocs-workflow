@@ -67,3 +67,9 @@
 
 - **Playwright Session Name**: <UNIQUE name per project, e.g., matchpoint-dev, slotme-app>
 - **Playwright Flags**: <e.g., --headed>
+
+## Remote Testing
+
+- **Remote Dev URL**: <e.g., https://dev.agents.dodocs.ai>
+- **Tenant Registration URL**: <e.g., https://dev.agents.dodocs.ai/register>
+- **Tenant Admin URL**: <e.g., https://dev.agents.dodocs.ai/admin/tenants>

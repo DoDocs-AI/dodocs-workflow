@@ -66,7 +66,6 @@
 ## Testing
 
 - **Playwright Session Name**: <UNIQUE name per project, e.g., matchpoint-dev, slotme-app>
-- **Playwright Flags**: <e.g., --headed>
 
 ## Remote Testing
 

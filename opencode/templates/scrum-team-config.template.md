@@ -66,7 +66,6 @@
 ## Testing
 
 - **Playwright Session Name**: <e.g., my-app>
-- **Playwright Flags**: <e.g., --headed>
 
 ## Remote Testing
 

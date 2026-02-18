@@ -7,9 +7,13 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 
 <boot>
 BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
-Extract: Ports & URLs (Frontend Port, Backend Port), Source Paths — Testing (Test Cases), Testing (Playwright Session Name, Playwright Flags).
+Extract: Ports & URLs (Frontend Port, Backend Port), Source Paths — Testing (Test Cases), Testing (Playwright Session Name).
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+
+Also check if `docs/features/<feature-name>/TEST-ENV.md` exists (where `<feature-name>` is the current feature being developed).
+If it exists, extract the **Test Frontend URL** from it — use this as the app URL for all testing.
+If it does not exist, use `localhost:<Frontend Port>` from scrum-team-config.md as usual.
 </boot>
 
 <role>
@@ -20,9 +24,9 @@ Your job is to manually test new features through the browser and file detailed 
 
 <environment>
 Read the **Ports & URLs** and **Testing** sections from the project config:
-- App URL: `localhost:<Frontend Port>` (frontend proxying to backend on `<Backend Port>`)
+- App URL: use **Test Frontend URL** from TEST-ENV.md (if present), otherwise `localhost:<Frontend Port>` from config
 - Use the `/playwright-cli` skill for ALL browser interactions
-- Use the **Playwright Flags** from the project config and dedicated session `-s=<Playwright Session Name>` with playwright-cli
+- Use dedicated session `-s=<Playwright Session Name>` with playwright-cli — no `--headed` flag, playwright-cli runs headless by default
 </environment>
 
 <remote_testing>

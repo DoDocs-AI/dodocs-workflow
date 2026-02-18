@@ -2,6 +2,11 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.1] - 2026-02-18
+
+- Remove --headed flag from manual-tester: playwright-cli now runs headless by default, no Playwright Flags config field needed
+- Remove Playwright Flags field from scrum-team-config template (both claude and opencode)
+
 ## [v1.5.0] - 2026-02-18
 
 - Switch Docker isolation to no-host-port architecture: only the frontend gets one host port (for manual-tester playwright-cli), all other services (backend, postgres, redis, minio) stay fully internal to the Docker network

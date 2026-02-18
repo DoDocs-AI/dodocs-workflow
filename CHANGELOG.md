@@ -2,6 +2,15 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.0] - 2026-02-18
+
+- Switch Docker isolation to no-host-port architecture: only the frontend gets one host port (for manual-tester playwright-cli), all other services (backend, postgres, redis, minio) stay fully internal to the Docker network
+- Startup health poll now runs inside Docker via curlimages/curl container (no host-side curl needed)
+- qa-automation gets a new docker_test_runner section: runs Playwright inside a container on the same Docker network using internal URLs (BASE_URL, API_URL env vars), with fallback to host Playwright when Playwright Service is blank
+- TEST-ENV.md now includes both external Test Frontend URL (for manual-tester) and internal Docker network URLs (for qa-automation)
+- Replace App Services field in scrum-team-config template with explicit fields: Frontend Service Name, Frontend Internal Port, Backend Service Name, Backend Internal Port, Playwright Service
+- Add Test Environment (Docker Isolation) section to opencode template (was missing)
+
 ## [v1.4.0] - 2026-02-18
 
 - Add remote dev environment testing support: manual-tester and qa-automation now register a fresh tenant before testing, use it throughout, and delete it after all tests complete

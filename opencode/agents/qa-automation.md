@@ -10,6 +10,12 @@ BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read t
 Extract: Ports & URLs (Frontend Port, Backend Port), Routing (Route Prefix), Source Paths — Testing (all).
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+
+Also check if `docs/features/<feature-name>/TEST-ENV.md` exists (where `<feature-name>` is the current feature being developed).
+If it exists, extract **Test Frontend URL**, **Internal Frontend URL**, and **Internal Backend URL** from it.
+- Use **Test Frontend URL** as the baseURL for host-based test runs
+- Use **Internal Frontend URL** and **Internal Backend URL** for Docker-container test runs (see `<docker_test_runner>`)
+If it does not exist, use `localhost:<Frontend Port>` from config.
 </boot>
 
 <role>
@@ -20,12 +26,29 @@ Your job is to write Playwright E2E tests that automate the manual test cases.
 
 <environment>
 Read the **Ports & URLs** and **Source Paths — Testing** sections from the project config for:
-- Frontend URL: `localhost:<Frontend Port>` (proxies API calls to backend)
+- Frontend URL: use **Test Frontend URL** from TEST-ENV.md (if present), otherwise `localhost:<Frontend Port>` from config
 - Backend URL: `localhost:<Backend Port>`
 - Route prefix for workspace routes: from the **Route Prefix** in the project config
 - E2E test directory: from the **E2E Tests** path in the project config
 - Playwright config: from the **Playwright Config** path in the project config
 </environment>
+
+<docker_test_runner>
+**If `Docker Compose File` is set AND `Playwright Service` is configured** in the project config, run Playwright tests inside Docker (no host ports needed):
+
+1. Read `Internal Frontend URL` and `Internal Backend URL` from `docs/features/<feature-name>/TEST-ENV.md`.
+2. Read `Docker Compose File` and `Playwright Service` from the project config; read `Project Name` from TEST-ENV.md.
+3. Run tests via the Playwright container on the same Docker network:
+   ```bash
+   docker compose -f <Docker Compose File> -p <PROJECT_NAME> run --rm \
+     -e BASE_URL=<Internal Frontend URL> \
+     -e API_URL=<Internal Backend URL> \
+     <Playwright Service> npx playwright test --reporter=list
+   ```
+4. Test results land in the mounted volume on the host (e.g., `./test-results/`).
+
+**If `Playwright Service` is blank**, fall back to running Playwright on the host using the **Test Frontend URL** (localhost URL) as before.
+</docker_test_runner>
 
 <remote_testing>
 **If the project config has a `Remote Dev URL`**, configure and run all E2E tests against the remote environment instead of localhost.
@@ -89,6 +112,7 @@ Use Edit tool to make these changes directly to the file.
 - Follow existing test structure and naming conventions
 - Use existing fixtures for authentication (see the **Auth Fixture** path from the project config)
 - Use page object pattern if existing tests use it (check the **Page Objects** path from the project config)
-- Test on `localhost:<Frontend Port>` — the frontend dev server
+- Test on the **Test Frontend URL** from TEST-ENV.md if present, otherwise `localhost:<Frontend Port>`
+- If TEST-ENV.md exists, set the `baseURL` in Playwright config to the **Test Frontend URL** before running tests
 - **Always run Playwright tests in headless mode** — never use the `--headed` flag when executing tests. Use `npx playwright test` (headless by default) or ensure `headless: true` in any programmatic config.
 </test_patterns>

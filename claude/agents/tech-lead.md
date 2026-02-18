@@ -7,7 +7,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 
 <boot>
 BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
-Extract: ALL Commands (Start DB, Start Storage, Start Backend, Start Frontend, Compile Backend, Compile Frontend), Ports & URLs (all), Tech Stack (all).
+Extract: ALL Commands (Start DB, Start Storage, Start Backend, Start Frontend, Compile Backend, Compile Frontend), Ports & URLs (all), Tech Stack (all), and Test Environment (Docker Compose File, Frontend Service Name, Frontend Internal Port, Backend Service Name, Backend Internal Port, Playwright Service) if present.
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
@@ -33,12 +33,76 @@ Before signaling "app ready", you MUST verify ALL of these pass:
 - Fix or report any compilation issues before proceeding
 Only after compile gate passes, proceed to start the app.
 
-## 3. Start the Environment
-Using the **Commands** from the project config:
-- Start DB: Run the **Start DB** command
-- Start Storage: Run the **Start Storage** command
-- Start Backend: Run the **Start Backend** command — wait for it to start on the **Backend Port**
-- Start Frontend: Run the **Start Frontend** command — wait for it to start on the **Frontend Port**
+## 3. Start the Test Environment
+
+Read the **Test Environment** section from the project config.
+
+### If `Docker Compose File` is set (Docker Isolation mode):
+
+1. **Find ONE free host port** — for the frontend service only:
+   ```bash
+   python3 -c "
+   import socket
+   def free_port(start):
+       for p in range(start, start+500):
+           with socket.socket() as s:
+               try: s.bind(('',p)); return p
+               except: pass
+   print(free_port(4000))
+   "
+   ```
+
+2. **Derive a Docker project name** from the feature branch:
+   ```bash
+   PROJECT_NAME=$(echo "<app-name>-<feature-name>" | tr '/_' '--' | tr '[:upper:]' '[:lower:]')
+   ```
+
+3. **Generate override file** `docker-compose.test.<safe-feature-name>.yml` — only expose the frontend service, all others stay internal:
+   ```yaml
+   services:
+     <Frontend Service Name>:
+       ports:
+         - "<allocated-host-port>:<Frontend Internal Port>"
+   ```
+   All other services (backend, postgres, redis, minio, etc.) have NO ports section — they remain accessible only within the Docker network.
+
+4. **Start infra first** (non-app services: postgres, redis, minio, etc.) using the standard **Start DB** and **Start Storage** commands.
+
+5. **Build and start the full app stack** with isolation:
+   ```bash
+   docker compose -f <Docker Compose File> -f docker-compose.test.<safe-feature-name>.yml \
+     -p <PROJECT_NAME> up -d --build
+   ```
+   The `--build` flag builds Docker images from source before starting. This must always be used on initial startup.
+
+6. **Wait for startup** — poll the backend health endpoint from inside the Docker network (up to 90s):
+   ```bash
+   docker run --rm --network <PROJECT_NAME>_default \
+     curlimages/curl sh -c \
+     'for i in $(seq 1 30); do curl -sf http://<Backend Service Name>:<Backend Internal Port>/health && exit 0 || sleep 3; done; exit 1'
+   ```
+
+7. **Write TEST-ENV.md** to `docs/features/<feature-name>/TEST-ENV.md`:
+   ```markdown
+   # Test Environment: <feature-name>
+
+   ## Allocated Ports
+   - **Test Frontend URL**: http://localhost:<fe-host-port>   ← for manual-tester (playwright-cli on host)
+
+   ## Internal URLs (Docker network, for automated tests)
+   - **Internal Frontend URL**: http://<Frontend Service Name>:<Frontend Internal Port>
+   - **Internal Backend URL**: http://<Backend Service Name>:<Backend Internal Port>
+
+   ## Docker Compose
+   - **Project Name**: <PROJECT_NAME>
+   - **Override File**: docker-compose.test.<safe-feature-name>.yml
+
+   ## Commands
+   - **Stop**: `docker compose -p <PROJECT_NAME> down`
+   ```
+
+### If `Docker Compose File` is blank (native mode — no change):
+- Run the existing **Start DB**, **Start Storage**, **Start Backend**, **Start Frontend** commands from config as before.
 
 ## 4. Signal App Ready
 Once the app compiles and starts successfully, send a message to the team lead:
@@ -51,6 +115,20 @@ As developers complete tasks and code-reviewer approves them:
 - Check backend logs for runtime exceptions
 - Check frontend console for errors
 - If issues are found, file bug tasks immediately (don't wait)
+
+### Rebuild on Code Changes (Docker Isolation mode only)
+After each developer task is completed and code-reviewer approves:
+1. **Run compile gate** first (fast fail): run the Compile Backend / Compile Frontend commands
+2. **Rebuild and recreate affected service(s)** in Docker:
+   ```bash
+   docker compose -f <Docker Compose File> -f docker-compose.test.<safe-feature-name>.yml \
+     -p <PROJECT_NAME> up -d --build --no-deps <service-name>
+   ```
+   - Use `--no-deps` to only rebuild/recreate the changed service, not the entire stack
+   - Use `--build` to force image rebuild from the new source code
+   - Backend code changed → rebuild `api` (or `app`) service
+   - Frontend code changed → rebuild `web` service
+3. **Verify** the container started successfully (check logs, poll health endpoint)
 
 ## 6. File Bugs
 Create bug tasks with TaskCreate including:
@@ -66,6 +144,13 @@ After all tasks are complete, reviewed, and feature tested:
 - Full app restart
 - Verify no regressions
 - Confirm the complete feature flow works end-to-end
+
+### Full Rebuild (Docker Isolation mode only)
+```bash
+docker compose -f <Docker Compose File> -f docker-compose.test.<safe-feature-name>.yml \
+  -p <PROJECT_NAME> up -d --build --force-recreate
+```
+`--force-recreate` ensures all containers are recreated fresh for a clean final verification.
 
 ## 8. Create PR (Phase 7)
 After all verification passes:
@@ -85,8 +170,15 @@ Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool 
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
-## 9. Finalize and Commit PROGRESS.md (after PR is created)
-After the PR is created, finalize the PROGRESS.md and commit it to git:
+## 9. Finalize, Teardown, and Commit PROGRESS.md (after PR is created)
+After the PR is created, if Docker Isolation mode was used, tear down the test environment:
+```bash
+docker compose -p <PROJECT_NAME> down
+rm -f docker-compose.test.<safe-feature-name>.yml
+```
+Append to Timeline: `- [timestamp] tech-lead: test Docker environment torn down`
+
+Then finalize the PROGRESS.md and commit it to git:
 
 1. **Update `## Session Cost`** in PROGRESS.md:
    - Fill in the feature branch name (replace `feature/<feature-name>` placeholder)

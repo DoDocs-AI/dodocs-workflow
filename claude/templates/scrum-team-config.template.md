@@ -73,3 +73,12 @@
 - **Remote Dev URL**: <e.g., https://dev.agents.dodocs.ai>
 - **Tenant Registration URL**: <e.g., https://dev.agents.dodocs.ai/register>
 - **Tenant Admin URL**: <e.g., https://dev.agents.dodocs.ai/admin/tenants>
+
+## Test Environment (Docker Isolation)
+
+- **Docker Compose File**: <e.g., docker-compose.yml — or leave blank to skip Docker isolation>
+- **Frontend Service Name**: <service name in docker-compose that serves the frontend, e.g., web, frontend>
+- **Frontend Internal Port**: <internal container port for frontend, e.g., 3000, 80>
+- **Backend Service Name**: <service name in docker-compose for the API, e.g., api, app, backend>
+- **Backend Internal Port**: <internal container port for backend, e.g., 8000, 8080>
+- **Playwright Service**: <optional: service name in docker-compose for test runner, e.g., playwright — leave blank to run Playwright on host>

@@ -85,4 +85,24 @@ Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool 
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
+## 9. Finalize and Commit PROGRESS.md (after PR is created)
+After the PR is created, finalize the PROGRESS.md and commit it to git:
+
+1. **Update `## Session Cost`** in PROGRESS.md:
+   - Fill in the feature branch name (replace `feature/<feature-name>` placeholder)
+   - Fill in the completion date (today's date in `YYYY-MM-DD` format)
+   - For the cost: try `ls ~/.claude/logs/ 2>/dev/null | tail -1` and check if a cost log exists; if not, leave the value as `$see-statusline — check Claude Code statusline for total USD`
+2. **Commit PROGRESS.md** to the feature branch:
+   ```bash
+   git add <feature-docs>/<feature-name>/PROGRESS.md
+   git commit -m "docs: add PROGRESS.md for feature/<feature-name>"
+   git push origin feature/<feature-name>
+   ```
+3. **Append to Timeline** in PROGRESS.md (before the commit above):
+   `- [timestamp] tech-lead: PROGRESS.md finalized and committed to git`
+4. **Update the PR** to mention PROGRESS.md is included:
+   ```bash
+   gh pr edit --body "$(gh pr view --json body -q .body)\n\n---\n📋 PROGRESS.md included in this PR."
+   ```
+
 </responsibilities>

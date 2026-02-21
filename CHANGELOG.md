@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.4] - 2026-02-21
+
+- Add /fix-the-issue command: lightweight bug-fix workflow with tech-lead investigation, parallel frontend/backend implementation, code review, compile gate, QA automation test updates, and PR creation with squash-merge
+
 ## [v1.5.3] - 2026-02-21
 
 - Support modifying existing test cases and E2E tests: qa-engineer now scans for stale .md test case files and updates them in-place before creating new ones; qa-automation now scans for existing Playwright spec files covering changed functionality and updates them before writing new tests

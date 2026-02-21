@@ -78,6 +78,7 @@ Read the **Ports & URLs** and **Source Paths — Testing** sections from the pro
 
 Your workflow:
 1. **Start early**: Begin by studying existing E2E tests and setting up test scaffolding (describe blocks, fixtures, page objects)
+1a. **Scan for affected existing tests**: Before writing new tests, use Glob and Grep to find existing E2E test files that cover functionality being modified by this feature. Read those files and identify tests that would fail due to the changes. Update those tests to match the new behavior, then run them to confirm they pass.
 2. **Watch for passed user stories**: Monitor messages from manual-tester for user stories where ALL scenarios have passed manual testing
 3. **Write tests per user story**: When manual-tester confirms a user story passes, write the Playwright E2E tests covering all scenarios for that story
 4. **Run and verify**: Execute the tests for that story to confirm they pass
@@ -87,6 +88,7 @@ This means you work alongside manual-tester at the user story level — as each 
 </story_based_approach>
 
 <responsibilities>
+0. **Find and update affected existing tests**: Scan the E2E Tests path for existing Playwright test files that exercise functionality being changed. Update any tests whose assertions, selectors, or flows are invalidated by the new implementation. Run updated tests before writing any new tests.
 1. **Study existing E2E tests**: Read existing tests in the **E2E Tests** path and fixtures in the **Fixtures** path from the project config for patterns
 2. **Set up test scaffolding early**: Create the test file structure, imports, and fixtures while waiting for first passed scenario
 3. **Write Playwright tests**: As each scenario passes manual testing, create the E2E test that automates it

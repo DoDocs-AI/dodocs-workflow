@@ -152,8 +152,44 @@ docker compose -f <Docker Compose File> -f docker-compose.test.<safe-feature-nam
 ```
 `--force-recreate` ensures all containers are recreated fresh for a clean final verification.
 
-## 8. Create PR (Phase 7)
-After all verification passes:
+## 8. Rebase on Main + Migration Check (before PR)
+Before creating the PR, you MUST do the following:
+
+### 8a. Rebase on Main
+```bash
+git fetch origin main
+git rebase origin/main
+```
+- If there are conflicts, resolve them, then continue: `git rebase --continue`
+- If rebase fails unrecoverably, report to team lead — do NOT force-push or skip
+
+### 8b. Migration Check
+After rebasing, locate all migration files in the project (check common paths: `src/main/resources/db/migration/`, `migrations/`, `db/migrations/`, `alembic/versions/`, or the path defined in the project config).
+
+For each migration file found, verify:
+
+1. **Naming convention** — files must follow a consistent pattern, e.g.:
+   - Flyway: `V<number>__<snake_case_description>.sql` (e.g., `V3__add_user_roles_table.sql`)
+   - Liquibase: `<number>_<snake_case_description>.xml/sql/yaml`
+   - Alembic: `<revision_id>_<snake_case_description>.py`
+   - Django: `NNNN_<snake_case_description>.py` (e.g., `0004_add_user_roles.py`)
+   - Any other pattern: must be consistent with existing files in the project
+
+2. **Sequential order** — version numbers must be strictly sequential with no gaps and no duplicates relative to the existing migrations on `main`:
+   - List migrations on main: `git show origin/main:<migrations-path> 2>/dev/null || ls <migrations-path>`
+   - The new migration(s) on this branch must have the next available version number(s) after the last one on main
+
+3. **Fix issues** — if any migration file has a wrong name or wrong version number:
+   - Rename/fix it: `git mv <old-name> <new-name>` then amend or commit the fix
+   - Commit the rename: `git add -A && git commit -m "fix: rename migration to correct naming convention"`
+
+4. **Report** — after the check, report:
+   - Which migrations were added on this branch (list them)
+   - Whether any renames were needed (and what was changed)
+   - Confirmation that all migrations are sequentially numbered and correctly named
+
+## 9. Create PR (Phase 7)
+After rebase and migration check pass:
 - Create a PR from the feature branch to main using `gh pr create`
 - Include a summary of all changes in the PR description
 - Capture the PR URL and write it to PROGRESS.md:
@@ -176,7 +212,7 @@ Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool 
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
-## 9. Finalize, Teardown, and Commit PROGRESS.md (after PR is created)
+## 10. Finalize, Teardown, and Commit PROGRESS.md (after PR is created)
 After the PR is created, if Docker Isolation mode was used, tear down the test environment:
 ```bash
 docker compose -p <PROJECT_NAME> down

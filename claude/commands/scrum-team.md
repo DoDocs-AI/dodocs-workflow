@@ -197,6 +197,7 @@ Phase 1 — Requirements + UX Research
 |------|-------|
 | Total Cost (USD) | $0.00 — update from statusline before merging |
 | Feature Branch | feature/<feature-name> |
+| PR URL | — |
 | Completed | <!-- tech-lead: fill with completion date --> |
 ```
 

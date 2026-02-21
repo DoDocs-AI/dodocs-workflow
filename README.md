@@ -18,6 +18,8 @@ That single command launches the full team. You answer a few product questions, 
 - [Automatic Update Notifications](#automatic-update-notifications)
 - [Project Setup](#project-setup)
 - [Usage](#usage)
+- [Container Team](#container-team)
+- [Merge Features](#merge-features)
 - [Workflow Phases](#workflow-phases)
 - [Team Roles](#team-roles)
 - [Prepare for Production](#prepare-for-production)
@@ -106,7 +108,8 @@ The installer copies files to `~/.claude/` (Claude Code's global config director
 | Destination | Files | Description |
 |-------------|-------|-------------|
 | `~/.claude/agents/` | 21 `.md` files | Agent role definitions (11 scrum + 10 production audit) |
-| `~/.claude/commands/` | `scrum-team.md`, `prepare-for-production.md` | Slash commands |
+| `~/.claude/commands/` | `scrum-team.md`, `prepare-for-production.md`, `container-team.md`, `dodocs-workflow.md`, `dw-upgrade.md`, `merge-features.md` | Slash commands |
+| `~/.claude/docker/` | `agent-env.Dockerfile`, `agent-entrypoint.sh` | Container team Docker runtime files |
 | `~/.claude/` | `scrum-team-config.template.md` | Config template for new projects |
 | `~/.claude/` | `.dodocs-workflow-version` | Installed version tracker |
 
@@ -423,6 +426,193 @@ Retest mode:
 
 ---
 
+## Container Team
+
+`/container-team` runs the same 13-agent scrum workflow as `/scrum-team`, but **inside an isolated Docker container**. Your main Claude Code session stays free while the agents work in the background.
+
+### When to Use It
+
+| Situation | Use |
+|-----------|-----|
+| You want to keep using Claude Code while the team builds | `/container-team` |
+| You need to run multiple features in parallel | `/container-team` (one container per feature) |
+| You want the team in your terminal right now | `/scrum-team` |
+| Short feature, hands-on oversight | `/scrum-team` |
+
+### Prerequisites
+
+- Docker Desktop running (or a configured Kubernetes cluster for `--k8s` mode)
+- `ANTHROPIC_API_KEY` exported in your shell
+- `.claude/scrum-team-config.md` present in the project (same as `/scrum-team`)
+- dodocs-workflow installed (the Docker files land in `~/.claude/docker/`)
+
+### Quick Start
+
+```bash
+/container-team add user billing dashboard
+```
+
+This builds the agent image, launches a container, and opens a live monitoring dashboard:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Container Team: add user billing dashboard
+Container: ct-add-user-billing-dashboard-1708001234  |  Status: running  |  Uptime: 14m
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROGRESS (docs/features/add-user-billing-dashboard/PROGRESS.md)
+  Phase 1: Requirements + UX Research   ✅ Done
+  Phase 2: UX Design + Architecture     🔄 In Progress
+  Phase 3: Task Breakdown + Git         ⏳ Pending
+  Phase 4: Build + Test                 ⏳ Pending
+  Phase 5: Integration Verification     ⏳ Pending
+  Phase 6: Ship                         ⏳ Pending
+
+RECENT LOGS (last 20 lines):
+  [product-owner] Feature Brief written to docs/features/...
+  [ux-designer]   Researching existing UI patterns...
+  [architect]     Reading Feature Brief, designing architecture...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Refreshing in 15s...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### Usage Examples
+
+```bash
+# Launch and monitor interactively
+/container-team add dark mode toggle
+
+# Launch in background (no monitoring loop)
+/container-team implement org invitations --detach
+
+# Re-attach to a running container
+/container-team --attach ct-implement-org-invitations-1708001234
+
+# List all running container teams
+/container-team --status
+
+# Use Kubernetes instead of Docker
+/container-team add billing dashboard --k8s
+```
+
+### How It Works
+
+```
+Main Claude Code session (your terminal)
+  │
+  └── docker run -d  dodocs-agent-env  "claude /scrum-team <feature>"
+                          │
+                          └── Inside container: full 13-agent scrum team
+                              ├── product-owner
+                              ├── ux-designer
+                              ├── architect
+                              ├── scrum-master, tech-lead, code-reviewer
+                              ├── frontend-dev x2, backend-dev x2
+                              ├── qa-engineer, manual-tester, qa-automation
+                              └── Agents coordinate via Claude Code's
+                                  internal team system (Tasks + SendMessage)
+
+Main session monitors:
+  - docker logs -f <container-id>     (stream everything)
+  - Periodic reads of PROGRESS.md     (structured phase status)
+```
+
+### Viewing Logs
+
+```bash
+# Full log stream (from outside Claude Code)
+docker logs -f ct-<feature-slug>-<timestamp>
+
+# Inside Claude Code monitoring loop, say "l" or "full logs"
+```
+
+### Stopping a Container
+
+```bash
+docker stop ct-<feature-name>-<timestamp>
+docker rm   ct-<feature-name>-<timestamp>
+```
+
+Or tell Claude Code "stop the container" while in the monitoring loop.
+
+### Files Created
+
+- `.container-team/<feature-name>/container.id` — container ID for reattachment
+- `.container-team/<feature-name>/container.name` — human-readable container name
+- `.container-team/<feature-name>/started.at` — launch timestamp
+- `docs/features/<feature-name>/PROGRESS.md` — live progress (written by agents inside the container)
+
+Add `.container-team/` to your `.gitignore` if you don't want to track container metadata.
+
+---
+
+## Merge Features
+
+After running `/scrum-team` or `/container-team` for multiple features, each feature ends with
+an open PR (`feature/<name>` → `main`). `/merge-features` collects and merges them all in one
+step — with CI gating, auto-rebase on conflicts, and a clear summary report.
+
+### When to Use It
+
+Run `/merge-features` after one or more `/scrum-team` or `/container-team` sessions have
+completed and their PRs are open and ready to ship.
+
+### Prerequisites
+
+- `gh` CLI installed and authenticated (`gh auth status`)
+- Inside a git repository with an `origin` remote
+- At least one open `feature/*` PR targeting `main`
+
+### Usage Examples
+
+```bash
+# Merge all open feature/* PRs (CI must pass)
+/merge-features
+
+# Assess status without merging anything
+/merge-features --dry-run
+
+# Merge only specific PRs by number
+/merge-features --only 42,38
+
+# Merge even if CI checks are pending or failing
+/merge-features --skip-ci
+```
+
+### What Each Status Means
+
+| Symbol | Meaning |
+|--------|---------|
+| ✅ ready to merge | CI passes, no conflicts — will be squash-merged |
+| 🔧 rebase then merge | Conflicts detected — auto-rebased onto main before merging |
+| ⏭️ skip (CI pending) | Checks still running — skipped unless `--skip-ci` is set |
+| ⏭️ skip (CI failed) | Checks failed — skipped unless `--skip-ci` is set |
+| ❌ conflict — manual resolution needed | Auto-rebase failed, needs human intervention |
+
+### How Conflict Auto-Rebase Works
+
+When a `feature/*` branch has conflicts with `main`, `/merge-features` spawns a tech-lead
+agent to rebase it:
+
+1. `git fetch origin main`
+2. `git checkout feature/<name>`
+3. `git rebase origin/main` — for each conflict, new files added by the feature are kept;
+   infrastructure / config files prefer the main version
+4. `git push --force-with-lease origin feature/<name>`
+
+If the rebase cannot be completed cleanly, the PR is marked `❌ failed` and skipped.
+After a successful rebase, CI is re-checked before the PR is merged.
+
+### Merge Order
+
+PRs are processed oldest-first (by PR creation date). After each merge, the remaining PRs
+are re-checked for new conflicts (since main has advanced), and auto-rebase is triggered
+again if needed.
+
+---
+
 ## Workflow Phases
 
 ### Phase 1: Requirements + Early UX Research
@@ -650,8 +840,16 @@ dodocs-workflow/
 ├── claude/                              # Claude Code workflow
 │   ├── agents/                          #   Agent definitions (installed to ~/.claude/agents/)
 │   ├── commands/                        #   Slash commands (installed to ~/.claude/commands/)
+│   │   ├── scrum-team.md                #     Interactive 13-agent team
+│   │   ├── container-team.md            #     Docker/K8s isolated team (background)
+│   │   ├── prepare-for-production.md    #     10-agent production audit
+│   │   ├── dodocs-workflow.md           #     Version + upgrade command
+│   │   └── dw-upgrade.md               #     Upgrade helper
 │   ├── docs/                            #   Agent documentation
 │   └── templates/                       #   Config template
+├── docker/                              # Container team runtime
+│   ├── agent-env.Dockerfile             #   Docker image (node:22-slim + claude CLI + tools)
+│   └── agent-entrypoint.sh             #   Entrypoint: copies config, runs scrum-team
 ├── opencode/                            # OpenCode workflow
 │   ├── agents/                          #   Agent definitions (installed to ~/.opencode/agents/)
 │   ├── commands/                        #   Slash commands (installed to ~/.opencode/commands/)

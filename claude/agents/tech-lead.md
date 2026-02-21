@@ -156,6 +156,12 @@ docker compose -f <Docker Compose File> -f docker-compose.test.<safe-feature-nam
 After all verification passes:
 - Create a PR from the feature branch to main using `gh pr create`
 - Include a summary of all changes in the PR description
+- Capture the PR URL and write it to PROGRESS.md:
+  ```bash
+  PR_URL=$(gh pr create --title "..." --body "...")
+  # Then update PROGRESS.md Session Cost table:
+  # Change "| PR URL | — |" to "| PR URL | $PR_URL |"
+  ```
 - Signal completion to the team lead
 
 <progress_tracking>
@@ -165,7 +171,7 @@ Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool 
    - **Branch created**: Append to Timeline: `- [timestamp] tech-lead: Feature branch created`
    - **Compile gate passed**: Update Phase 5 status to `In Progress`, append to Timeline: `- [timestamp] tech-lead: Compile gate passed, app ready`
    - **Integration verified (Phase 6)**: Update Phase 6 status to `Done`, append to Timeline: `- [timestamp] tech-lead: Integration verification passed`
-   - **PR created (Phase 7)**: Update Phase 7 status to `Done`, append to Timeline: `- [timestamp] tech-lead: PR created`
+   - **PR created (Phase 7)**: Update Phase 7 status to `Done`, fill in `| PR URL | <url> |` in the Session Cost table, append to Timeline: `- [timestamp] tech-lead: PR created`
 
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>

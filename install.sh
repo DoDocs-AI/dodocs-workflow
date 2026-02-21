@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for Claude Code
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.4.0"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.2"
 CLAUDE_DIR="$HOME/.claude"
 VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
 
@@ -95,6 +95,8 @@ COMMANDS=(
     "prepare-for-production"
     "dodocs-workflow"
     "dw-upgrade"
+    "container-team"
+    "merge-features"
 )
 
 print_info "Installing commands..."
@@ -106,6 +108,20 @@ for cmd in "${COMMANDS[@]}"; do
     fi
     print_success "  $cmd command"
 done
+
+# Install Docker agent environment files
+print_info "Installing Docker agent environment..."
+mkdir -p "$CLAUDE_DIR/docker"
+if [ "$SOURCE" = "local" ]; then
+    cp "$SCRIPT_DIR/docker/agent-env.Dockerfile" "$CLAUDE_DIR/docker/agent-env.Dockerfile"
+    cp "$SCRIPT_DIR/docker/agent-entrypoint.sh"  "$CLAUDE_DIR/docker/agent-entrypoint.sh"
+else
+    curl -fsSL "$REPO_URL/docker/agent-env.Dockerfile" -o "$CLAUDE_DIR/docker/agent-env.Dockerfile"
+    curl -fsSL "$REPO_URL/docker/agent-entrypoint.sh"  -o "$CLAUDE_DIR/docker/agent-entrypoint.sh"
+fi
+chmod +x "$CLAUDE_DIR/docker/agent-entrypoint.sh"
+print_success "  agent-env.Dockerfile"
+print_success "  agent-entrypoint.sh"
 
 # Install status line script
 print_info "Installing status line script..."
@@ -148,7 +164,8 @@ echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
 echo "  ~/.claude/agents/          - 21 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + prepare-for-production + dodocs-workflow commands"
+echo "  ~/.claude/commands/        - scrum-team + prepare-for-production + dodocs-workflow + container-team commands"
+echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"
 echo ""

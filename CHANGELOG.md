@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.6] - 2026-02-21
+
+- fix: include /rebase command in install.sh
+
 ## [v1.5.5] - 2026-02-21
 
 - tech-lead now rebases on main and validates migrations (naming convention + sequential order) before creating a PR

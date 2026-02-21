@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.3] - 2026-02-21
+
+- Support modifying existing test cases and E2E tests: qa-engineer now scans for stale .md test case files and updates them in-place before creating new ones; qa-automation now scans for existing Playwright spec files covering changed functionality and updates them before writing new tests
+
 ## [v1.5.1] - 2026-02-18
 
 - Remove --headed flag from manual-tester: playwright-cli now runs headless by default, no Playwright Flags config field needed

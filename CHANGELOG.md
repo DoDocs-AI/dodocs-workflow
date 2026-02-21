@@ -2,6 +2,11 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.5] - 2026-02-21
+
+- tech-lead now rebases on main and validates migrations (naming convention + sequential order) before creating a PR
+- Add /rebase command: manual rebase on main with full migration check and auto-fix
+
 ## [v1.5.4] - 2026-02-21
 
 - Add /fix-the-issue command: lightweight bug-fix workflow with tech-lead investigation, parallel frontend/backend implementation, code review, compile gate, QA automation test updates, and PR creation with squash-merge

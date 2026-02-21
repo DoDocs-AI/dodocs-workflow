@@ -97,6 +97,7 @@ COMMANDS=(
     "dw-upgrade"
     "container-team"
     "merge-features"
+    "fix-the-issue"
 )
 
 print_info "Installing commands..."
@@ -164,7 +165,7 @@ echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
 echo "  ~/.claude/agents/          - 21 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + prepare-for-production + dodocs-workflow + container-team commands"
+echo "  ~/.claude/commands/        - scrum-team + prepare-for-production + dodocs-workflow + container-team + fix-the-issue commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"

@@ -2,6 +2,12 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.8] - 2026-02-23
+
+- feat: feature-manager agent for parallel batch execution with DAG scheduling, retry logic, stall detection, and completeness verification
+- feat: batch-features parallel mode delegates to feature-manager agent; sequential mode properly invokes /scrum-team --auto via Task
+- feat: add brainstorm command and brainstorm-facilitator agent
+
 ## [v1.5.6] - 2026-02-21
 
 - fix: include /rebase command in install.sh

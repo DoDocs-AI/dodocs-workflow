@@ -119,8 +119,12 @@ For each feature in **topologically sorted order**:
    ```
    Spawn Task:
      subagent_type = "general-purpose"
-     prompt        = "/scrum-team --auto [--size <SIZE>] <displayName>"
-                     (omit --size if SIZE was not provided)
+     mode          = "bypassPermissions"
+     prompt        = """
+       Read the file `~/.claude/commands/scrum-team.md` and execute the full workflow
+       described in it. Set $ARGUMENTS to: `--auto [--size <SIZE>] <displayName>`
+       (omit --size if SIZE was not provided)
+     """
    ```
    Wait for the Task to complete before starting the next feature.
 3. If the task finished successfully → log: `Feature <name> complete — PR: <url>`

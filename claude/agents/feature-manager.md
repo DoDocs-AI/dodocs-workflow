@@ -78,9 +78,9 @@ For each slug in `waiting` (process in topological order — dependencies first)
 3. Otherwise, if `attempts[slug] < MAX_RETRIES`:
    - Spawn a background Task:
      - `subagent_type = "general-purpose"`
+     - `mode = "bypassPermissions"`
      - `run_in_background = true`
-     - prompt: `/scrum-team --auto [--size <SIZE>] <displayName>`
-       (omit `--size` if SIZE was not provided)
+     - prompt: `Read the file ~/.claude/commands/scrum-team.md and execute the full workflow described in it. Set $ARGUMENTS to: --auto [--size <SIZE>] <displayName> (omit --size if SIZE was not provided)`
    - Record `running[slug] = { task_handle, started_at: now() }`.
    - Increment `attempts[slug]`.
    - Remove slug from `waiting`.

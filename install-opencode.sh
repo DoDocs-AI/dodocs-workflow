@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for OpenCode
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.8"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.9"
 OPENCODE_DIR="$HOME/.opencode"
 VERSION_FILE="$OPENCODE_DIR/.dodocs-workflow-version"
 

@@ -2,6 +2,12 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.9] - 2026-02-23
+
+- feat: add research phase to product-owner and architect agents (read SPECIFICATION.md, related briefs/arch docs, and sample source files before producing output)
+- feat: feature-manager auto-discover mode (Phase 0 builds FEATURES array from docs/features/ when no explicit list provided)
+- feat: batch-features no-args support triggers auto-discover mode
+
 ## [v1.5.8] - 2026-02-23
 
 - feat: feature-manager agent for parallel batch execution with DAG scheduling, retry logic, stall detection, and completeness verification

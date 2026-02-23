@@ -2,6 +2,11 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.10] - 2026-02-23
+
+- fix: batch-features and feature-manager now correctly run the full scrum-team workflow by reading ~/.claude/commands/scrum-team.md directly (sub-agents spawned via Task tool do not inherit the parent session's skill system, so /scrum-team shorthand was never executed)
+- fix: add bypassPermissions mode to sub-agent spawns in batch-features and feature-manager
+
 ## [v1.5.9] - 2026-02-23
 
 - feat: add research phase to product-owner and architect agents (read SPECIFICATION.md, related briefs/arch docs, and sample source files before producing output)

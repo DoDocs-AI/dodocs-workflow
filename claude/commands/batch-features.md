@@ -3,6 +3,7 @@ Process a list of features autonomously, one after another (or in parallel). Alw
 ## Usage
 
 ```
+/batch-features                                    # auto-discover from docs/features/
 /batch-features --features "user-auth, billing-dashboard, dark-mode"
 /batch-features --file docs/backlog.md
 /batch-features --features "feat-a, feat-b" --parallel
@@ -11,6 +12,7 @@ Process a list of features autonomously, one after another (or in parallel). Alw
 
 ## Arguments
 
+- *(no args)* — auto-discover all pending features from `docs/features/` (reads deps from each `FEATURE-BRIEF.md`)
 - `--features "a, b, c"` — comma-separated feature list (inline); supports dependency annotations (see below)
 - `--file <path>` — markdown file with one feature per line (lines starting with `#` are comments); supports dependency annotations (see below)
 - `--parallel` — run all features simultaneously with DAG-aware scheduling; default is sequential
@@ -48,6 +50,10 @@ Read `$ARGUMENTS` and extract:
 
 Verify `.claude/scrum-team-config.md` exists. If not, STOP and tell the user to run `dodocs-workflow init`.
 
+**Auto-discover detection:**
+If neither `--features` nor `--file` is present → set `AUTO_DISCOVER=true`.
+Read `.claude/scrum-team-config.md` and extract the **Feature Docs** path (default: `docs/features/`); store as `FEATURE_DOCS_PATH`.
+
 **Parse dependency annotations:**
 
 For each raw entry, check for a `[depends-on: ...]` bracket (case-insensitive, spaces optional):
@@ -81,7 +87,14 @@ All subsequent phases operate on the **topologically sorted** feature list.
 
 ### Phase 2: Plan
 
-Print the batch plan before starting, showing the resolved execution order and dependency relationships:
+If `AUTO_DISCOVER=true`:
+```
+Batch: auto-discover mode | Size: <size or "auto">
+Scanning <FEATURE_DOCS_PATH> for pending features...
+(feature-manager will report discovered features before starting)
+```
+
+Otherwise, print the batch plan before starting, showing the resolved execution order and dependency relationships:
 
 ```
 Batch: 4 features | Mode: sequential | Size: large
@@ -114,6 +127,26 @@ For each feature in **topologically sorted order**:
 4. If the task finished with error → log the failure, mark it as Failed, and continue to the next feature.
 
 Because the list is topologically sorted, a feature only starts after all its dependencies have already completed (or been marked Failed — in which case proceed anyway and let the downstream feature fail naturally if the dependency was critical).
+
+#### Auto-discover mode (no args)
+
+If `AUTO_DISCOVER=true`, always spawn a single `feature-manager` agent regardless of `--parallel`.
+
+```
+Spawn Task:
+  subagent_type = "feature-manager"
+  prompt        = """
+    AUTO_DISCOVER=true
+    FEATURE_DOCS_PATH=<FEATURE_DOCS_PATH>
+    SIZE=<size>              # omit if not provided
+    MAX_RETRIES=2
+    STALL_TIMEOUT_MINUTES=120
+  """
+Wait for the feature-manager agent to complete.
+```
+
+The feature-manager agent runs Phase 0 (discovery) then Phases 1–3 as normal.
+Proceed directly to Phase 4 once the agent returns.
 
 #### Parallel mode (`--parallel`)
 

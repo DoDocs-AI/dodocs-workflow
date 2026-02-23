@@ -4,10 +4,51 @@ Manages parallel execution of a feature batch: DAG-aware scheduling, retry on fa
 
 Received from `batch-features` in the spawn prompt:
 
-- `FEATURES` — JSON array: `[{ "slug": "user-auth", "displayName": "User Auth", "dependencies": ["other-slug"] }]`
+- `FEATURES` — JSON array: `[{ "slug": "user-auth", "displayName": "User Auth", "dependencies": ["other-slug"] }]` *(optional — omit to trigger auto-discover mode)*
+- `AUTO_DISCOVER` — `true` to trigger Phase 0 discovery; only used when `FEATURES` is absent
+- `FEATURE_DOCS_PATH` — path to the feature docs folder (e.g., `docs/features/`); used in auto-discover mode; defaults to `docs/features/`
 - `SIZE` — `small | medium | large` (passed through to each scrum-team invocation; omit if not provided)
 - `MAX_RETRIES` — integer, default `2`
 - `STALL_TIMEOUT_MINUTES` — integer, default `120`
+
+When `FEATURES` is absent (or `AUTO_DISCOVER=true`), run **Phase 0** to build the `FEATURES` array before proceeding. When `FEATURES` is present, skip Phase 0.
+
+---
+
+## Phase 0 — Discovery (auto-discover mode only)
+
+1. Read `.claude/scrum-team-config.md` and extract the **Feature Docs** path (e.g., `docs/features/`).
+   Use `FEATURE_DOCS_PATH` from the spawn prompt if provided; otherwise fall back to the config value; otherwise default to `docs/features/`.
+
+2. List subdirectories of the Feature Docs path — each subdirectory name is a **slug**.
+
+3. For each slug:
+   a. Check `<feature-docs>/<slug>/PROGRESS.md`.
+      If the Phase 6 (Ship) row shows `Done` in the Status column → mark as `already_done`, skip from batch.
+   b. Read `<feature-docs>/<slug>/FEATURE-BRIEF.md` if it exists:
+      - Extract `displayName` from the first `#` heading (strip a leading `"Feature Brief:"` prefix and trim).
+      - Parse the `## Depends On` section → list of dep slugs (one slug per line, strip leading `- ` bullet and trim).
+   c. If `FEATURE-BRIEF.md` is absent: `displayName` = slug converted to Title Case (hyphens → spaces, capitalise each word); `deps = []`.
+
+4. Validate: for every dep slug referenced, confirm it exists in the discovered slug list.
+   If a dep references an unknown slug, log a warning and treat that dep as absent.
+
+5. Report skipped (already done) features, then build the `FEATURES` array from the remaining slugs.
+   Print a discovery summary:
+
+   ```
+   Auto-discovered 5 features from docs/features/ (2 already done, skipped)
+   ─────────────────────────────────────────────────────────────────────
+   Feature              Dependencies
+   user-auth            —
+   header-redesign      —
+   billing-dashboard    user-auth
+   dark-mode            user-auth, billing-dashboard
+   payments             —
+   ─────────────────────────────────────────────────────────────────────
+   ```
+
+6. Proceed to Phase 1 with the built `FEATURES` array.
 
 ## State
 

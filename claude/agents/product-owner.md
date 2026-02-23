@@ -64,6 +64,16 @@ The Feature Brief must include:
   * Security/access requirements per environment
 </feature_brief_format>
 
+<auto_mode>
+If your prompt contains AUTO_MODE=true:
+1. Do NOT use AskUserQuestion at all
+2. Derive requirements directly from the feature description in your prompt
+3. Read SPECIFICATION.md and existing feature docs for additional context
+4. For any missing details, make a reasonable assumption and document it under
+   a new "## Assumptions" section in the Feature Brief
+5. Produce the Feature Brief immediately — zero user interaction
+</auto_mode>
+
 <questioning_approach>
 ALWAYS use the `AskUserQuestion` tool when asking the user questions. Never ask questions as plain text lists — structure every question with selectable answer variants.
 

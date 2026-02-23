@@ -58,3 +58,9 @@ The Architecture document must include:
 - **API Contracts**: Full request/response examples for each endpoint
 - **File Inventory**: Exact list of files to create/modify
 </architecture_doc_format>
+
+<auto_mode>
+If your prompt contains AUTO_MODE=true, you are running in fully autonomous mode.
+Produce ARCHITECTURE.md directly without waiting for plan approval — proceed as if bypassPermissions.
+Do NOT pause or prompt the user for review.
+</auto_mode>

@@ -14,11 +14,52 @@ Task(subagent_type="frontend-dev", mode="bypassPermissions", ...)
 Spawn all agents automatically as their phase begins — do NOT ask the user for permission to spawn any agent.
 
 <boot>
-BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
+BEFORE doing anything else:
+
+**Step 1 — Parse $ARGUMENTS:**
+- Extract flags first, then treat the remainder as the feature name.
+- If `--auto` is present: set AUTO_MODE=true; otherwise AUTO_MODE=false.
+- If `--size small` is present: set SIZE=small.
+- If `--size medium` is present: set SIZE=medium.
+- If `--size large` is present: set SIZE=large.
+- If no `--size` flag, auto-detect size from feature name keywords:
+  - Keywords "button", "color", "style", "layout", "UI", "page", "component", "display" → SIZE=small
+  - Keywords "API", "endpoint", "schema", "database", "query" → SIZE=medium
+  - Otherwise → SIZE=large
+  - Log: "Size auto-detected as <size> — spawning <N> agents"
+- Flags may be combined: `--auto --size small fix button layout`
+- Strip all parsed flags from $ARGUMENTS to obtain the clean feature name.
+
+**Step 2 — Read config:**
+Read `.claude/scrum-team-config.md` using the Read tool.
 If the file does not exist, STOP immediately and tell the user:
 "No scrum-team config found for this project. Run `dodocs-workflow init` or copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 Extract: ALL sections — you need App Identity, Tech Stack, Ports & URLs, and all paths/commands.
 </boot>
+
+## Team Size Configuration
+
+Based on SIZE (default: large if no keywords match, see auto-detection above):
+
+| Agent          | small | medium | large |
+|----------------|-------|--------|-------|
+| product-owner  | yes   | yes    | yes   |
+| ux-designer    | yes   | yes    | yes   |
+| architect      | no    | yes    | yes   |
+| scrum-master   | yes   | yes    | yes   |
+| frontend-dev-1 | yes   | yes    | yes   |
+| frontend-dev-2 | no    | yes    | yes   |
+| backend-dev-1  | no    | yes    | yes   |
+| backend-dev-2  | no    | no     | yes   |
+| code-reviewer  | yes   | yes    | yes   |
+| qa-engineer    | yes   | yes    | yes   |
+| qa-automation  | no    | yes    | yes   |
+| manual-tester  | yes   | yes    | yes   |
+| tech-lead      | yes   | yes    | yes   |
+
+- **small** (9 agents): frontend-only change, no migrations, <5 files. Skip Phase 2 entirely (no architect). Scrum-master reads Feature Brief directly.
+- **medium** (11 agents): full-stack but no second backend dev. Architect uses `bypassPermissions` (no plan mode).
+- **large** (13 agents): default, full team, original behavior.
 
 ## Team Agents
 
@@ -28,7 +69,7 @@ Spawn these teammates using their agent definitions from `~/.claude/agents/`. **
 |------|-----------|------|-------|
 | product-owner | `product-owner` | `bypassPermissions` | |
 | ux-designer | `ux-designer` | `bypassPermissions` | |
-| architect | `architect` | `plan` | Require plan approval |
+| architect | `architect` | `plan` when AUTO_MODE=false (SIZE=large), `bypassPermissions` when AUTO_MODE=true or SIZE=medium | Require plan approval only in manual large mode |
 | scrum-master | `scrum-master` | `bypassPermissions` | |
 | code-reviewer | `code-reviewer` | `bypassPermissions` | |
 | frontend-dev-1 | `frontend-dev` | `bypassPermissions` | |
@@ -48,17 +89,24 @@ Models are defined in each agent's `.md` file (opus for architect and security-a
 **First**: Create the initial `PROGRESS.md` at `<feature-docs>/<feature-name>/PROGRESS.md` using the template from the Progress Tracking section.
 
 Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypassPermissions"`):
-- **product-owner** talks to the user, gathers requirements, produces **FEATURE-BRIEF.md**
+- **product-owner** talks to the user (or derives requirements autonomously if AUTO_MODE=true), produces **FEATURE-BRIEF.md**. If AUTO_MODE=true, append `AUTO_MODE=true` to the product-owner's prompt.
 - **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
 
 ### Phase 2: UX Design + Architecture (PARALLEL)
-Spawn ux-designer and architect simultaneously once the Feature Brief is ready:
+
+**Skip Phase 2 entirely if SIZE=small** — proceed directly to Phase 3. Scrum-master reads Feature Brief directly.
+
+Otherwise, spawn ux-designer and architect simultaneously once the Feature Brief is ready:
 - **ux-designer** reads the Feature Brief and produces **UX-DESIGN.md** (combining research from Phase 1 with the brief) — spawned with `mode: "bypassPermissions"`
-- **architect** reads the Feature Brief, researches existing code patterns, designs the technical solution, produces **ARCHITECTURE.md** — spawned with `mode: "plan"` (lead must approve the architecture plan)
+- **architect** reads the Feature Brief, researches existing code patterns, designs the technical solution, produces **ARCHITECTURE.md**
+  - Mode: `plan` when AUTO_MODE=false AND SIZE=large; `bypassPermissions` when AUTO_MODE=true OR SIZE=medium
+  - If AUTO_MODE=true, append `AUTO_MODE=true` to the architect's prompt
 
 Both agents work from the Feature Brief in parallel. The architect does NOT need to wait for UX Design.
 
-- **USER CHECKPOINT**: After both UX-DESIGN.md and ARCHITECTURE.md are complete, present both to the user and ask: "Do the UX flows and architecture look right? Any changes before we proceed to development?" Wait for user approval before continuing.
+**USER CHECKPOINT** (conditional):
+- **AUTO_MODE=true**: Log "AUTO_MODE: Architecture and UX Design auto-approved." and proceed immediately to Phase 3.
+- **AUTO_MODE=false**: After both UX-DESIGN.md and ARCHITECTURE.md are complete, present both to the user and ask: "Do the UX flows and architecture look right? Any changes before we proceed to development?" Wait for user approval before continuing.
 
 ### Phase 3: Task Breakdown + Git Setup
 Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
@@ -70,14 +118,14 @@ Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
   - Assigns tasks to all devs and QA
 
 ### Phase 4: Build + Test (ALL PARALLEL)
-Spawn ALL these agents simultaneously, every one with `mode: "bypassPermissions"`:
-- **frontend-dev-1** + **frontend-dev-2**: work on assigned tasks, make atomic git commit per completed task
-- **backend-dev-1** + **backend-dev-2**: work on assigned tasks, make atomic git commit per completed task
+Spawn agents simultaneously according to the SIZE configuration (see Team Size Configuration table), every one with `mode: "bypassPermissions"`:
+- **frontend-dev-1** (all sizes) + **frontend-dev-2** (medium/large only): work on assigned tasks, make atomic git commit per completed task
+- **backend-dev-1** (medium/large only) + **backend-dev-2** (large only): work on assigned tasks, make atomic git commit per completed task
 - **qa-engineer**: writes test case `.md` files organized by user story
 - **code-reviewer**: watches for completed developer tasks, reviews each one
 - **tech-lead**: runs compile gate (compile backend + frontend + lint), starts the app, monitors for build/runtime issues
 - **manual-tester**: waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready, then tests the full feature story by story using the test cases
-- **qa-automation**: writes E2E tests per user story — after manual-tester passes all scenarios for a user story, qa-automation writes the Playwright tests for that story
+- **qa-automation** (medium/large only): writes E2E tests per user story — after manual-tester passes all scenarios for a user story, qa-automation writes the Playwright tests for that story
 
 ### Phase 4 Flow:
 ```

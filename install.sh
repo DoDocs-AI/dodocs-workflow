@@ -77,6 +77,7 @@ AGENTS=(
     "db-analyst"
     "load-tester"
     "brainstorm-facilitator"
+    "feature-manager"
 )
 
 # Install agent files
@@ -168,7 +169,7 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 22 agent definitions"
+echo "  ~/.claude/agents/          - 23 agent definitions"
 echo "  ~/.claude/commands/        - scrum-team + batch-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + rebase + brainstorm commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"

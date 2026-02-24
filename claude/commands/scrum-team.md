@@ -92,6 +92,11 @@ Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypas
 - **product-owner** talks to the user (or derives requirements autonomously if AUTO_MODE=true), produces **FEATURE-BRIEF.md**. If AUTO_MODE=true, append `AUTO_MODE=true` to the product-owner's prompt.
 - **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
 
+**VALIDATE Phase 1 artifacts** before proceeding to Phase 2:
+- Read `<feature-docs>/<feature-name>/FEATURE-BRIEF.md` using the Read tool.
+- Must exist AND contain all of these non-empty sections: problem statement (or background), user stories, acceptance criteria.
+- If the file is missing or any required section is absent/empty: re-spawn `product-owner` with `bypassPermissions` and append to its prompt: "FEATURE-BRIEF.md is incomplete or missing. Regenerate it with all required sections: problem statement, user stories, acceptance criteria, and edge cases." Wait for it to complete, then re-validate before proceeding.
+
 ### Phase 2: UX Design + Architecture (PARALLEL)
 
 **Skip Phase 2 entirely if SIZE=small** — proceed directly to Phase 3. Scrum-master reads Feature Brief directly.
@@ -103,6 +108,12 @@ Otherwise, spawn ux-designer and architect simultaneously once the Feature Brief
   - If AUTO_MODE=true, append `AUTO_MODE=true` to the architect's prompt
 
 Both agents work from the Feature Brief in parallel. The architect does NOT need to wait for UX Design.
+
+**VALIDATE Phase 2 artifacts** before proceeding to the user checkpoint:
+- Read `<feature-docs>/<feature-name>/ARCHITECTURE.md` — must exist and contain at minimum one of: backend endpoints section OR frontend components section, AND a file inventory section.
+- Read `<feature-docs>/<feature-name>/UX-DESIGN.md` — must exist and contain at least one user flow.
+- If ARCHITECTURE.md is missing or incomplete: re-spawn `architect` (same mode as before) with the note: "ARCHITECTURE.md is missing or incomplete. Please regenerate it covering: backend endpoints, database entities, frontend components, and file inventory." Wait for completion, re-validate.
+- If UX-DESIGN.md is missing: re-spawn `ux-designer` with `bypassPermissions` with the note: "UX-DESIGN.md is missing. Please produce it from the Feature Brief and your Phase 1 research." Wait for completion.
 
 **USER CHECKPOINT** (conditional):
 - **AUTO_MODE=true**: Log "AUTO_MODE: Architecture and UX Design auto-approved." and proceed immediately to Phase 3.
@@ -117,6 +128,11 @@ Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
   - **Task dependencies**: Set `blockedBy` relationships where needed
   - Assigns tasks to all devs and QA
 
+**VALIDATE Phase 3 task breakdown** before proceeding to Phase 4:
+- Call TaskList and count tasks assigned to developers (frontend-dev-*, backend-dev-*).
+- Must have at least 2 developer tasks AND all developer tasks must have a user story prefix (`[US01]`, `[US02]`, etc.) in their subject.
+- If fewer than 2 developer tasks exist OR tasks are missing user story prefixes: re-spawn `scrum-master` with `bypassPermissions` and append: "Task breakdown is incomplete. Re-read ARCHITECTURE.md and create ALL developer tasks. Every task subject must start with a user story prefix like [US01]. Ensure file conflict and migration ownership rules are applied." Wait for completion, re-validate.
+
 ### Phase 4: Build + Test (ALL PARALLEL)
 Spawn agents simultaneously according to the SIZE configuration (see Team Size Configuration table), every one with `mode: "bypassPermissions"`:
 - **frontend-dev-1** (all sizes) + **frontend-dev-2** (medium/large only): work on assigned tasks, make atomic git commit per completed task
@@ -124,27 +140,27 @@ Spawn agents simultaneously according to the SIZE configuration (see Team Size C
 - **qa-engineer**: writes test case `.md` files organized by user story
 - **code-reviewer**: watches for completed developer tasks, reviews each one
 - **tech-lead**: runs compile gate (compile backend + frontend + lint), starts the app, monitors for build/runtime issues
-- **manual-tester**: waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready, then tests the full feature story by story using the test cases
+- **manual-tester**: waits for "app ready" signal, then begins testing each user story as soon as all tasks for THAT story are code-reviewed AND qa-engineer's test cases for that story are ready — does NOT wait for all stories to complete
 - **qa-automation** (medium/large only): writes E2E tests per user story — after manual-tester passes all scenarios for a user story, qa-automation writes the Playwright tests for that story
 
 ### Phase 4 Flow:
 ```
-Developers complete tasks -> atomic commits (unchanged)
+Developers complete tasks -> atomic commits (per story)
        |
        v
-Code-reviewer reviews each task individually (unchanged)
+Code-reviewer reviews each task individually
+       |
+       v  (per story — no waiting for other stories)
+ALL tasks for US01 reviewed + US01 test cases ready
        |
        v
-QA-engineer writes test cases organized by user story (parallel with devs)
+Manual-tester tests US01 immediately
        |
-       v
-ALL tasks reviewed + test cases ready
-       |
-       v
-Manual-tester tests the full feature using QA engineer's test cases (story by story)
-       |
-       +-- pass -> qa-automation writes E2E for that user story
+       +-- pass -> qa-automation writes E2E for US01
        +-- fail -> bug task -> developer fixes -> code-reviewer reviews -> manual-tester retests
+            (if same test case fails 2+ times -> escalate to tech-lead)
+
+Meanwhile: US02 development continues in parallel -> reviewed -> manual-tester tests US02 -> ...
 ```
 
 ### Phase 5: Integration Verification
@@ -161,10 +177,11 @@ After all tasks are complete, reviewed, and tested:
 ## Parallel Execution Rules
 
 - From Phase 4 onward, tech-lead, code-reviewer, manual-tester, qa-automation, and all developers MUST run in parallel
-- **Feature-level testing**: manual-tester waits for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready before beginning testing. Then tests the full feature story by story.
+- **Story-level testing**: manual-tester begins testing each user story as soon as ALL dev tasks for that story are code-reviewed AND qa-engineer's test cases for that story are ready. Does NOT wait for other stories — testing and development run in parallel across stories.
 - **Story-level E2E**: qa-automation writes E2E tests per user story — after manual-tester passes all scenarios for a story, qa-automation writes the E2E tests for that story
 - When manual-tester or tech-lead files a bug, the assigned developer picks it up and fixes it immediately — no waiting
 - After a developer fixes a bug, code-reviewer reviews the fix, then manual-tester retests that story
+- **Bug fix cycle detection**: if manual-tester retests the same test case 2+ times and it still fails, escalate to tech-lead for root cause analysis instead of creating another fix task
 - This review-test-fix-retest loop continues until all test cases pass
 
 ## Compile Gate

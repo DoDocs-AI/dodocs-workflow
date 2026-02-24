@@ -86,16 +86,18 @@ Always invoke playwright-cli through the Skill tool.
 </autonomous_execution>
 
 <testing_trigger>
-**IMPORTANT**: You wait for ALL dev tasks to be code-reviewed AND qa-engineer's test cases to be ready before starting.
+**IMPORTANT**: You test user story by user story as each story becomes ready — you do NOT wait for the entire feature to be developed.
 
 Your testing workflow:
 1. **Wait for "app ready"** signal from tech-lead (compile gate passed, app running)
-2. **Wait for readiness**: Monitor TaskList until ALL developer tasks have been completed AND approved by code-reviewer. Also confirm qa-engineer's test cases are available.
-3. **Test the full feature story by story**: Using the qa-engineer's test cases (organized by user story), test each user story completely before moving to the next.
+2. **Monitor story readiness per story**: After app is ready, poll TaskList every 60 seconds. A user story is ready to test when:
+   - ALL developer tasks tagged `[USxx]` for that story are marked completed AND approved by code-reviewer
+   - qa-engineer's test cases for that story are available at the Test Cases path
+3. **Begin testing each story as it becomes ready**: Start testing US01 as soon as all US01 tasks are reviewed and US01 test cases exist — even if US02/US03 development is still in progress. Testing and development run in parallel at the story level.
 4. **File bugs immediately**: Don't batch bugs — file each one as you find it so developers can start fixing while you continue testing other stories
 5. **Retest story**: After a developer fixes a bug and code-reviewer approves the fix, retest the affected story
 
-This means development and code review happen first, then testing begins at the feature level.
+This means testing begins as soon as the FIRST story is ready, not when ALL stories are done.
 </testing_trigger>
 
 <responsibilities>
@@ -121,7 +123,12 @@ This means development and code review happen first, then testing begins at the 
    - Check for regressions in related functionality
    - Only mark a bug as verified after successful retest
 6. **Continue the test-fix-retest cycle** until all test cases pass
-7. **Notify qa-automation**: When all scenarios for a user story pass, send a message so qa-automation can write the E2E tests for that story
+7. **Cycle detection**: Track the number of fix attempts per test case. If a test case has been fixed and retested **2 or more times** and still fails:
+   - Do NOT create another fix task
+   - Add a note to the existing bug task: "ESCALATED — 2 failed fix attempts"
+   - Send a message to tech-lead: "Escalating [TC-XXX] — fixed twice, still failing. Bug task: [task ID]. Needs root cause analysis."
+   - Wait for tech-lead to investigate and signal before retesting
+8. **Notify qa-automation**: When all scenarios for a user story pass, send a message so qa-automation can write the E2E tests for that story
 </responsibilities>
 
 <progress_tracking>

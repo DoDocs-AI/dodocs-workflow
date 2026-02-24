@@ -64,7 +64,7 @@ Use Edit tool to make these changes directly to the file.
 
 <coordination>
 - Send a message to the team lead after each review with the verdict
-- When all tasks in a user story are approved, notify the team lead that the story is review-complete. Manual-tester begins testing only after ALL tasks are reviewed and test cases are ready.
-- If you request changes, the developer must fix and you re-review
+- **Story-level testing trigger**: When ALL tasks for a user story are approved, send a message directly to manual-tester: "US0X — <story name> is review-complete. All [USxx] tasks approved. Ready for testing." Do NOT wait for other stories to be review-complete before sending this signal.
+- If you request changes, the developer must fix and you re-review before the story is considered review-complete
 - For the final phase, do a full-diff review of the entire feature branch before PR creation
 </coordination>

@@ -130,7 +130,17 @@ After each developer task is completed and code-reviewer approves:
    - Frontend code changed → rebuild `web` service
 3. **Verify** the container started successfully (check logs, poll health endpoint)
 
-## 6. File Bugs
+## 6. Escalated Bug Root Cause Analysis
+If manual-tester escalates a bug (marked "ESCALATED — 2 failed fix attempts" in a task):
+1. Read the bug task description and all previous fix commit messages (`git log --oneline feature/<feature-name>`)
+2. Read the relevant source files involved in the failing test case
+3. Identify the root cause — why the fix keeps failing (wrong layer fixed, incorrect assumption about data flow, test setup issue, etc.)
+4. Take one of these actions:
+   - **Assign a targeted fix**: Create a new task for the appropriate developer with a detailed root cause explanation, specific files and lines to change, and acceptance criteria
+   - **Architectural issue**: If the problem is a design flaw in ARCHITECTURE.md, notify the team lead with a clear explanation and proposed approach change before assigning work
+5. After the root cause fix is merged, message manual-tester: "Root cause fix committed for [TC-XXX]. Ready to retest."
+
+## 7. File Bugs
 Create bug tasks with TaskCreate including:
 - Clear reproduction steps
 - Error logs/messages
@@ -139,7 +149,7 @@ Create bug tasks with TaskCreate including:
   - UI issues -> `frontend-dev-1` or `frontend-dev-2` (whoever wrote the code)
   - API/DB issues -> `backend-dev-1` or `backend-dev-2` (whoever wrote the code)
 
-## 7. Integration Verification (Phase 6)
+## 8. Integration Verification (Phase 6)
 After all tasks are complete, reviewed, and feature tested:
 - Full app restart
 - Verify no regressions
@@ -152,7 +162,7 @@ docker compose -f <Docker Compose File> -f docker-compose.test.<safe-feature-nam
 ```
 `--force-recreate` ensures all containers are recreated fresh for a clean final verification.
 
-## 8. Rebase on Main + Migration Check (before PR)
+## 9. Rebase on Main + Migration Check (before PR)
 Before creating the PR, you MUST do the following:
 
 ### 8a. Rebase on Main
@@ -188,7 +198,7 @@ For each migration file found, verify:
    - Whether any renames were needed (and what was changed)
    - Confirmation that all migrations are sequentially numbered and correctly named
 
-## 9. Create PR (Phase 7)
+## 10. Create PR (Phase 7)
 After rebase and migration check pass:
 - Create a PR from the feature branch to main using `gh pr create`
 - Include a summary of all changes in the PR description
@@ -212,7 +222,7 @@ Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool 
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
-## 10. Finalize, Teardown, and Commit PROGRESS.md (after PR is created)
+## 11. Finalize, Teardown, and Commit PROGRESS.md (after PR is created)
 After the PR is created, if Docker Isolation mode was used, tear down the test environment:
 ```bash
 docker compose -p <PROJECT_NAME> down

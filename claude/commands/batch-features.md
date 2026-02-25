@@ -54,6 +54,16 @@ Verify `.claude/scrum-team-config.md` exists. If not, STOP and tell the user to 
 If neither `--features` nor `--file` is present → set `AUTO_DISCOVER=true`.
 Read `.claude/scrum-team-config.md` and extract the **Feature Docs** path (default: `docs/features/`); store as `FEATURE_DOCS_PATH`.
 
+**Auto-discover STATUS filter:**
+When `AUTO_DISCOVER=true`, scan `FEATURE_DOCS_PATH` for feature folders and apply the following filter for each slug found:
+- Read `docs/features/<slug>/STATUS` (if the file exists)
+- STATUS == `approved` → **include** in batch
+- STATUS == `completed` → **skip** (already done)
+- STATUS == `in-progress` → **skip** (already running)
+- STATUS is any other value (`draft`, `requirements-ready`, `mockups-ready`) → **skip** with log:
+  `Skipping <slug> — status is <status> (not approved for batch; run /prepare-feature <slug> first)`
+- STATUS file missing → fall back to existing PROGRESS.md Phase 6 check (backward compatibility with features that pre-date STATUS tracking)
+
 **Parse dependency annotations:**
 
 For each raw entry, check for a `[depends-on: ...]` bracket (case-insensitive, spaces optional):
@@ -115,7 +125,8 @@ Features with no dependencies show no `[after: ...]` annotation. Features with d
 
 For each feature in **topologically sorted order**:
 1. Log: `Starting feature N/total: <feature-name>`
-2. Spawn a Task that runs the full scrum-team workflow:
+2. Write `in-progress` to `docs/features/<slug>/STATUS` (create the file if it does not exist).
+3. Spawn a Task that runs the full scrum-team workflow:
    ```
    Spawn Task:
      subagent_type = "general-purpose"
@@ -127,8 +138,8 @@ For each feature in **topologically sorted order**:
      """
    ```
    Wait for the Task to complete before starting the next feature.
-3. If the task finished successfully → log: `Feature <name> complete — PR: <url>`
-4. If the task finished with error → log the failure, mark it as Failed, and continue to the next feature.
+4. If the task finished successfully → log: `Feature <name> complete — PR: <url>`
+5. If the task finished with error → log the failure, mark it as Failed, and continue to the next feature.
 
 Because the list is topologically sorted, a feature only starts after all its dependencies have already completed (or been marked Failed — in which case proceed anyway and let the downstream feature fail naturally if the dependency was critical).
 

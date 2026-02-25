@@ -102,6 +102,26 @@ Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypas
 **Skip Phase 2 entirely if SIZE=small** — proceed directly to Phase 3. Scrum-master reads Feature Brief directly.
 
 Otherwise, spawn ux-designer and architect simultaneously once the Feature Brief is ready:
+
+**Before spawning ux-designer:** Check if `src/mockups/<feature-slug>/` exists (where `<feature-slug>` is the kebab-case feature name). If it exists, append the following mockup context to the ux-designer's prompt:
+```
+Framework-native mockup components were approved by the human during daytime preparation.
+Location: src/mockups/<feature-slug>/  (one .tsx/.vue file per screen)
+Read index.tsx for the full screen overview, then read each USxx*.tsx.
+Your UX-DESIGN.md MUST align with the approved mockup structure. Do not redesign
+approved screens. Enrich with: keyboard navigation, accessibility, responsive behavior,
+micro-interactions, and transition details not captured in mockups.
+Reference mockup filenames inline: "As shown in US01MainView.tsx, ..."
+```
+
+**Before spawning architect:** Check if `src/mockups/<feature-slug>/` exists. If it exists, append to the architect's prompt:
+```
+Approved mockup components exist at src/mockups/<feature-slug>/.
+Read them to understand the frontend component scope and structure required.
+These are the approved screens — your ARCHITECTURE.md frontend component list
+should align with the mockup component structure.
+```
+
 - **ux-designer** reads the Feature Brief and produces **UX-DESIGN.md** (combining research from Phase 1 with the brief) — spawned with `mode: "bypassPermissions"`
 - **architect** reads the Feature Brief, researches existing code patterns, designs the technical solution, produces **ARCHITECTURE.md**
   - Mode: `plan` when AUTO_MODE=false AND SIZE=large; `bypassPermissions` when AUTO_MODE=true OR SIZE=medium
@@ -234,6 +254,11 @@ Phase 1 — Requirements + UX Research
 | FEATURE-BRIEF.md | Pending | product-owner |
 | UX-DESIGN.md | Pending | ux-designer |
 | ARCHITECTURE.md | Pending | architect |
+
+<!-- If src/mockups/<feature-slug>/ exists (daytime prep was done), pre-fill these two rows as Done:
+| src/mockups/<feature-slug>/ | Done | mockup-designer |
+| MOCKUP-VALIDATION.md | Done | mockup-validator |
+-->
 
 ## Development Tasks
 <!-- scrum-master populates this after Phase 4 -->

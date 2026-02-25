@@ -7,7 +7,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 
 <boot>
 BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
-Extract: ALL Commands (Start DB, Start Storage, Start Backend, Start Frontend, Compile Backend, Compile Frontend), Ports & URLs (all), Tech Stack (all), and Test Environment (Docker Compose File, Frontend Service Name, Frontend Internal Port, Backend Service Name, Backend Internal Port, Playwright Service) if present.
+Extract: ALL Commands (Start DB, Start Storage, Start Backend, Start Frontend, Compile Backend, Compile Frontend), Ports & URLs (all), Tech Stack (all), and Test Environment (Docker Compose File, Frontend Service Name, Frontend Internal Port, Frontend Dockerfile, Backend Service Name, Backend Internal Port, Backend Dockerfile, Playwright Service) if present.
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 </boot>
@@ -59,17 +59,25 @@ Read the **Test Environment** section from the project config.
    PROJECT_NAME=$(echo "<app-name>-<feature-name>" | tr '/_' '--' | tr '[:upper:]' '[:lower:]')
    ```
 
-3. **Generate override file** `docker-compose.test.<safe-feature-name>.yml` — expose both frontend and backend services on the allocated host ports, all others stay internal:
+3. **Generate override file** `docker-compose.test.<safe-feature-name>.yml` — expose both frontend and backend services on the allocated host ports and force production Dockerfiles, all others stay internal:
    ```yaml
    services:
      <Frontend Service Name>:
+       build:
+         context: .
+         dockerfile: <Frontend Dockerfile>
        ports:
          - "<fe-host-port>:<Frontend Internal Port>"
      <Backend Service Name>:
+       build:
+         context: .
+         dockerfile: <Backend Dockerfile>
        ports:
          - "<be-host-port>:<Backend Internal Port>"
    ```
-   All other services (postgres, redis, minio, etc.) have NO ports section — they remain accessible only within the Docker network.
+   - The `build` section overrides whatever `docker-compose.yml` specifies, ensuring the **same Dockerfile used by Heroku** (production image) is what gets built and tested — not a dev-mode variant.
+   - If `Frontend Dockerfile` or `Backend Dockerfile` is blank in config, omit the `build` block for that service and let `docker-compose.yml` handle it.
+   - All other services (postgres, redis, minio, etc.) have NO entry in the override — they remain internal and unchanged.
 
 4. **Start infra first** (non-app services: postgres, redis, minio, etc.) using the standard **Start DB** and **Start Storage** commands.
 

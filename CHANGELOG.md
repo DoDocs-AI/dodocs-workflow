@@ -2,6 +2,15 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.16] - 2026-02-25
+
+- feat: create feature branch at boot (Step 3) before any agent spawns — all docs land on feature branch from the start
+- feat: add Mockup Component Schema and Mockup Preview Port fields to scrum-team-config template
+- feat: mockup-designer reads component schema from config as authoritative reference for available UI components
+- feat: scrum-team starts Vite mockup preview server before user checkpoint and shows preview URL
+- feat: Phase 4 orchestrator prints periodic progress bar report after each agent idle notification
+- fix: Phase 3 no longer spawns tech-lead — only scrum-master needed for task breakdown
+
 ## [v1.5.15] - 2026-02-25
 
 - feat: add AppIntegrationView to mockup pipeline — full app shell with feature wired into navigation, shown as default screen in mockup hub

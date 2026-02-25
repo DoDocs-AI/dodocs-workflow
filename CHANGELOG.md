@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.15] - 2026-02-25
+
+- feat: add AppIntegrationView to mockup pipeline — full app shell with feature wired into navigation, shown as default screen in mockup hub
+
 ## [v1.5.14] - 2026-02-25
 
 - feat: expand frontend-dev agent with full mockup-driven implementation workflow (5-step process, mockup→production translation table, state machine patterns)

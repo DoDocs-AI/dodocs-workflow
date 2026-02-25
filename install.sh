@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for Claude Code
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.10"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.11"
 CLAUDE_DIR="$HOME/.claude"
 VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
 
@@ -78,6 +78,8 @@ AGENTS=(
     "load-tester"
     "brainstorm-facilitator"
     "feature-manager"
+    "mockup-designer"
+    "mockup-validator"
 )
 
 # Install agent files
@@ -103,6 +105,8 @@ COMMANDS=(
     "rebase"
     "brainstorm"
     "batch-features"
+    "prepare-feature"
+    "prepare-features"
 )
 
 print_info "Installing commands..."
@@ -169,8 +173,8 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 23 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + batch-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + rebase + brainstorm commands"
+echo "  ~/.claude/agents/          - 25 agent definitions"
+echo "  ~/.claude/commands/        - scrum-team + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + rebase + brainstorm commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"

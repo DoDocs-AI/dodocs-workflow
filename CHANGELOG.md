@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.14] - 2026-02-25
+
+- feat: expand frontend-dev agent with full mockup-driven implementation workflow (5-step process, mockup→production translation table, state machine patterns)
+
 ## [v1.5.13] - 2026-02-25
 
 - feat: move mockups to docs/features/<slug>/mockups/ and add standalone Vite dev server per feature (no router integration)

@@ -27,11 +27,11 @@ Your job is to cross-check mockup component source files against the Feature Bri
 ## Step 1 — Inventory Mockup Files
 
 List all files in `docs/features/<slug>/mockups/`:
+- Record whether `AppIntegrationView.tsx` (or `.vue`) exists — this is the full-app shell view
 - Record all `USxx*.tsx` (or `.vue`, `.jsx`, etc.) component files
 - Record whether `index.tsx` (or `index.vue`) exists
 
-If `docs/features/<slug>/mockups/` does not exist, check for `docs/features/<slug>/mockups/` (fallback HTML path).
-If neither exists: write FAIL immediately — "No mockup files found at docs/features/<slug>/mockups/".
+If `docs/features/<slug>/mockups/` does not exist: write FAIL immediately — "No mockup files found at docs/features/<slug>/mockups/".
 
 ## Step 2 — Read Feature Brief
 
@@ -78,15 +78,18 @@ Search within each file for:
 
 Result per file: FULL (all 4 states) or PARTIAL (missing one or more) with list of missing
 
-### Check 4: Navigation Entry Point
+### Check 4: App Integration View
 
-Search all mockup files for evidence of a navigation link to the feature:
-- React Router `<Link>`, `useNavigate`
-- Vue Router `<router-link>`
-- Any `NavItem`, `MenuItem`, `SidebarItem`, or similar navigation component
-- Or: a button/link in `index.tsx` that leads to the feature screens
+Verify `AppIntegrationView.tsx` (or `.vue`) exists and is wired correctly:
 
-Result: PRESENT or MISSING
+- **File exists**: `AppIntegrationView.tsx` is present in the mockups folder
+- **Full shell**: search for sidebar/layout markup — evidence the real app shell is reproduced (nav items, layout, shell component imports)
+- **Existing nav items**: search for at least 2 existing nav item labels copied from the real app
+- **New nav item**: search for `isNew`, `New` badge, or `NEW_NAV_ITEM` — the feature's nav entry is highlighted
+- **Feature screens rendered**: search for imports of `US01*` or `US02*` components inside `AppIntegrationView`
+- **Listed first in index**: check `index.tsx` — `AppIntegrationView` should appear before all `USxx` entries
+
+Result: PRESENT (all sub-checks pass) | PARTIAL (some sub-checks fail, list which) | MISSING (file not found)
 
 ### Check 5: Destructive Action Confirmation
 
@@ -138,11 +141,16 @@ Write `docs/features/<slug>/MOCKUP-VALIDATION.md`:
 
 ---
 
-## 4. Navigation Entry Point
+## 4. App Integration View
 
-| Check | Result | Evidence |
-|-------|--------|---------|
-| Feature reachable from navigation | PRESENT | Link in index.tsx |
+| Sub-check | Result | Evidence |
+|-----------|--------|---------|
+| AppIntegrationView.tsx exists | PRESENT | — |
+| Full app shell reproduced | PRESENT | Sidebar markup, layout components |
+| Existing nav items included | PRESENT | 'Dashboard', 'Projects', ... |
+| New feature nav item with badge | PRESENT | `isNew`, "New" badge |
+| Feature screens rendered inside shell | PRESENT | US01MainView imported and rendered |
+| Listed first in index.tsx | PRESENT | SCREENS[0] = app-integration |
 
 ---
 
@@ -169,10 +177,10 @@ Write `docs/features/<slug>/MOCKUP-VALIDATION.md`:
 
 ## Summary
 
+- App integration view: Present / Partial / Missing
 - User stories: 2/3 covered (1 missing)
 - Acceptance criteria: 8/10 covered (2 missing)
 - State coverage: 1/2 fully covered
-- Navigation entry: Present
 - Destructive confirmations: 1/2 present
 ```
 

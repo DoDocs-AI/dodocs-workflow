@@ -39,7 +39,7 @@ Read the **Test Environment** section from the project config.
 
 ### If `Docker Compose File` is set (Docker Isolation mode):
 
-1. **Find ONE free host port** — for the frontend service only:
+1. **Find TWO free host ports** — one for frontend, one for backend:
    ```bash
    python3 -c "
    import socket
@@ -48,7 +48,9 @@ Read the **Test Environment** section from the project config.
            with socket.socket() as s:
                try: s.bind(('',p)); return p
                except: pass
-   print(free_port(4000))
+   fe = free_port(4000)
+   be = free_port(fe + 1)
+   print(fe, be)
    "
    ```
 
@@ -57,14 +59,17 @@ Read the **Test Environment** section from the project config.
    PROJECT_NAME=$(echo "<app-name>-<feature-name>" | tr '/_' '--' | tr '[:upper:]' '[:lower:]')
    ```
 
-3. **Generate override file** `docker-compose.test.<safe-feature-name>.yml` — only expose the frontend service, all others stay internal:
+3. **Generate override file** `docker-compose.test.<safe-feature-name>.yml` — expose both frontend and backend services on the allocated host ports, all others stay internal:
    ```yaml
    services:
      <Frontend Service Name>:
        ports:
-         - "<allocated-host-port>:<Frontend Internal Port>"
+         - "<fe-host-port>:<Frontend Internal Port>"
+     <Backend Service Name>:
+       ports:
+         - "<be-host-port>:<Backend Internal Port>"
    ```
-   All other services (backend, postgres, redis, minio, etc.) have NO ports section — they remain accessible only within the Docker network.
+   All other services (postgres, redis, minio, etc.) have NO ports section — they remain accessible only within the Docker network.
 
 4. **Start infra first** (non-app services: postgres, redis, minio, etc.) using the standard **Start DB** and **Start Storage** commands.
 
@@ -75,11 +80,11 @@ Read the **Test Environment** section from the project config.
    ```
    The `--build` flag builds Docker images from source before starting. This must always be used on initial startup.
 
-6. **Wait for startup** — poll the backend health endpoint from inside the Docker network (up to 90s):
+6. **Wait for startup** — poll the backend health endpoint via the exposed host port (up to 90s):
    ```bash
-   docker run --rm --network <PROJECT_NAME>_default \
-     curlimages/curl sh -c \
-     'for i in $(seq 1 30); do curl -sf http://<Backend Service Name>:<Backend Internal Port>/health && exit 0 || sleep 3; done; exit 1'
+   for i in $(seq 1 30); do
+     curl -sf http://localhost:<be-host-port>/health && break || sleep 3
+   done
    ```
 
 7. **Write TEST-ENV.md** to `docs/features/<feature-name>/TEST-ENV.md`:
@@ -87,9 +92,10 @@ Read the **Test Environment** section from the project config.
    # Test Environment: <feature-name>
 
    ## Allocated Ports
-   - **Test Frontend URL**: http://localhost:<fe-host-port>   ← for manual-tester (playwright-cli on host)
+   - **Test Frontend URL**: http://localhost:<fe-host-port>
+   - **Test Backend URL**: http://localhost:<be-host-port>
 
-   ## Internal URLs (Docker network, for automated tests)
+   ## Internal URLs (Docker network)
    - **Internal Frontend URL**: http://<Frontend Service Name>:<Frontend Internal Port>
    - **Internal Backend URL**: http://<Backend Service Name>:<Backend Internal Port>
 
@@ -162,6 +168,14 @@ docker compose -f <Docker Compose File> -f docker-compose.test.<safe-feature-nam
 ```
 `--force-recreate` ensures all containers are recreated fresh for a clean final verification.
 
+### Teardown after Integration Verified (Docker Isolation mode only)
+Once integration verification passes, immediately tear down the test environment:
+```bash
+docker compose -p <PROJECT_NAME> down
+rm -f docker-compose.test.<safe-feature-name>.yml
+```
+Append to Timeline: `- [timestamp] tech-lead: test Docker environment torn down`
+
 ## 9. Rebase on Main + Migration Check (before PR)
 Before creating the PR, you MUST do the following:
 
@@ -222,15 +236,8 @@ Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool 
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
-## 11. Finalize, Teardown, and Commit PROGRESS.md (after PR is created)
-After the PR is created, if Docker Isolation mode was used, tear down the test environment:
-```bash
-docker compose -p <PROJECT_NAME> down
-rm -f docker-compose.test.<safe-feature-name>.yml
-```
-Append to Timeline: `- [timestamp] tech-lead: test Docker environment torn down`
-
-Then finalize the PROGRESS.md and commit it to git:
+## 11. Finalize and Commit PROGRESS.md (after PR is created)
+After the PR is created, finalize the PROGRESS.md and commit it to git:
 
 1. **Update `## Session Cost`** in PROGRESS.md:
    - Fill in the feature branch name (replace `feature/<feature-name>` placeholder)

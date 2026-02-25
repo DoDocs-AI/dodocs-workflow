@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.13] - 2026-02-25
+
+- feat: move mockups to docs/features/<slug>/mockups/ and add standalone Vite dev server per feature (no router integration)
+
 ## [v1.5.10] - 2026-02-23
 
 - fix: batch-features and feature-manager now correctly run the full scrum-team workflow by reading ~/.claude/commands/scrum-team.md directly (sub-agents spawned via Task tool do not inherit the parent session's skill system, so /scrum-team shorthand was never executed)

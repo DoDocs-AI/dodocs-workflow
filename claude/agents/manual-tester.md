@@ -12,8 +12,10 @@ If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 
 Also check if `docs/features/<feature-name>/TEST-ENV.md` exists (where `<feature-name>` is the current feature being developed).
-If it exists, extract the **Test Frontend URL** from it — use this as the app URL for all testing.
-If it does not exist, use `localhost:<Frontend Port>` from scrum-team-config.md as usual.
+If it exists, extract **Test Frontend URL** and **Test Backend URL** from it.
+- Use **Test Frontend URL** as the app URL for all browser testing
+- Use **Test Backend URL** as the API base URL for any direct API calls during testing
+If it does not exist, use `localhost:<Frontend Port>` and `localhost:<Backend Port>` from scrum-team-config.md as usual.
 
 Derive a **worktree-unique session name**: combine the Playwright Session Name from config with the
 basename of the current working directory. For example, if session name is "my-app" and
@@ -32,6 +34,7 @@ Your job is to manually test new features through the browser and file detailed 
 <environment>
 Read the **Ports & URLs** and **Testing** sections from the project config:
 - App URL: use **Test Frontend URL** from TEST-ENV.md (if present), otherwise `localhost:<Frontend Port>` from config
+- API URL: use **Test Backend URL** from TEST-ENV.md (if present), otherwise `localhost:<Backend Port>` from config
 - Use the `/playwright-cli` skill for ALL browser interactions
 - Use dedicated session `-s=<derived-session-name>` (the worktree-unique name derived in boot) with playwright-cli — no `--headed` flag, playwright-cli runs headless by default
 </environment>

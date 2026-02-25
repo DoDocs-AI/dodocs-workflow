@@ -77,6 +77,8 @@ Spawn these teammates using their agent definitions from `~/.claude/agents/`. **
 | backend-dev-1 | `backend-dev` | `bypassPermissions` | Owns all database migrations |
 | backend-dev-2 | `backend-dev` | `bypassPermissions` | Coordinates with backend-dev-1, never creates migrations |
 | tech-lead | `tech-lead` | `bypassPermissions` | |
+| mockup-designer | `mockup-designer` | `bypassPermissions` | Skipped if SIZE=small or daytime-prep mockups already exist |
+| mockup-validator | `mockup-validator` | `bypassPermissions` | Skipped if SIZE=small or daytime-prep mockups already exist |
 | qa-engineer | `qa-engineer` | `bypassPermissions` | |
 | qa-automation | `qa-automation` | `bypassPermissions` | |
 | manual-tester | `manual-tester` | `bypassPermissions` | |
@@ -103,10 +105,10 @@ Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypas
 
 Otherwise, spawn ux-designer and architect simultaneously once the Feature Brief is ready:
 
-**Before spawning ux-designer:** Check if `src/mockups/<feature-slug>/` exists (where `<feature-slug>` is the kebab-case feature name). If it exists, append the following mockup context to the ux-designer's prompt:
+**Before spawning ux-designer:** Check if `docs/features/<feature-slug>/mockups/` exists (where `<feature-slug>` is the kebab-case feature name). If it exists, append the following mockup context to the ux-designer's prompt:
 ```
 Framework-native mockup components were approved by the human during daytime preparation.
-Location: src/mockups/<feature-slug>/  (one .tsx/.vue file per screen)
+Location: docs/features/<feature-slug>/mockups/  (one .tsx/.vue file per screen)
 Read index.tsx for the full screen overview, then read each USxx*.tsx.
 Your UX-DESIGN.md MUST align with the approved mockup structure. Do not redesign
 approved screens. Enrich with: keyboard navigation, accessibility, responsive behavior,
@@ -114,9 +116,9 @@ micro-interactions, and transition details not captured in mockups.
 Reference mockup filenames inline: "As shown in US01MainView.tsx, ..."
 ```
 
-**Before spawning architect:** Check if `src/mockups/<feature-slug>/` exists. If it exists, append to the architect's prompt:
+**Before spawning architect:** Check if `docs/features/<feature-slug>/mockups/` exists. If it exists, append to the architect's prompt:
 ```
-Approved mockup components exist at src/mockups/<feature-slug>/.
+Approved mockup components exist at docs/features/<feature-slug>/mockups/.
 Read them to understand the frontend component scope and structure required.
 These are the approved screens — your ARCHITECTURE.md frontend component list
 should align with the mockup component structure.
@@ -127,17 +129,54 @@ should align with the mockup component structure.
   - Mode: `plan` when AUTO_MODE=false AND SIZE=large; `bypassPermissions` when AUTO_MODE=true OR SIZE=medium
   - If AUTO_MODE=true, append `AUTO_MODE=true` to the architect's prompt
 
-Both agents work from the Feature Brief in parallel. The architect does NOT need to wait for UX Design.
+Both agents work from the Feature Brief in parallel. The architect does NOT need to wait
+for UX Design.
+
+**Mockup generation (after ux-designer + architect complete):**
+
+Check if `docs/features/<feature-slug>/mockups/` already exists (created by daytime preparation):
+
+- **If it DOES exist (daytime-prep mockups)**: Skip mockup-designer and mockup-validator.
+  The existing mockups count as already approved. Proceed directly to validation below.
+
+- **If it does NOT exist**: spawn the mockup pipeline sequentially:
+  1. Spawn **mockup-designer** with `mode: "bypassPermissions"`. Pass the feature slug and
+     a note: "Generate framework-native mockup components from FEATURE-BRIEF.md and UX-DESIGN.md.
+     Read existing UI components and patterns from the codebase before creating any file."
+     Wait for completion.
+  2. Spawn **mockup-validator** with `mode: "bypassPermissions"`. Pass the feature slug.
+     Wait for completion.
+  3. If mockup-validator reports FAILED:
+     - Re-spawn mockup-designer with the note: "MOCKUP-VALIDATION.md reported failures.
+       Fix the identified issues and regenerate the mockup components." Wait for completion.
+     - Re-spawn mockup-validator. Wait for completion.
+     - If still FAILED after retry: log the failures and proceed (do not block the workflow).
 
 **VALIDATE Phase 2 artifacts** before proceeding to the user checkpoint:
-- Read `<feature-docs>/<feature-name>/ARCHITECTURE.md` — must exist and contain at minimum one of: backend endpoints section OR frontend components section, AND a file inventory section.
-- Read `<feature-docs>/<feature-name>/UX-DESIGN.md` — must exist and contain at least one user flow.
-- If ARCHITECTURE.md is missing or incomplete: re-spawn `architect` (same mode as before) with the note: "ARCHITECTURE.md is missing or incomplete. Please regenerate it covering: backend endpoints, database entities, frontend components, and file inventory." Wait for completion, re-validate.
-- If UX-DESIGN.md is missing: re-spawn `ux-designer` with `bypassPermissions` with the note: "UX-DESIGN.md is missing. Please produce it from the Feature Brief and your Phase 1 research." Wait for completion.
+- Read `<feature-docs>/<feature-name>/ARCHITECTURE.md` — must exist and contain at minimum
+  one of: backend endpoints section OR frontend components section, AND a file inventory section.
+- Read `<feature-docs>/<feature-name>/UX-DESIGN.md` — must exist and contain at least one
+  user flow.
+- If ARCHITECTURE.md is missing or incomplete: re-spawn `architect` (same mode as before)
+  with the note: "ARCHITECTURE.md is missing or incomplete. Please regenerate it covering:
+  backend endpoints, database entities, frontend components, and file inventory."
+  Wait for completion, re-validate.
+- If UX-DESIGN.md is missing: re-spawn `ux-designer` with `bypassPermissions` with the note:
+  "UX-DESIGN.md is missing. Please produce it from the Feature Brief and your Phase 1 research."
+  Wait for completion.
 
 **USER CHECKPOINT** (conditional):
-- **AUTO_MODE=true**: Log "AUTO_MODE: Architecture and UX Design auto-approved." and proceed immediately to Phase 3.
-- **AUTO_MODE=false**: After both UX-DESIGN.md and ARCHITECTURE.md are complete, present both to the user and ask: "Do the UX flows and architecture look right? Any changes before we proceed to development?" Wait for user approval before continuing.
+- **AUTO_MODE=true**: Log "AUTO_MODE: Architecture, UX Design and Mockups auto-approved."
+  and proceed immediately to Phase 3.
+- **AUTO_MODE=false**: Present the full artifact set to the user and ask:
+  "UX flows, architecture, and mockups are ready. Do they look right? Any changes before
+  we proceed to development?"
+  Show the user:
+  - `<feature-docs>/<feature-name>/UX-DESIGN.md`
+  - `<feature-docs>/<feature-name>/ARCHITECTURE.md`
+  - `<feature-docs>/<feature-name>/MOCKUP-VALIDATION.md` (or note that daytime-prep mockups
+    were used if applicable)
+  Wait for user approval before continuing.
 
 ### Phase 3: Task Breakdown + Git Setup
 Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
@@ -255,10 +294,8 @@ Phase 1 — Requirements + UX Research
 | UX-DESIGN.md | Pending | ux-designer |
 | ARCHITECTURE.md | Pending | architect |
 
-<!-- If src/mockups/<feature-slug>/ exists (daytime prep was done), pre-fill these two rows as Done:
-| src/mockups/<feature-slug>/ | Done | mockup-designer |
-| MOCKUP-VALIDATION.md | Done | mockup-validator |
--->
+| docs/features/<feature-slug>/mockups/ | Pending | mockup-designer |
+| MOCKUP-VALIDATION.md | Pending | mockup-validator |
 
 ## Development Tasks
 <!-- scrum-master populates this after Phase 4 -->
@@ -290,6 +327,10 @@ Phase 1 — Requirements + UX Research
 | PR URL | — |
 | Completed | <!-- tech-lead: fill with completion date --> |
 ```
+
+> **Note on mockup rows**: When creating PROGRESS.md, if `docs/features/<feature-slug>/mockups/` already
+> exists (daytime prep was done), pre-fill both mockup rows as `Done` instead of `Pending`.
+> Otherwise leave them as `Pending` — the mockup agents will update them during Phase 2.
 
 ## Retest Mode
 

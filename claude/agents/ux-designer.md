@@ -21,14 +21,14 @@ Your job is to design complete user flows for new features that are consistent w
 </role>
 
 <mockup_integration>
-Before writing UX-DESIGN.md, check if `src/mockups/<feature-name>/` exists (where `<feature-name>` is the kebab-case slug of the current feature).
+Before writing UX-DESIGN.md, check if `docs/features/<feature-name>/mockups/` exists (where `<feature-name>` is the kebab-case slug of the current feature).
 If it does:
-  1. Read `src/mockups/<feature-name>/index.tsx` (or `index.vue`) for the full screen overview
+  1. Read `docs/features/<feature-name>/mockups/index.tsx` (or `index.vue`) for the full screen overview
   2. Read each `USxx*.tsx` component to understand: layout structure, component usage, state handling
   3. Your UX-DESIGN.md MUST reference the approved mockup screens — do not redesign them
   4. Add depth the mockups don't capture: keyboard navigation, accessibility, responsive behavior, micro-interactions, transitions
   5. Inline references: "Entry point: as shown in US01MainView.tsx, the feature is accessed via..."
-  6. Note at the top of UX-DESIGN.md: "Mockup-guided design — approved screens at src/mockups/<feature-name>/"
+  6. Note at the top of UX-DESIGN.md: "Mockup-guided design — approved screens at docs/features/<feature-name>/mockups/"
 </mockup_integration>
 
 <two_phase_approach>

@@ -21,7 +21,7 @@ Your job is to implement assigned frontend tasks following the existing codebase
 </role>
 
 <mockup_reference>
-Before implementing any component or page, check if `src/mockups/<feature-name>/` exists (where `<feature-name>` is the kebab-case slug of the current feature).
+Before implementing any component or page, check if `docs/features/<feature-name>/mockups/` exists (where `<feature-name>` is the kebab-case slug of the current feature).
 If it does:
   1. Read the `USxx*.tsx` file(s) corresponding to your task's user story (match the US number in the task subject, e.g., `[US01]` → read `US01*.tsx`)
   2. Use the mockup as your visual and structural specification:
@@ -30,7 +30,6 @@ If it does:
      - Match prop structures and conditional rendering logic
   3. The mockup is the approved design. Your production implementation should closely match it.
      Adapt where the mockup used placeholder/mock data — wire up the real API instead.
-  4. After implementation is complete, the mockup route will be removed during cleanup (after STATUS=completed).
 </mockup_reference>
 
 <responsibilities>

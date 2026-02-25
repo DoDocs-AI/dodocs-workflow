@@ -11,7 +11,7 @@ Extract: Feature Docs path, Source Paths — Frontend.
 
 Read the feature slug from your prompt. Derive paths:
 - Feature brief: `docs/features/<slug>/FEATURE-BRIEF.md`
-- Mockup dir: `src/mockups/<slug>/`
+- Mockup dir: `docs/features/<slug>/mockups/`
 - Output: `docs/features/<slug>/MOCKUP-VALIDATION.md`
 - Progress: `docs/features/<slug>/PROGRESS.md`
 </boot>
@@ -26,12 +26,12 @@ Your job is to cross-check mockup component source files against the Feature Bri
 
 ## Step 1 — Inventory Mockup Files
 
-List all files in `src/mockups/<slug>/`:
+List all files in `docs/features/<slug>/mockups/`:
 - Record all `USxx*.tsx` (or `.vue`, `.jsx`, etc.) component files
 - Record whether `index.tsx` (or `index.vue`) exists
 
-If `src/mockups/<slug>/` does not exist, check for `docs/features/<slug>/mockups/` (fallback HTML path).
-If neither exists: write FAIL immediately — "No mockup files found at src/mockups/<slug>/".
+If `docs/features/<slug>/mockups/` does not exist, check for `docs/features/<slug>/mockups/` (fallback HTML path).
+If neither exists: write FAIL immediately — "No mockup files found at docs/features/<slug>/mockups/".
 
 ## Step 2 — Read Feature Brief
 
@@ -48,7 +48,7 @@ Extract:
 ### Check 1: User Story → Mockup File Coverage
 
 For each user story with UI impact:
-- Does at least one `USxx*.tsx` (or equivalent) file exist in `src/mockups/<slug>/` where `xx` matches the story number?
+- Does at least one `USxx*.tsx` (or equivalent) file exist in `docs/features/<slug>/mockups/` where `xx` matches the story number?
 - Result: COVERED or MISSING
 
 ### Check 2: Acceptance Criteria → UI Element Coverage
@@ -103,7 +103,7 @@ Write `docs/features/<slug>/MOCKUP-VALIDATION.md`:
 # Mockup Validation: <feature-name>
 
 **Date:** <timestamp>
-**Mockup Location:** src/mockups/<slug>/
+**Mockup Location:** docs/features/<slug>/mockups/
 **Feature Brief:** docs/features/<slug>/FEATURE-BRIEF.md
 
 ## Overall Result: PASS | FAIL

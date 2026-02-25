@@ -89,7 +89,7 @@ Spawn Task:
     Feature name: <feature-name>
 
     Read docs/features/<slug>/FEATURE-BRIEF.md for requirements.
-    Create mockup components at src/mockups/<slug>/
+    Create mockup components at docs/features/<slug>/mockups/
     Write 'mockups-ready' to docs/features/<slug>/STATUS when done.
   """
 ```
@@ -132,7 +132,7 @@ Spawn Task:
     FEATURE_SLUG=<slug>
     Feature name: <feature-name>
 
-    Validate src/mockups/<slug>/ against docs/features/<slug>/FEATURE-BRIEF.md
+    Validate docs/features/<slug>/mockups/ against docs/features/<slug>/FEATURE-BRIEF.md
     Write results to docs/features/<slug>/MOCKUP-VALIDATION.md
   """
 ```
@@ -181,9 +181,12 @@ If still failing after 3 loops: fall through to manual review option.
 **If "I'll review files first":**
 Print:
 ```
-Mockup files: src/mockups/<slug>/
+Mockup files: docs/features/<slug>/mockups/
 Feature brief: docs/features/<slug>/FEATURE-BRIEF.md
 Validation report: docs/features/<slug>/MOCKUP-VALIDATION.md
+
+To preview while editing:
+  cd docs/features/<slug>/mockups && npx vite --port 3100
 
 Make your changes, then tell me to "continue" when ready.
 ```
@@ -201,15 +204,16 @@ Print:
 ```
 Mockups are ready for review.
 
-Start the dev server if not already running:
-  npm run dev
+Start the mockup dev server from the feature folder:
+  cd docs/features/<slug>/mockups
+  npx vite --port 3100
   — or —
-  make dev-frontend
+  npm run dev
 
-Then visit:
-  http://localhost:<Frontend Port>/mockups/<slug>
+Then open:
+  http://localhost:3100
 
-Source files: src/mockups/<slug>/
+Source files: docs/features/<slug>/mockups/
   - index.tsx          — navigation hub (all screens)
   - US01*.tsx          — screen for user story 01
   - US02*.tsx          — screen for user story 02
@@ -254,7 +258,7 @@ prompt = """
 
   <user's change description>
 
-  Update the mockup components at src/mockups/<slug>/ accordingly.
+  Update the mockup components at docs/features/<slug>/mockups/ accordingly.
   Follow the same patterns — use real project components, keep state toggles.
 """
 ```
@@ -297,7 +301,7 @@ If "Abandon": print "Feature '<slug>' abandoned. Folder kept at docs/features/<s
 | File | Status | Author |
 |------|--------|--------|
 | FEATURE-BRIEF.md | Pending | product-owner |
-| src/mockups/<slug>/ | Pending | mockup-designer |
+| docs/features/<slug>/mockups/ | Pending | mockup-designer |
 | MOCKUP-VALIDATION.md | Pending | mockup-validator |
 | UX-DESIGN.md | Pending | ux-designer |
 | ARCHITECTURE.md | Pending | architect |

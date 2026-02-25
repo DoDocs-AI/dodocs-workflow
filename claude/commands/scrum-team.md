@@ -35,6 +35,17 @@ Read `.claude/scrum-team-config.md` using the Read tool.
 If the file does not exist, STOP immediately and tell the user:
 "No scrum-team config found for this project. Run `dodocs-workflow init` or copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 Extract: ALL sections — you need App Identity, Tech Stack, Ports & URLs, and all paths/commands.
+Also extract (optional fields, use defaults if absent):
+- **Mockup Component Schema**: path to UI component schema/registry file (empty string if not set)
+- **Mockup Preview Port**: port for the mockup Vite dev server (default `3100` if not set)
+
+**Step 3 — Create feature branch:**
+- Skip this step if `--retest` flag is present in $ARGUMENTS.
+- Derive the branch slug from the clean feature name: lowercase, spaces → hyphens, strip special characters.
+  Example: "Notification Center" → `notification-center`
+- Run: `git checkout -b feature/<slug>`
+- If the branch already exists (command fails), check it out instead: `git checkout feature/<slug>`
+- Print: "Feature branch: feature/<slug>"
 </boot>
 
 ## Team Size Configuration
@@ -142,7 +153,10 @@ Check if `docs/features/<feature-slug>/mockups/` already exists (created by dayt
 - **If it does NOT exist**: spawn the mockup pipeline sequentially:
   1. Spawn **mockup-designer** with `mode: "bypassPermissions"`. Pass the feature slug and
      a note: "Generate framework-native mockup components from FEATURE-BRIEF.md and UX-DESIGN.md.
-     Read existing UI components and patterns from the codebase before creating any file."
+     Read existing UI components and patterns from the codebase before creating any file.
+     Output directory: docs/features/<feature-slug>/mockups/ (all files go here).
+     Mockup preview port: <MOCKUP_PORT from config, default 3100>.
+     Mockup Component Schema: <MOCKUP_SCHEMA_PATH from config — if non-empty, read this file first and use it as the authoritative component reference>."
      Wait for completion.
   2. Spawn **mockup-validator** with `mode: "bypassPermissions"`. Pass the feature slug.
      Wait for completion.
@@ -165,12 +179,19 @@ Check if `docs/features/<feature-slug>/mockups/` already exists (created by dayt
   "UX-DESIGN.md is missing. Please produce it from the Feature Brief and your Phase 1 research."
   Wait for completion.
 
+**Start mockup preview server** (before user checkpoint, skip if AUTO_MODE=true):
+- Run in background: `cd docs/features/<feature-slug>/mockups && npm run dev`
+  (uses project root `node_modules` automatically — no install needed)
+- The server starts on the configured Mockup Preview Port (default 3100).
+- Print: "Mockup preview running at http://localhost:<MOCKUP_PORT>"
+
 **USER CHECKPOINT** (conditional):
 - **AUTO_MODE=true**: Log "AUTO_MODE: Architecture, UX Design and Mockups auto-approved."
   and proceed immediately to Phase 3.
 - **AUTO_MODE=false**: Present the full artifact set to the user and ask:
-  "UX flows, architecture, and mockups are ready. Do they look right? Any changes before
-  we proceed to development?"
+  "UX flows, architecture, and mockups are ready. Mockup preview is running at
+  http://localhost:<MOCKUP_PORT> — open it to review screens interactively.
+  Any changes before we proceed to development?"
   Show the user:
   - `<feature-docs>/<feature-name>/UX-DESIGN.md`
   - `<feature-docs>/<feature-name>/ARCHITECTURE.md`
@@ -178,9 +199,8 @@ Check if `docs/features/<feature-slug>/mockups/` already exists (created by dayt
     were used if applicable)
   Wait for user approval before continuing.
 
-### Phase 3: Task Breakdown + Git Setup
-Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
-- **tech-lead** creates a feature branch: `git checkout -b feature/<feature-name>`
+### Phase 3: Task Breakdown
+Spawn scrum-master with `mode: "bypassPermissions"`:
 - **scrum-master** reads the Architecture doc and creates all tasks with these rules:
   - **Migration ownership**: Only `backend-dev-1` creates database migrations. `backend-dev-2` tasks that need migrations are blocked by `backend-dev-1`'s migration tasks
   - **No file conflicts**: No two developers edit the same file
@@ -201,6 +221,26 @@ Spawn agents simultaneously according to the SIZE configuration (see Team Size C
 - **tech-lead**: runs compile gate (compile backend + frontend + lint), starts the app, monitors for build/runtime issues
 - **manual-tester**: waits for "app ready" signal, then begins testing each user story as soon as all tasks for THAT story are code-reviewed AND qa-engineer's test cases for that story are ready — does NOT wait for all stories to complete
 - **qa-automation** (medium/large only): writes E2E tests per user story — after manual-tester passes all scenarios for a user story, qa-automation writes the Playwright tests for that story
+
+**Periodic progress report** — print after every agent message received during Phase 4:
+
+Call TaskList and output a compact status block in this exact format:
+```
+─────────────────────────────────────────
+  BACKEND  ██████████  6/6  done ✅
+  FRONTEND ░░░░░░░░░░  0/5  pending  (T16 in progress by frontend-dev-1)
+  QA       ██████████  test cases ready ✅
+  COMPILE  🔨 tech-lead running now
+  TESTING  ⏳ waiting for compile gate
+─────────────────────────────────────────
+```
+Rules for the report:
+- **BACKEND / FRONTEND**: count tasks assigned to backend-dev-* / frontend-dev-*. Fill bar: `█` for each completed, `░` for each pending (scale to 10 chars). Show `done ✅` when all complete, otherwise show the in-progress task ID and owner.
+- **QA**: `test cases ready ✅` when qa-engineer is done, otherwise `⏳ writing test cases`.
+- **COMPILE**: `✅ app ready` after tech-lead signals compile gate passed; `🔨 running now` while active; `⏳ waiting` before started.
+- **TESTING**: `✅ all stories pass` when manual-tester is done; show current story being tested otherwise.
+- Omit rows that don't apply to the current SIZE (e.g., no BACKEND row for small).
+- Print the report **after each agent idle notification** — do not wait for all agents to finish.
 
 ### Phase 4 Flow:
 ```
@@ -254,7 +294,7 @@ Only then does tech-lead signal "app ready" for testing to begin.
 
 ## Git Strategy
 
-- **Feature branch**: `feature/<feature-name>` created at Phase 3
+- **Feature branch**: `feature/<feature-name>` created at boot (before Phase 1)
 - **Atomic commits**: Each completed task = one commit with descriptive message
 - **Commit format**: `<scope>: <description>` (e.g., `backend: add User entity and migration`)
 - **PR**: Created at Phase 6 by tech-lead after all verification passes
@@ -281,7 +321,7 @@ Phase 1 — Requirements + UX Research
 |-------|--------|----------|
 | Phase 1: Requirements + UX Research | In Progress | product-owner, ux-designer |
 | Phase 2: UX Design + Architecture | Pending | ux-designer, architect |
-| Phase 3: Task Breakdown + Git | Pending | scrum-master, tech-lead |
+| Phase 3: Task Breakdown | Pending | scrum-master |
 | Phase 4: Build + Test | Pending | all |
 | Phase 5: Integration Verification | Pending | — |
 | Phase 6: Ship | Pending | — |

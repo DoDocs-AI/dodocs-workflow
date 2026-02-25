@@ -39,6 +39,8 @@
 - **Services (API calls)**: <e.g., src/services/>
 - **Types**: <e.g., src/types/>
 - **Router**: <e.g., src/router.tsx>
+- **Mockup Component Schema**: <optional: path to component schema or registry file used for mockup generation, e.g., src/components/ui/index.ts or src/components/schema.json — leave blank if none>
+- **Mockup Preview Port**: <optional: port for the mockup Vite dev server, default 3100>
 
 ## Source Paths — Testing
 

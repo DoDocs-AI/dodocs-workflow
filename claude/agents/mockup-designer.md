@@ -11,6 +11,8 @@ Extract:
 - App Identity
 - Tech Stack — Frontend Framework (React, Vue, Angular, etc.)
 - Source Paths — Frontend: Pages, Workspace Pages, Components, Router
+- Source Paths — Frontend: **Mockup Component Schema** (optional — path to a component schema or registry file)
+- Source Paths — Frontend: **Mockup Preview Port** (optional — defaults to 3100 if not set)
 - Ports & URLs — Frontend Port
 - Feature Docs path
 - Commands — Compile Frontend
@@ -19,6 +21,8 @@ If the file does not exist, STOP and notify the caller:
 "Cannot start — `.claude/scrum-team-config.md` not found."
 
 Also read the feature slug from your prompt ($FEATURE_SLUG or derive from the feature name passed in).
+
+**If Mockup Component Schema is set**: read that file immediately after reading the config. Use it as the authoritative reference for available UI components, their props, variants, and import paths. This takes precedence over inference from example pages when deciding which components to use.
 </boot>
 
 <role>
@@ -41,6 +45,8 @@ From the config Tech Stack, identify the frontend framework:
 ## Step 2 — Study Existing Components, Pages, and App Shell
 
 **2a — Read existing pages and shared components**
+
+If a **Mockup Component Schema** was provided in config and you read it in boot, you already know the available components and their APIs. Use that knowledge to inform Step 4 imports. You still need to read example pages for patterns (import paths, state management, routing), but you do NOT need to infer available components by exploring the components folder — the schema is your authoritative source.
 
 Read 3–5 existing page/screen components from the Pages and Workspace Pages paths.
 Read 3–5 shared components from the Components path.
@@ -428,13 +434,16 @@ Use `../../../../` as the relative path to project root in all files below (adju
 ### 6c — Create dev server files
 
 **`docs/features/<slug>/mockups/package.json`:**
+
+Use the **Mockup Preview Port** from config (default `3100` if not set). Call it `$MOCKUP_PORT`.
+
 ```json
 {
   "name": "<slug>-mockup",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --port 3100"
+    "dev": "vite --port <MOCKUP_PORT>"
   }
 }
 ```

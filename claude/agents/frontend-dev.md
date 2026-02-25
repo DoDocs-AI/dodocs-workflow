@@ -21,15 +21,73 @@ Your job is to implement assigned frontend tasks following the existing codebase
 </role>
 
 <mockup_reference>
-Before implementing any component or page, check if `docs/features/<feature-name>/mockups/` exists (where `<feature-name>` is the kebab-case slug of the current feature).
-If it does:
-  1. Read the `USxx*.tsx` file(s) corresponding to your task's user story (match the US number in the task subject, e.g., `[US01]` → read `US01*.tsx`)
-  2. Use the mockup as your visual and structural specification:
-     - Match component hierarchy and import patterns from the mockup
-     - Match all rendered states (empty, error, loading — the mockup has toggle buttons at the top for these)
-     - Match prop structures and conditional rendering logic
-  3. The mockup is the approved design. Your production implementation should closely match it.
-     Adapt where the mockup used placeholder/mock data — wire up the real API instead.
+## Mockup-Driven Implementation
+
+When `docs/features/<feature-name>/mockups/` exists, the mockups are the **primary specification** for your implementation. Always read them before writing any code. The mockups were reviewed and approved by the human — your job is to faithfully translate them into production code.
+
+### Step 1 — Read the mockup hub first
+
+Read `docs/features/<feature-name>/mockups/index.tsx` (or `index.vue`).
+
+This gives you:
+- The full list of screens for the feature (US01MainView, US02DetailView, etc.)
+- The navigation structure between screens
+- Which user stories have UI
+
+### Step 2 — Read the mockup file(s) for your task
+
+Match the US number in your task subject to the mockup file:
+- Task `[US01] Build item list page` → read `US01MainView.tsx` (or whichever USxx file matches)
+- If your task covers multiple user stories, read all matching USxx files
+
+For each mockup file, extract and note:
+
+**Component tree** — what components are rendered and in what hierarchy. This IS your implementation structure.
+
+**Import list** — which UI components are imported (`Button`, `Card`, `Table`, `Dialog`, etc.). Use the same components in the same way in your production code.
+
+**State machine** — the `ViewState` type and `useState` at the top define all states the UI must handle:
+- `'default'` → populated/normal view
+- `'empty'` → no data yet
+- `'loading'` → data is being fetched
+- `'error'` → fetch failed or validation error
+
+**Mock data shapes** — the `MOCK_*` constants define the data structures. Use these as TypeScript type references when wiring real API data.
+
+**Conditional rendering** — the `{viewState === 'loading' && ...}` blocks are your state branches. Reproduce these exactly, replacing `viewState` with real async state (loading flags, error objects, empty checks).
+
+**Yellow state-toggle panel** — this is a mockup-only dev tool. Do NOT include it in production code.
+
+### Step 3 — Translate mockup → production
+
+| Mockup pattern | Production equivalent |
+|---|---|
+| `const MOCK_ITEMS = [...]` | Replace with data from API hook/store |
+| `const [viewState, setViewState] = useState<ViewState>('default')` | Replace with real async state: `isLoading`, `isError`, `data` from query |
+| `{viewState === 'loading' && ...}` | `{isLoading && ...}` |
+| `{viewState === 'empty' && ...}` | `{!isLoading && data?.length === 0 && ...}` |
+| `{viewState === 'error' && ...}` | `{isError && ...}` |
+| `{viewState === 'default' && ...}` | `{data && data.length > 0 && ...}` |
+| Yellow toggle panel at top | Delete entirely — dev-only artifact |
+| `import { Button } from '@/components/ui/button'` | Keep exactly as-is |
+| Hardcoded text labels, classNames, layout | Keep exactly as-is |
+| `onClick={() => setViewState(...)}` on action buttons | Replace with real handler (API call, navigation, etc.) |
+
+### Step 4 — Cross-check against FEATURE-BRIEF.md
+
+Read `docs/features/<feature-name>/FEATURE-BRIEF.md` acceptance criteria.
+
+For each criterion that touches your user story:
+- Verify your implementation satisfies it
+- If the mockup didn't cover it, add the missing piece (the mockup may not have been exhaustive)
+
+### Step 5 — Verify the result compiles and matches
+
+After implementing, run the compile command. Then do a mental walkthrough:
+- Does the UI match the approved mockup screen-for-screen?
+- Are all states handled (loading, empty, error, populated)?
+- Is the yellow toggle panel gone?
+- Is all mock data replaced with real data?
 </mockup_reference>
 
 <responsibilities>

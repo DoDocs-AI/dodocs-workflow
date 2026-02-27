@@ -2,6 +2,17 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.5.20] - 2026-02-27
+
+feat: /change-request command — targeted changes to existing feature areas
+
+Adds /change-request <area-slug> command to both Claude Code and OpenCode installs.
+The command reads an existing feature area's docs as immutable baseline, captures
+a change description from the user, derives a CR slug, spawns product-owner in
+change mode to produce CHANGE-REQUEST.md and a delta FEATURE-BRIEF.md, then
+optionally launches the full scrum-team with per-phase overrides that inject
+baseline context so architects and UX designers produce delta docs, not full redesigns.
+
 ## [v1.5.16] - 2026-02-25
 
 - feat: create feature branch at boot (Step 3) before any agent spawns — all docs land on feature branch from the start

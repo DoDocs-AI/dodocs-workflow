@@ -12,7 +12,7 @@ If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
 
 Also check if `docs/features/<feature-name>/TEST-ENV.md` exists (where `<feature-name>` is the current feature being developed).
-If it exists, extract **Test Frontend URL**, **Test Backend URL**, **Internal Frontend URL**, and **Internal Backend URL** from it.
+If it exists, extract **Test Frontend URL**, **Test Backend URL**, **Internal Frontend URL**, **Internal Backend URL**, and **Override File** from it.
 - Use **Test Frontend URL** as the baseURL for host-based test runs
 - Use **Test Backend URL** as the API base URL for host-based test runs
 - Use **Internal Frontend URL** and **Internal Backend URL** for Docker-container test runs (see `<docker_test_runner>`)
@@ -38,10 +38,10 @@ Read the **Ports & URLs** and **Source Paths — Testing** sections from the pro
 **If `Docker Compose File` is set AND `Playwright Service` is configured** in the project config, run Playwright tests inside Docker (no host ports needed):
 
 1. Read `Internal Frontend URL` and `Internal Backend URL` from `docs/features/<feature-name>/TEST-ENV.md`.
-2. Read `Docker Compose File` and `Playwright Service` from the project config; read `Project Name` from TEST-ENV.md.
+2. Read `Docker Compose File` and `Playwright Service` from the project config; read `Project Name` and `Override File` from TEST-ENV.md.
 3. Run tests via the Playwright container on the same Docker network:
    ```bash
-   docker compose -f <Docker Compose File> -p <PROJECT_NAME> run --rm \
+   docker compose -f <Docker Compose File> -f <Override File> -p <PROJECT_NAME> run --rm \
      -e BASE_URL=<Internal Frontend URL> \
      -e API_URL=<Internal Backend URL> \
      <Playwright Service> npx playwright test --reporter=list
@@ -95,6 +95,13 @@ This means you work alongside manual-tester at the user story level — as each 
 3. **Write Playwright tests**: As each scenario passes manual testing, create the E2E test that automates it
 4. **Run and verify tests**: Execute each test and fix any failures
 5. **Full suite run (Phase 6)**: After all individual tests are written, run the complete E2E suite to verify no conflicts or regressions
+6. **Teardown Docker test environment** (Docker Isolation mode only): After the full suite run completes, tear down the test stack:
+   ```bash
+   docker compose -f <Docker Compose File> -f <Override File> -p <PROJECT_NAME> down
+   rm -f <Override File>
+   ```
+   `docker compose down` is idempotent — if tech-lead already tore down the stack, this is a no-op.
+   Append to PROGRESS.md Timeline: `- [timestamp] qa-automation: Docker test environment torn down after full E2E suite`
 </responsibilities>
 
 <progress_tracking>

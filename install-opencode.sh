@@ -95,6 +95,7 @@ COMMANDS=(
     "prepare-for-production"
     "dodocs-workflow"
     "dw-upgrade"
+    "change-request"
 )
 
 print_info "Installing commands..."
@@ -148,7 +149,7 @@ echo "Installed to: $OPENCODE_DIR"
 echo ""
 echo "Files:"
 echo "  ~/.opencode/agents/          - 21 agent definitions"
-echo "  ~/.opencode/commands/        - scrum-team + prepare-for-production + dodocs-workflow commands"
+echo "  ~/.opencode/commands/        - scrum-team + prepare-for-production + dodocs-workflow + change-request commands"
 echo "  ~/.opencode/statusline-dodocs-workflow.sh"
 echo "  ~/.opencode/scrum-team-config.template.md"
 echo ""

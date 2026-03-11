@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for Claude Code
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.20"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.21"
 CLAUDE_DIR="$HOME/.claude"
 VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
 
@@ -80,6 +80,21 @@ AGENTS=(
     "feature-manager"
     "mockup-designer"
     "mockup-validator"
+    "gtm-community"
+    "gtm-copywriter"
+    "gtm-crm"
+    "gtm-experiment"
+    "gtm-icp-discovery"
+    "gtm-lead-scoring"
+    "gtm-localization"
+    "gtm-market-research"
+    "gtm-metrics"
+    "gtm-outbound"
+    "gtm-paid-ads"
+    "gtm-proposal"
+    "gtm-reporting"
+    "gtm-seo-content"
+    "gtm-trend-monitor"
 )
 
 # Install agent files
@@ -108,6 +123,11 @@ COMMANDS=(
     "prepare-feature"
     "prepare-features"
     "change-request"
+    "gtm-team"
+    "apollo"
+    "linkedin"
+    "pipedrive"
+    "semrush"
 )
 
 print_info "Installing commands..."
@@ -133,6 +153,16 @@ fi
 chmod +x "$CLAUDE_DIR/docker/agent-entrypoint.sh"
 print_success "  agent-env.Dockerfile"
 print_success "  agent-entrypoint.sh"
+
+# Install skills/templates
+print_info "Installing skills..."
+mkdir -p "$CLAUDE_DIR/skills"
+if [ "$SOURCE" = "local" ]; then
+    cp "$SOURCE_DIR/skills/gtm-api-config.template.md" "$CLAUDE_DIR/skills/gtm-api-config.template.md"
+else
+    curl -fsSL "$REPO_URL/claude/skills/gtm-api-config.template.md" -o "$CLAUDE_DIR/skills/gtm-api-config.template.md"
+fi
+print_success "  gtm-api-config.template.md"
 
 # Install status line script
 print_info "Installing status line script..."
@@ -174,7 +204,7 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 25 agent definitions"
+echo "  ~/.claude/agents/          - 40 agent definitions"
 echo "  ~/.claude/commands/        - scrum-team + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + rebase + brainstorm + change-request commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"

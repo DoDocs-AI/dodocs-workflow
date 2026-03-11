@@ -1,0 +1,20 @@
+{
+  "update_id": 123456789,
+  "message": {
+    "message_id": 42,
+    "from": {
+      "id": 196294534,
+      "is_bot": false,
+      "first_name": "Anton",
+      "last_name": "Ignashev",
+      "username": "ignashev_anton"
+    },
+    "chat": {
+      "id": -4652099509,
+      "title": "SOL Support",
+      "type": "supergroup"
+    },
+    "date": 1710000000,
+    "text": "Check matchpoint logs for errors in the last hour"
+  }
+}

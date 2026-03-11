@@ -1,0 +1,22 @@
+# DoDocs Support Bot — Access Control
+
+team_members:
+  - username: ignashev_anton
+    telegram_chat_id: 196294534
+    name: Anton Ignashev
+    role: admin
+
+  - username: dangudkov
+    telegram_chat_id: 101672830
+    name: Dan Gudkov
+    role: admin
+
+  - username: dokuchaev_ev
+    telegram_chat_id: null
+    name: Evgeny Dokuchaev
+    role: admin
+
+escalation:
+  telegram_chat_id: -1001558680353
+  slack_channel: support-escalation
+  primary_contact: ignashev_anton

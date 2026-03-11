@@ -1,0 +1,25 @@
+state/
+.env
+*.pid
+logs/
+__pycache__/
+*.pyc
+.venv/
+repos/
+.playwright-cli/
+
+# Slack OAuth/debug response dumps (contain tokens)
+authorize.yml
+installed.yml
+reinstall.yml
+oauth.yml
+signin.yml
+verify.yml
+verify2.yml
+current.yml
+retry-result.yml
+bot-events.yml
+events.yml
+events-check.yml
+events-final.yml
+after-*.yml

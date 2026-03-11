@@ -1,0 +1,12 @@
+{
+  "type": "event_callback",
+  "event_id": "Ev0123456789",
+  "event": {
+    "type": "app_mention",
+    "user": "U0123456789",
+    "text": "<@U_BOT> check matchpoint pod health",
+    "ts": "1710000000.000100",
+    "channel": "C0123456789",
+    "channel_type": "channel"
+  }
+}

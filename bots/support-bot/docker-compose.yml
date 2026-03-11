@@ -1,0 +1,23 @@
+services:
+  support-bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: dodocs-support-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-2}
+    volumes:
+      - ${HOME}/.claude:/root/.claude-host:ro
+      - ${HOME}/.kube/config:/root/.kube/config:ro
+      - bot-state:/app/state
+      - repos-cache:/app/repos
+    ports:
+      - "8888:8888"  # Slack webhook
+
+volumes:
+  bot-state:
+  repos-cache:

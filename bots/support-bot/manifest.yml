@@ -1,0 +1,187 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "Slack API" [ref=e7] [cursor=pointer]:
+          - /url: https://api.slack.com
+          - img "Slack API" [ref=e8]
+        - search [ref=e9]:
+          - generic [ref=e11]:
+            - generic [ref=e12]: 
+            - textbox "Search" [ref=e13]
+        - generic [ref=e14]:
+          - link "Documentation" [ref=e15] [cursor=pointer]:
+            - /url: https://api.slack.com/#read_the_docs
+          - link "Tutorials" [ref=e16] [cursor=pointer]:
+            - /url: https://api.slack.com/tutorials
+          - link "Your apps" [ref=e17] [cursor=pointer]:
+            - /url: https://api.slack.com/apps
+    - generic [ref=e18]:
+      - navigation "Main Menu" [ref=e19]:
+        - combobox "app_select" [ref=e21] [cursor=pointer]:
+          - generic [ref=e22]:
+            - img [ref=e23]
+            - generic [ref=e25]: dodocs-customer-support
+          - img [ref=e27]
+        - list [ref=e30]:
+          - heading "Settings" [level=3] [ref=e31]
+          - menuitem "Basic information" [ref=e32] [cursor=pointer]
+          - menuitem "Collaborators" [ref=e33] [cursor=pointer]
+          - menuitem "Socket Mode" [ref=e34] [cursor=pointer]
+          - menuitem "Install App" [ref=e35] [cursor=pointer]
+          - menuitem "Manage distribution" [ref=e36] [cursor=pointer]
+          - heading "Features" [level=3] [ref=e37]
+          - menuitem "App home" [ref=e38] [cursor=pointer]
+          - menuitem "Agents & AI Apps New Feature" [ref=e39] [cursor=pointer]:
+            - text: Agents & AI Apps
+            - img "New Feature" [ref=e40]: NEW
+          - menuitem "Work Object Previews New Feature" [ref=e41] [cursor=pointer]:
+            - text: Work Object Previews
+            - img "New Feature" [ref=e42]: NEW
+          - menuitem "Workflow steps New Feature" [ref=e43] [cursor=pointer]:
+            - text: Workflow steps
+            - img "New Feature" [ref=e44]: NEW
+          - menuitem "Org Level Apps" [ref=e45] [cursor=pointer]
+          - menuitem "Incoming webhooks" [ref=e46] [cursor=pointer]
+          - menuitem "Interactivity & Shortcuts" [ref=e47] [cursor=pointer]
+          - menuitem "Slash commands" [ref=e48] [cursor=pointer]
+          - menuitem "Workflow steps LEGACY" [ref=e49] [cursor=pointer]:
+            - text: Workflow steps
+            - generic [ref=e50]: LEGACY
+          - menuitem "OAuth & permissions" [ref=e51] [cursor=pointer]
+          - menuitem "Event subscriptions" [ref=e52] [cursor=pointer]
+          - menuitem "User ID translation" [ref=e53] [cursor=pointer]
+          - menuitem "App Manifest New Feature" [ref=e54] [cursor=pointer]:
+            - text: App Manifest
+            - img "New Feature" [ref=e55]: NEW
+          - menuitem "Beta Features" [ref=e56] [cursor=pointer]
+          - heading "Submit to Slack Marketplace" [level=3] [ref=e57]
+          - menuitem "Prepare & Submit" [ref=e58] [cursor=pointer]
+          - menuitem "1. Your App Listing" [ref=e59]
+          - menuitem "2. Review scopes" [ref=e60]
+          - menuitem "3. Security and compliance" [ref=e61]
+          - menuitem "4. Testing information" [ref=e62]
+          - menuitem "5. Automated checks" [ref=e63]
+        - link "Give feedback" [ref=e65] [cursor=pointer]:
+          - /url: https://slack.com/help/requests/new?cu_web_tags=app_config_feedback
+        - list [ref=e66]:
+          - text: Slack
+          - generic [ref=e67]: 
+          - link "Help" [ref=e68] [cursor=pointer]:
+            - /url: https://slack.com/intl/en-gb/help
+          - link "Contact" [ref=e69] [cursor=pointer]:
+            - /url: https://slack.com/intl/en-gb/help/requests/new
+          - link "Policies" [ref=e70] [cursor=pointer]:
+            - /url: https://slack.com/intl/en-gb/terms-of-service
+          - link "Our blog" [ref=e71] [cursor=pointer]:
+            - /url: https://slackhq.com
+      - main [ref=e72]:
+        - generic [ref=e75]:
+          - generic [ref=e76]:
+            - heading "App Manifest" [level=2] [ref=e77]
+            - button "Save Changes" [disabled]
+          - paragraph [ref=e78]: The manifest below captures your app as it’s currently configured. You can make any changes to your basic info, settings, or feature configurations right here.
+          - paragraph [ref=e79]:
+            - text: Have suggestions or feature requests?
+            - link "Give us feedback" [ref=e80] [cursor=pointer]:
+              - /url: https://slack.com/help/requests/new?cu_web_tags=app_config_feedback
+          - tablist [ref=e81]:
+            - tab "Manifest JSON" [selected] [ref=e82] [cursor=pointer]:
+              - generic [ref=e83]: JSON
+            - tab "Manifest YAML" [ref=e84] [cursor=pointer]:
+              - generic [ref=e85]: YAML
+          - tabpanel "Manifest JSON" [ref=e86]:
+            - generic [ref=e87]:
+              - link "View app manifest example" [ref=e88] [cursor=pointer]:
+                - /url: https://api.slack.com/reference/manifests#creating_manifests
+                - text: View Example
+              - button "Copy to Clipboard" [ref=e89] [cursor=pointer]
+              - link "Download" [ref=e90] [cursor=pointer]:
+                - /url: blob:https://app.slack.com/9c5998b5-7be8-487f-86ec-9a2e21fa73db
+            - generic [ref=e92]:
+              - textbox [ref=e93]
+              - generic [ref=e96]:
+                - generic [ref=e97]:
+                  - generic [ref=e98]: "1"
+                  - text: "{"
+                - generic [ref=e99]:
+                  - generic [ref=e100]: "2"
+                  - text: "\"display_information\": {"
+                - generic [ref=e101]:
+                  - generic [ref=e102]: "3"
+                  - text: "\"name\": \"dodocs-customer-support\""
+                - generic [ref=e103]:
+                  - generic [ref=e104]: "4"
+                  - text: "},"
+                - generic [ref=e105]:
+                  - generic [ref=e106]: "5"
+                  - text: "\"features\": {"
+                - generic [ref=e107]:
+                  - generic [ref=e108]: "6"
+                  - text: "\"bot_user\": {"
+                - generic [ref=e109]:
+                  - generic [ref=e110]: "7"
+                  - text: "\"display_name\": \"dodocs-customer-support\","
+                - generic [ref=e111]:
+                  - generic [ref=e112]: "8"
+                  - text: "\"always_online\": false"
+                - generic [ref=e113]:
+                  - generic [ref=e114]: "9"
+                  - text: "}"
+                - generic [ref=e115]:
+                  - generic [ref=e116]: "10"
+                  - text: "},"
+                - generic [ref=e117]:
+                  - generic [ref=e118]: "11"
+                  - text: "\"oauth_config\": {"
+                - generic [ref=e119]:
+                  - generic [ref=e120]: "12"
+                  - text: "\"scopes\": {"
+                - generic [ref=e121]:
+                  - generic [ref=e122]: "13"
+                  - text: "\"bot\": ["
+                - generic [ref=e123]:
+                  - generic [ref=e124]: "14"
+                  - text: "\"groups:history\","
+                - generic [ref=e125]:
+                  - generic [ref=e126]: "15"
+                  - text: "\"app_mentions:read\","
+                - generic [ref=e127]:
+                  - generic [ref=e128]: "16"
+                  - text: "\"channels:history\","
+                - generic [ref=e129]:
+                  - generic [ref=e130]: "17"
+                  - text: "\"chat:write\","
+                - generic [ref=e131]:
+                  - generic [ref=e132]: "18"
+                  - text: "\"im:history\""
+                - generic [ref=e133]:
+                  - generic [ref=e134]: "19"
+                  - text: "]"
+                - generic [ref=e135]:
+                  - generic [ref=e136]: "20"
+                  - text: "}"
+                - generic [ref=e137]:
+                  - generic [ref=e138]: "21"
+                  - text: "},"
+                - generic [ref=e139]:
+                  - generic [ref=e140]: "22"
+                  - text: "\"settings\": {"
+                - generic [ref=e141]:
+                  - generic [ref=e142]: "23"
+                  - text: "\"org_deploy_enabled\": false,"
+                - generic [ref=e143]:
+                  - generic [ref=e144]: "24"
+                  - text: "\"socket_mode_enabled\": false,"
+                - generic [ref=e145]:
+                  - generic [ref=e146]: "25"
+                  - text: "\"token_rotation_enabled\": false"
+                - generic [ref=e147]:
+                  - generic [ref=e148]: "26"
+                  - text: "}"
+                - generic [ref=e149]:
+                  - generic [ref=e150]: "27"
+                  - text: "}"
+  - generic [ref=e155]:
+    - alert [ref=e156]
+    - log [ref=e157]

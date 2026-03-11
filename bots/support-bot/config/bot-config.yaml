@@ -1,0 +1,17 @@
+# DoDocs Support Bot — Global Configuration
+
+polling:
+  telegram_interval_seconds: 30
+
+processing:
+  max_concurrent_claude_sessions: 2
+  claude_timeout_seconds: 300
+  batch_window_seconds: 2
+
+rate_limiting:
+  max_messages_per_user: 5
+  window_seconds: 300
+
+audit:
+  retention_days: 90
+  log_dir: /app/state/audit

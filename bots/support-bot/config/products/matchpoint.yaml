@@ -1,0 +1,31 @@
+# DoDocs Support Bot — Matchpoint Product Configuration
+
+product:
+  name: Matchpoint
+  description: Document processing and matching platform
+
+kubernetes:
+  context: prod
+  namespace: dodocs-matchpoint
+  deployment: dodocs-matchpoint
+
+database:
+  # DB access is via socat tunnel pod in k8s
+  rds_host: prod-matchpoint-postgresbbbb0a2.c544sc4ucs9x.us-east-2.rds.amazonaws.com
+  rds_port: 5432
+  db_name: dodocs_matchpoint
+  user: postgres
+  # Password from k8s secret: matchpoint-db-secret
+  secret_name: matchpoint-db-secret
+  secret_key: password
+  tunnel_pod_name: mp-db-tunnel
+  local_port: 15433
+
+github:
+  org: DoDocs-AI
+  repo: dodocs-matchpoint-full
+
+telegram_groups:
+  - chat_id: -4652099509
+    client_name: SOL
+    org_id: null

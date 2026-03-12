@@ -1,0 +1,91 @@
+.model-bar {
+  display: flex;
+  height: 40px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 32px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.model-bar-segment {
+  background: var(--model-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: width 0.8s ease-out;
+}
+
+.model-bar-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fff;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.model-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.model-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.model-card:hover {
+  border-color: var(--model-color);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--model-color) 15%, transparent);
+}
+
+.model-card-icon {
+  font-size: 2.5rem;
+  margin-bottom: 12px;
+}
+
+.model-card-name {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--model-color);
+  margin-bottom: 4px;
+}
+
+.model-card-purpose {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.model-card-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.model-card-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--model-color);
+  background: color-mix(in srgb, var(--model-color) 10%, transparent);
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 100px;
+}
+
+@media (max-width: 768px) {
+  .model-cards {
+    grid-template-columns: 1fr;
+  }
+}

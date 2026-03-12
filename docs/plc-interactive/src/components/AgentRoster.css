@@ -1,0 +1,94 @@
+.roster-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.roster-filter {
+  padding: 8px 16px;
+  border-radius: 100px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.roster-filter:hover {
+  background: var(--bg-card-hover);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.roster-filter.active {
+  background: var(--bg-card-hover);
+  border-color: var(--filter-color, var(--accent-strategy));
+  color: var(--text-primary);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--filter-color, var(--accent-strategy)) 15%, transparent);
+}
+
+.roster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.roster-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  transition: all 0.2s;
+  cursor: default;
+}
+
+.roster-card:hover {
+  border-color: var(--card-color);
+  background: var(--bg-card-hover);
+}
+
+.roster-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.roster-card-emoji {
+  font-size: 1.6rem;
+}
+
+.roster-card-model {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.roster-card-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.roster-card-role {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.roster-card-phase {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: capitalize;
+  opacity: 0.6;
+}

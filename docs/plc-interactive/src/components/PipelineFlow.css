@@ -1,0 +1,113 @@
+.pipeline-section {
+  padding-bottom: 40px;
+}
+
+.pipeline {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 0;
+}
+
+.pipeline-connections {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 10px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.pipeline-phase {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: border-color 0.3s, background 0.3s;
+  overflow: hidden;
+}
+
+.pipeline-phase:hover {
+  border-color: var(--phase-color);
+  background: var(--bg-card-hover);
+}
+
+.pipeline-phase.active {
+  border-color: var(--phase-color);
+  background: var(--bg-card-hover);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--phase-color) 20%, transparent);
+}
+
+.pipeline-phase-icon {
+  font-size: 2rem;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pipeline-phase-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.pipeline-phase-agents {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.pipeline-phase-glow {
+  position: absolute;
+  bottom: -50%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  height: 60%;
+  background: var(--phase-color);
+  opacity: 0;
+  filter: blur(40px);
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.pipeline-phase:hover .pipeline-phase-glow,
+.pipeline-phase.active .pipeline-phase-glow {
+  opacity: 0.15;
+}
+
+@media (max-width: 900px) {
+  .pipeline {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .pipeline-phase {
+    flex: 0 0 calc(33% - 12px);
+  }
+  .pipeline-connections {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .pipeline-phase {
+    flex: 0 0 calc(50% - 8px);
+  }
+}

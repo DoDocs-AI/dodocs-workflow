@@ -1,0 +1,100 @@
+.cmd-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.cmd-block {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+}
+
+.cmd-block-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.cmd-code-block {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+
+.cmd-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.cmd-slash {
+  color: var(--accent-strategy);
+}
+
+.cmd-arg {
+  color: var(--accent-launch);
+  font-style: italic;
+}
+
+.cmd-flag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cmd-flag-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.2s;
+}
+
+.cmd-flag-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cmd-flag-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.cmd-flag-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--accent-strategy);
+  flex-shrink: 0;
+  min-width: 140px;
+}
+
+.cmd-output-path {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--accent-discover);
+  flex-shrink: 0;
+  min-width: 220px;
+}
+
+.cmd-flag-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .cmd-flag-item {
+    flex-wrap: wrap;
+  }
+  .cmd-flag-name,
+  .cmd-output-path {
+    min-width: auto;
+  }
+}

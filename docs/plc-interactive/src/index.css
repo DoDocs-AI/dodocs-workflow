@@ -1,0 +1,66 @@
+:root {
+  --bg-primary: #0a0a1a;
+  --bg-secondary: #12122a;
+  --bg-card: #1a1a3e;
+  --bg-card-hover: #222255;
+  --text-primary: #e8e8ff;
+  --text-secondary: #9999cc;
+  --text-muted: #6666aa;
+  --accent-discover: #4A90D9;
+  --accent-strategy: #7B68EE;
+  --accent-build: #E8833A;
+  --accent-launch: #50C878;
+  --accent-grow: #FFD700;
+  --accent-evolve: #FF6B6B;
+  --accent-opus: #6C5CE7;
+  --accent-sonnet: #0984E3;
+  --accent-haiku: #00B894;
+  --border: rgba(255, 255, 255, 0.06);
+  --glow: rgba(123, 104, 238, 0.15);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#root {
+  width: 100%;
+}
+
+::selection {
+  background: rgba(123, 104, 238, 0.3);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--bg-card-hover);
+}

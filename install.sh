@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for Claude Code
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.5.21"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.6.0"
 CLAUDE_DIR="$HOME/.claude"
 VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
 
@@ -68,6 +68,7 @@ AGENTS=(
     "ux-designer"
     "security-auditor"
     "performance-engineer"
+    "product-launch-orchestrator"
     "accessibility-auditor"
     "seo-analyst"
     "devops-engineer"
@@ -95,6 +96,25 @@ AGENTS=(
     "gtm-reporting"
     "gtm-seo-content"
     "gtm-trend-monitor"
+    "plc-architect-agent"
+    "plc-competitive-intel"
+    "plc-copy-agent"
+    "plc-customer-voice"
+    "plc-dev-agent"
+    "plc-distribution-agent"
+    "plc-feature-inventor"
+    "plc-growth-hacker"
+    "plc-icp-profiler"
+    "plc-market-scout"
+    "plc-orchestrator"
+    "plc-pricing-architect"
+    "plc-product-strategist"
+    "plc-qa-agent"
+    "plc-retention-engineer"
+    "plc-revenue-agent"
+    "plc-roadmap-planner"
+    "plc-seo-content-agent"
+    "plc-validation-agent"
 )
 
 # Install agent files
@@ -112,6 +132,8 @@ done
 COMMANDS=(
     "scrum-team"
     "prepare-for-production"
+    "product-launch"
+    "product-lifecycle"
     "dodocs-workflow"
     "dw-upgrade"
     "container-team"
@@ -204,8 +226,8 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 40 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + rebase + brainstorm + change-request commands"
+echo "  ~/.claude/agents/          - 59 agent definitions"
+echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + rebase + brainstorm + change-request + gtm-team commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"

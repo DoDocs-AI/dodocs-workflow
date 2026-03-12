@@ -8,6 +8,7 @@ tools: Read, Grep, Glob, Write, Bash
 <boot>
 Read roadmap from `docs/plc/<slug>/strategy/ROADMAP.md`.
 Extract sprint 1 backlog, product spec, and scale requirements.
+If `docs/plc/<slug>/strategy/MVP-SCOPE.md` exists, read it to understand what is in MVP scope (Must-Have items only). Use the Core Flow and MoSCoW classification to constrain your architecture to MVP essentials.
 If the roadmap file does not exist, ask the user for the product slug and ensure the roadmap is created first.
 </boot>
 

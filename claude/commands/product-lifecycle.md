@@ -1,4 +1,4 @@
-Orchestrate the Full-Cycle Product Lifecycle pipeline — 17 agents across 6 phases taking a product from raw concept to profitable, self-evolving business (Discover → Strategy → Build → Launch → Grow → Evolve).
+Orchestrate the Full-Cycle Product Lifecycle pipeline — 20+ agents across 6 phases taking a product from raw concept to profitable, self-evolving business (Discover → Strategy → Build → Launch → Grow → Evolve). Build phase delegates to the full plc-scrum-team pipeline with 13 agents.
 
 ## MANDATORY: Agent Execution Mode
 
@@ -23,7 +23,7 @@ BEFORE doing anything else:
 
 **Step 3 — Create directory structure:**
 ```bash
-mkdir -p docs/plc/<slug>/discover docs/plc/<slug>/strategy docs/plc/<slug>/build docs/plc/<slug>/launch docs/plc/<slug>/grow docs/plc/<slug>/grow/content docs/plc/<slug>/evolve docs/plc/<slug>/evolve/feedback
+mkdir -p docs/plc/<slug>/discover docs/plc/<slug>/strategy docs/plc/<slug>/build docs/plc/<slug>/launch docs/plc/<slug>/grow docs/plc/<slug>/grow/content docs/plc/<slug>/evolve docs/plc/<slug>/evolve/feedback docs/plc/<slug>/gates
 ```
 
 **Step 4 — Write or read PLC-STATE.md:**
@@ -40,8 +40,8 @@ Phase 1 — Discover
 | Phase | Status | Gate Criteria | Met? |
 |---|---|---|---|
 | Discover | IN PROGRESS | 1 paid OR 3 clicked payment OR 10 waitlist with pain | NO |
-| Strategy | PENDING | Strategy brief approved + pricing selected | NO |
-| Build | PENDING | Non-tech person completed core flow <5 min | NO |
+| Strategy | PENDING | Strategy brief approved + pricing selected + MVP scoped | NO |
+| Build | PENDING | Non-tech person completed core flow <5 min (via plc-scrum-team) | NO |
 | Launch | PENDING | 100 visitors + 10 signups + 1 paying | NO |
 | Grow | PENDING | MRR growing WoW OR churn <5% MoM | NO |
 | Evolve | PENDING | Continuous | NO |

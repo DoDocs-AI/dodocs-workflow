@@ -1,8 +1,8 @@
 # dodocs-workflow Features
 
-> v1.5.20 | Autonomous Scrum Team for Claude Code & OpenCode
+> v1.7.0 | Autonomous Scrum Team + Product Lifecycle Framework for Claude Code & OpenCode
 
-dodocs-workflow turns a one-line feature description into a production-ready pull request. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation.
+dodocs-workflow turns a one-line feature description into a production-ready pull request. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation. The Product Lifecycle (PLC) framework extends this with 20+ agents across 6 phases taking any product from concept to profitable business.
 
 ---
 
@@ -19,9 +19,15 @@ dodocs-workflow turns a one-line feature description into a production-ready pul
   - [Prepare Feature](#8-prepare-feature)
   - [Merge Features](#9-merge-features)
   - [Rebase](#10-rebase)
+  - [Product Lifecycle](#11-product-lifecycle)
+  - [Product Launch](#12-product-launch)
+  - [GTM Team](#13-gtm-team)
 - [Agent Roster](#agent-roster)
   - [Scrum Team Agents](#scrum-team-agents-13)
+  - [PLC Scrum Team Agents](#plc-scrum-team-agents-13)
+  - [PLC Strategy & Discovery Agents](#plc-strategy--discovery-agents-19)
   - [Production Audit Agents](#production-audit-agents-10)
+  - [GTM Agents](#gtm-agents-16)
   - [Specialized Agents](#specialized-agents)
 - [Workflow Phases](#workflow-phases)
 - [Architecture Highlights](#architecture-highlights)
@@ -255,6 +261,50 @@ Rebases the current feature/fix branch on top of `main` with migration ordering 
 
 ---
 
+### 11. Product Lifecycle
+
+**Command**: `/product-lifecycle <product-name>`
+
+Full-cycle product lifecycle pipeline — 20+ agents across 6 phases taking a product from raw concept to profitable, self-evolving business.
+
+**Phases**:
+| Phase | What Happens | Key Agents |
+|-------|-------------|------------|
+| Discover | Market research, ICP profiling, demand validation | plc-market-scout, plc-icp-profiler, plc-validation-agent |
+| Strategy | Product strategy, roadmap, pricing, MVP scoping | plc-product-strategist, plc-roadmap-planner, plc-pricing-architect, plc-mvp-scoper |
+| Build | Full development via plc-scrum-team (13-agent pipeline) | plc-product-owner, plc-architect, plc-scrum-master, plc-frontend-dev, plc-backend-dev, plc-code-reviewer, plc-tech-lead, plc-qa-engineer, plc-manual-tester, plc-qa-automation, plc-ux-designer, plc-mockup-designer, plc-mockup-validator |
+| Launch | Analytics setup, copywriting, distribution, monetization | plc-analytics-agent, plc-copy-agent, plc-distribution-agent, plc-revenue-agent |
+| Grow | Growth experiments, retention, SEO content | plc-growth-hacker, plc-retention-engineer, plc-seo-content-agent |
+| Evolve | Feature invention, competitive intel, customer feedback | plc-feature-inventor, plc-competitive-intel, plc-customer-voice |
+
+**Phase gates**: Enforced between each phase — criteria must be met and logged before advancing. Gate check reports written to `docs/plc/<slug>/gates/`.
+
+**Flags**:
+| Flag | Effect |
+|------|--------|
+| `--auto` | Skip human approval gates |
+| `--skip-discover` | Jump past discovery phase |
+| `--skip-build` | Skip build phase |
+| `--resume` | Resume from existing PLC-STATE.md |
+
+---
+
+### 12. Product Launch
+
+**Command**: `/product-launch <product-name>`
+
+15+ agents across 10 phases — from idea validation through MVP build to launch.
+
+---
+
+### 13. GTM Team
+
+**Command**: `/gtm-team <product-name>`
+
+16 agents across 6 phases producing a complete Go-To-Market strategy.
+
+---
+
 ## Agent Roster
 
 ### Scrum Team Agents (13)
@@ -296,6 +346,73 @@ Rebases the current feature/fix branch on top of `main` with migration ordering 
 | Mockup Validator | Sonnet | `/prepare-feature` — validates mockups against requirements |
 | Brainstorm Facilitator | Opus | `/brainstorm` — adversarial feature idea testing |
 | Feature Manager | Sonnet | `/batch-features` — DAG-aware batch scheduling |
+
+### PLC Scrum Team Agents (13)
+
+MVP-focused copies of the scrum team agents, optimized for PLC Build phase. Always autonomous, core-flow only.
+
+| Agent | Model | PLC Differences |
+|-------|-------|----------------|
+| PLC Product Owner | Opus | Auto-mode only, reads MVP-SCOPE.md |
+| PLC UX Designer | Sonnet | Simplified MVP UX, core flow only |
+| PLC Architect | Opus | Reads PLC strategy docs, MVP-minimal |
+| PLC Scrum Master | Sonnet | Smaller task breakdown for Must-Have items |
+| PLC Frontend Dev | Sonnet | MVP-focused, skip non-essential polish |
+| PLC Backend Dev | Sonnet | MVP-focused, minimal endpoints |
+| PLC Code Reviewer | Sonnet | Lighter review, correctness only |
+| PLC Tech Lead | Sonnet | Writes BUILD-SUMMARY.md on completion |
+| PLC QA Engineer | Sonnet | Core flow test cases only |
+| PLC QA Automation | Sonnet | E2E for core flow only |
+| PLC Manual Tester | Haiku | Tests "Mom Test" scenario |
+| PLC Mockup Designer | Sonnet | Simplified MVP mockups |
+| PLC Mockup Validator | Sonnet | Validates against MVP-SCOPE.md |
+
+### PLC Strategy & Discovery Agents (19)
+
+| Agent | Model | Phase | Role |
+|-------|-------|-------|------|
+| PLC Orchestrator | Opus | All | Meta-orchestrator coordinating all PLC agents |
+| PLC Market Scout | Sonnet | Discover | Competitive landscape and opportunity scanning |
+| PLC ICP Profiler | Sonnet | Discover | Ideal customer profile definition |
+| PLC Validation Agent | Sonnet | Discover | Demand testing with real prospects |
+| PLC Product Strategist | Opus | Strategy | Strategy brief creation |
+| PLC Roadmap Planner | Sonnet | Strategy | NOW/NEXT/LATER roadmap |
+| PLC Pricing Architect | Opus | Strategy | Pricing model design |
+| PLC MVP Scoper | Opus | Strategy | MoSCoW classification, core flow, "Mom Test" |
+| PLC Architect Agent | Opus | Build | Stack selection, data models, API contracts |
+| PLC Dev Agent | Sonnet | Build | Standalone development (manual use) |
+| PLC QA Agent | Sonnet | Build | Standalone QA (manual use) |
+| PLC Analytics Agent | Sonnet | Launch | Analytics tool setup, event tracking, funnels |
+| PLC Copy Agent | Sonnet | Launch | Landing page copywriting |
+| PLC Distribution Agent | Sonnet | Launch | Channel distribution strategy |
+| PLC Revenue Agent | Sonnet | Launch | Monetization setup |
+| PLC Growth Hacker | Sonnet | Grow | Growth experiments and optimization |
+| PLC Retention Engineer | Sonnet | Grow | Churn reduction, engagement loops |
+| PLC SEO Content Agent | Sonnet | Grow | SEO content strategy |
+| PLC Feature Inventor | Sonnet | Evolve | Feature discovery from feedback |
+| PLC Competitive Intel | Sonnet | Evolve | Competitive monitoring |
+| PLC Customer Voice | Sonnet | Evolve | Customer feedback analysis |
+
+### GTM Agents (16)
+
+| Agent | Model | Role |
+|-------|-------|------|
+| GTM Community | Sonnet | Community engagement strategies |
+| GTM Copywriter | Sonnet | B2B SaaS copywriting |
+| GTM CRM | Sonnet | CRM pipeline design |
+| GTM Experiment | Sonnet | A/B test design and optimization |
+| GTM ICP Discovery | Sonnet | Prospect profiling and scoring |
+| GTM Lead Scoring | Sonnet | Lead scoring models |
+| GTM Localization | Sonnet | Market-specific content adaptation |
+| GTM Market Research | Sonnet | Competitive intelligence |
+| GTM Metrics | Sonnet | KPI dashboards and analytics |
+| GTM Outbound | Sonnet | Outbound sales sequences |
+| GTM Paid Ads | Sonnet | Paid advertising campaigns |
+| GTM Proposal | Sonnet | Sales proposal templates |
+| GTM Reporting | Sonnet | GTM performance reporting |
+| GTM SEO Content | Sonnet | SEO keyword research and content |
+| GTM Trend Monitor | Sonnet | Industry trend monitoring |
+| GTM Strategist | Opus | GTM strategy orchestration |
 
 ---
 
@@ -400,8 +517,8 @@ cd dodocs-workflow && bash install-opencode.sh
 **Check version**: `/dodocs-workflow version`
 
 **What gets installed** (to `~/.claude/` or `~/.opencode/`):
-- 25 agent definitions in `agents/`
-- 13 slash commands in `commands/`
+- 76 agent definitions in `agents/` (Claude Code) / 21 in `agents/` (OpenCode)
+- 21 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
 - Docker runtime files in `docker/`
 - Config template
 - Status line script with auto-update notifications

@@ -1,0 +1,25 @@
+name: Validate Structure
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate structure
+        run: bash tests/validate-structure.sh
+
+      - name: Validate references
+        run: bash tests/validate-references.sh
+
+      - name: Validate version
+        run: bash tests/validate-version.sh
+
+      - name: Validate docs
+        run: bash tests/validate-docs.sh

@@ -1,3 +1,10 @@
+---
+name: feature-manager
+model: sonnet
+description: Manages parallel execution of a feature batch: DAG-aware scheduling, retry on failure, stall detection, completeness verification, and final report.
+tools: Read, Write, Edit, Bash, Grep, Glob, Agent
+---
+
 Manages parallel execution of a feature batch: DAG-aware scheduling, retry on failure, stall detection, completeness verification, and final report.
 
 ## Input

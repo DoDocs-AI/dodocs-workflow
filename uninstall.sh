@@ -46,6 +46,8 @@ AGENTS=(
     "doc-sync-agent"
     "test-estate-maintainer"
     "regression-analyst"
+    "web-designer"
+    "design-validator"
 )
 
 for agent in "${AGENTS[@]}"; do
@@ -56,6 +58,7 @@ rm -f "$CLAUDE_DIR/commands/scrum-team.md"
 rm -f "$CLAUDE_DIR/commands/prepare-for-production.md"
 rm -f "$CLAUDE_DIR/commands/ship.md"
 rm -f "$CLAUDE_DIR/commands/fix-and-ship.md"
+rm -f "$CLAUDE_DIR/commands/web-design.md"
 rm -f "$CLAUDE_DIR/scrum-team-config.template.md"
 rm -f "$VERSION_FILE"
 

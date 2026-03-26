@@ -1,8 +1,8 @@
 # dodocs-workflow Features
 
-> v1.11.0 | Autonomous Scrum Team + Product Lifecycle Framework for Claude Code & OpenCode
+> v1.12.0 | Autonomous Scrum Team + Product Lifecycle Framework for Claude Code & OpenCode
 
-dodocs-workflow turns a one-line feature description into a production-ready pull request. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation. The `/ship` command wraps each feature with post-build hygiene — doc sync, test maintenance, regression analysis, and multi-perspective validation — ensuring every feature leaves the project in a clean state. The `/fix-and-ship` command applies the same hygiene to bug fixes, preventing docs and tests from going stale when shared components change. The Product Lifecycle (PLC) framework extends this with 20+ agents across 6 phases taking any product from concept to profitable business. The Project Supervisor provides automated health monitoring and auto-fix for stalled projects.
+dodocs-workflow turns a one-line feature description into a production-ready pull request. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation. The `/ship` command wraps each feature with post-build hygiene — doc sync, test maintenance, regression analysis, and multi-perspective validation — ensuring every feature leaves the project in a clean state. The `/fix-and-ship` command applies the same hygiene to bug fixes, preventing docs and tests from going stale when shared components change. The `/web-design` command generates creative, award-caliber Next.js websites with iterative visual validation — a designer agent creates the site while a validator agent screenshots and scores it until quality threshold is met. The Product Lifecycle (PLC) framework extends this with 20+ agents across 6 phases taking any product from concept to profitable business. The Project Supervisor provides automated health monitoring and auto-fix for stalled projects.
 
 ---
 
@@ -25,12 +25,14 @@ dodocs-workflow turns a one-line feature description into a production-ready pul
   - [Project Supervisor](#14-project-supervisor)
   - [Ship](#15-ship)
   - [Fix and Ship](#16-fix-and-ship)
+  - [Web Design](#17-web-design)
 - [Agent Roster](#agent-roster)
   - [Scrum Team Agents](#scrum-team-agents-13)
   - [PLC Scrum Team Agents](#plc-scrum-team-agents-13)
   - [PLC Strategy & Discovery Agents](#plc-strategy--discovery-agents-19)
   - [Production Audit Agents](#production-audit-agents-10)
   - [GTM Agents](#gtm-agents-16)
+  - [Design Agents](#design-agents-2)
   - [Specialized Agents](#specialized-agents)
 - [Workflow Phases](#workflow-phases)
 - [Architecture Highlights](#architecture-highlights)
@@ -405,6 +407,48 @@ Fix a bug with full hygiene — applies the fix via `/fix-the-issue`, then runs 
 
 ---
 
+### 17. Web Design
+
+**Command**: `/web-design <site-name>`
+
+Creative website design generator — spawns a designer agent to create an award-caliber Next.js site with Tailwind CSS, then a validator agent to screenshot and score visual quality. Iterates until the design meets a quality threshold.
+
+**What it does**:
+- **Phase W1**: Parses arguments, creates output directory, writes a creative brief
+- **Phase W2**: `web-designer` scaffolds a complete Next.js App Router project with creative, concept-driven design
+- **Phase W3**: `design-validator` takes full-page desktop and mobile screenshots, scores on 7 weighted criteria
+- **Phase W3.5**: If score < 7.0, designer fixes issues based on feedback → validator re-scores (max 3 iterations)
+- **Phase W4**: Kills dev server, writes summary with preview instructions
+
+**Design philosophy**: Every site starts from a concept/metaphor — not templates. 4-6 color palette, 2-3 Google Fonts via `next/font`, CSS art instead of external images, meaningful scroll animations, innovative layouts.
+
+**Scoring criteria** (weighted):
+| Criterion | Weight |
+|-----------|--------|
+| Visual Impact | 1.5x |
+| Color Harmony | 1.0x |
+| Typography | 1.0x |
+| Layout & Composition | 1.5x |
+| Animation & Interaction | 0.5x |
+| Originality | 1.5x |
+| Cohesion | 1.0x |
+
+**Pass threshold**: Weighted average >= 7.0, no single criterion < 5.
+
+**Flags**:
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--pages N` | 3 | Number of pages to generate |
+| `--port N` | 3200 | Dev server port |
+| `--theme "..."` | (open) | Creative direction hint |
+| `--max-iterations N` | 3 | Max design/validate cycles |
+
+**Output**: `docs/designs/<site-name>/` — Next.js app, screenshots, validation report, summary.
+
+**Agents**: web-designer (Sonnet), design-validator (Opus)
+
+---
+
 ## Agent Roster
 
 ### Scrum Team Agents (13)
@@ -437,6 +481,13 @@ Fix a bug with full hygiene — applies the fix via `/fix-the-issue`, then runs 
 | API Documenter | Sonnet | OpenAPI spec, endpoint inventory |
 | DB Analyst | Opus | Schema, indexes, constraints, migrations |
 | Load Tester | Sonnet | Load scenarios, capacity, breaking points |
+
+### Design Agents (2)
+
+| Agent | Model | Used By |
+|-------|-------|---------|
+| Web Designer | Sonnet | `/web-design` — creates award-caliber Next.js sites with Tailwind CSS |
+| Design Validator | Opus | `/web-design` — screenshots and scores visual quality on 7 criteria |
 
 ### Specialized Agents
 
@@ -632,8 +683,8 @@ cd dodocs-workflow && bash install-opencode.sh
 **Check version**: `/dodocs-workflow version`
 
 **What gets installed** (to `~/.claude/` or `~/.opencode/`):
-- 82 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
-- 24 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
+- 84 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
+- 25 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
 - Docker runtime files in `docker/`
 - Config template
 - Status line script with auto-update notifications

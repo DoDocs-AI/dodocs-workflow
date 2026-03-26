@@ -62,6 +62,30 @@ Use Edit tool to make these changes directly to the file.
 - Each task description must include: "After completing this task, make an atomic git commit with message: `<scope>: <description>`"
 </task_assignment_rules>
 
+<effort_estimation>
+After creating all tasks, estimate effort for each task using this scale:
+
+| Size | Description | Estimated Hours |
+|------|------------|----------------|
+| XS   | Config change, single-line fix | 0.25 |
+| S    | Simple CRUD, single file change | 0.5 |
+| M    | Multi-file change, new component/endpoint | 1–2 |
+| L    | Complex logic, multiple integrations | 2–4 |
+| XL   | Major refactor, new subsystem | 4–8 |
+
+**Process**:
+1. After creating all tasks, assess each one based on: number of files, complexity of logic, dependency chain depth, and whether it involves migrations or new patterns
+2. Add a `Size` and `Est. Hours` column to the Development Tasks table in PROGRESS.md:
+
+| Task | User Story | Assignee | Size | Est. Hours | Status |
+|------|-----------|----------|------|-----------|--------|
+| Create User entity + migration | US01 | backend-dev-1 | M | 1.5 | Pending |
+
+3. Compute and report the **total estimated effort** at the bottom:
+   `**Total estimated effort: X.X hours** (XS: N, S: N, M: N, L: N, XL: N)`
+4. Send the total estimate to the team lead via message
+</effort_estimation>
+
 <dependency_examples>
 Example dependency chain for a typical feature:
 1. `backend-dev-1`: Create entity + migration (no dependencies)

@@ -96,6 +96,51 @@ Spawn these teammates using their agent definitions from `~/.claude/agents/`. **
 
 Models are defined in each agent's `.md` file (opus for architect and security-auditor, sonnet for all other roles).
 
+## Phase Timeout Detection
+
+Each phase has a maximum duration. Track elapsed time from when a phase starts. If a phase exceeds its timeout, report status and ask the user whether to continue or abort.
+
+| Phase | Max Duration | What to report on timeout |
+|-------|-------------|--------------------------|
+| Phase 1: Requirements + UX Research | 15 min | Which agents are still running, what artifacts are missing |
+| Phase 2: UX Design + Architecture | 20 min | Which docs are incomplete, which agents haven't finished |
+| Phase 3: Task Breakdown | 10 min | Number of tasks created so far, what's pending |
+| Phase 4: Build + Test | 120 min | Tasks completed vs total, bugs open, tests passing |
+| Phase 5: Integration Verification | 30 min | Which verification steps are incomplete |
+| Phase 6: Ship | 10 min | PR creation status, DoD gate status |
+
+**Timeout implementation**:
+1. Record the wall-clock time when each phase begins (use `date +%s` in Bash)
+2. After each agent message or status check, compute elapsed seconds
+3. If elapsed > max duration:
+   - In AUTO_MODE: log a warning `⚠️ Phase N timeout (Xm > Ym limit)` and continue (do not abort automatically)
+   - In interactive mode: ask the user: "Phase N has exceeded its Ym time limit (currently at Xm). Status: <brief status>. Continue or abort?"
+
+## Regression Baseline
+
+Before creating the feature branch (in Step 3 of boot), run existing E2E tests on main to establish a regression baseline. This prevents confusing pre-existing failures with new regressions.
+
+**Skip with**: `--skip-regression` flag in $ARGUMENTS.
+
+**Process**:
+1. Before `git checkout -b feature/<slug>`, stay on main
+2. Check if E2E tests exist: look for Playwright test files in the Test Cases path from config (e.g., `*.spec.ts`, `*.test.ts` in the E2E tests directory)
+3. If E2E tests exist, run them: `npx playwright test --reporter=list 2>&1 | tail -50`
+4. Record the results in the initial PROGRESS.md under a new **Regression Baseline** section:
+   ```markdown
+   ## Regression Baseline
+   - **Run date**: YYYY-MM-DD HH:MM
+   - **Branch**: main (commit: <short-sha>)
+   - **Result**: X passed, Y failed, Z skipped
+   - **Pre-existing failures**:
+     - test-name-1.spec.ts: <failure reason>
+     - test-name-2.spec.ts: <failure reason>
+   ```
+5. If no E2E tests exist, record: `No existing E2E tests found — baseline skipped`
+6. Then proceed with `git checkout -b feature/<slug>`
+
+**Usage during Phase 5**: When running the E2E suite during integration verification, compare results against the baseline. Any test that was already failing in the baseline is a **pre-existing failure** and should NOT block the PR. Only NEW failures (tests that passed in baseline but fail now) are regressions that must be fixed.
+
 ## Full Workflow
 
 ### Phase 1: Requirements + Early UX Research (PARALLEL)
@@ -105,10 +150,11 @@ Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypas
 - **product-owner** talks to the user (or derives requirements autonomously if AUTO_MODE=true), produces **FEATURE-BRIEF.md**. If AUTO_MODE=true, append `AUTO_MODE=true` to the product-owner's prompt.
 - **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
 
-**VALIDATE Phase 1 artifacts** before proceeding to Phase 2:
+**VALIDATE Phase 1 artifacts + update gates** before proceeding to Phase 2:
 - Read `<feature-docs>/<feature-name>/FEATURE-BRIEF.md` using the Read tool.
 - Must exist AND contain all of these non-empty sections: problem statement (or background), user stories, acceptance criteria.
 - If the file is missing or any required section is absent/empty: re-spawn `product-owner` with `bypassPermissions` and append to its prompt: "FEATURE-BRIEF.md is incomplete or missing. Regenerate it with all required sections: problem statement, user stories, acceptance criteria, and edge cases." Wait for it to complete, then re-validate before proceeding.
+- On pass: update the Phase Gates table in PROGRESS.md — set "FEATURE-BRIEF.md exists + complete" to `PASS`.
 
 ### Phase 2: UX Design + Architecture (PARALLEL)
 
@@ -268,6 +314,23 @@ After all tasks are complete, reviewed, and tested:
 - **qa-automation**: runs the full E2E test suite
 - **manual-tester**: final smoke test of the complete feature flow end-to-end
 - **code-reviewer**: reviews the full feature diff (all changes from feature branch)
+- **quality-metrics-collector**: Spawn `quality-metrics-collector` with `mode: "bypassPermissions"` to collect quantitative quality metrics and produce QUALITY-METRICS.md
+- **security-auditor** (conditional): If the feature diff touches any of these file patterns, spawn `security-auditor` with `mode: "bypassPermissions"` for a focused security review:
+  - Auth files: `**/auth/**`, `**/login*`, `**/session*`, `**/token*`, `**/jwt*`, `**/oauth*`
+  - Security config: `**/security*`, `**/cors*`, `**/csrf*`, `**/permissions*`, `**/roles*`
+  - Database migrations: `**/migration*`, `**/migrate*`
+  - Route definitions: `**/route*`, `**/router*`, `**/middleware*`
+  - Environment/secrets: `**/.env*`, `**/secret*`, `**/credential*`
+
+  To detect: run `git diff --name-only origin/main...HEAD` and match against the patterns above.
+  If any match, spawn security-auditor with the prompt: "Review the feature branch diff for security issues. Focus on: auth changes, route/middleware changes, migration safety, exposed secrets, and input validation. Feature: <feature-name>. Run `git diff origin/main...HEAD` to see all changes."
+
+  **Security gate**: If security-auditor reports any **Critical** findings, do NOT proceed to Phase 6. Report the findings to the team lead and create fix tasks for the appropriate developers. Re-run security-auditor after fixes are applied.
+
+**Phase 5 gate enforcement**: Before proceeding to Phase 6, read the Phase Gates table from PROGRESS.md. Verify that ALL gates required by Phase 6 show PASS. If any gate shows FAIL or BLOCKED:
+- Log: `⛔ Phase 6 blocked — gate "<gate name>" is <status>: <blocker description>`
+- Do NOT proceed until the blocker is resolved
+- Update the gate status in PROGRESS.md as agents complete their checks
 
 ### Phase 6: Ship
 - **tech-lead**: creates a PR from the feature branch to main
@@ -326,6 +389,21 @@ Phase 1 — Requirements + UX Research
 | Phase 5: Integration Verification | Pending | — |
 | Phase 6: Ship | Pending | — |
 
+## Phase Gates
+
+| Gate | Required By | Status | Blocker |
+|------|------------|--------|---------|
+| FEATURE-BRIEF.md exists + complete | Phase 2 | Pending | — |
+| UX-DESIGN.md exists | Phase 3 | Pending | — |
+| ARCHITECTURE.md exists + file inventory | Phase 3 | Pending | — |
+| ≥2 developer tasks with US prefix | Phase 4 | Pending | — |
+| Compile gate passes (backend + frontend) | Phase 5 | Pending | — |
+| All manual tests pass | Phase 5 | Pending | — |
+| Security review clear (if triggered) | Phase 6 | Pending | — |
+| AC traceability 100% | Phase 6 | Pending | — |
+| Definition of Done — all 10 checks pass | Phase 6 | Pending | — |
+| Quality metrics ≠ FAIL | Phase 6 | Pending | — |
+
 ## Artifacts
 
 | Document | Status | Author |
@@ -357,6 +435,15 @@ Phase 1 — Requirements + UX Research
 
 ## Timeline
 <!-- all agents append entries -->
+
+## Regression Baseline
+<!-- tech-lead fills this before creating feature branch -->
+
+## Definition of Done
+<!-- tech-lead fills this before PR creation -->
+
+## Quality Metrics
+<!-- quality-metrics-collector fills this during Phase 5 -->
 
 ## Session Cost
 

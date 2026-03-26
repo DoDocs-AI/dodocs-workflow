@@ -220,10 +220,41 @@ For each migration file found, verify:
    - Whether any renames were needed (and what was changed)
    - Confirmation that all migrations are sequentially numbered and correctly named
 
-## 10. Create PR (Phase 7)
-After rebase and migration check pass:
+## 10. Definition of Done Gate (before PR)
+Before creating the PR, verify ALL items in this checklist. If ANY item fails, do NOT create the PR — fix or report the blocker first.
+
+| # | Check | How to Verify |
+|---|-------|--------------|
+| 1 | All developer tasks completed + reviewed | TaskList: zero open dev tasks, all have code-reviewer approval |
+| 2 | Compile passes (backend + frontend) | Run Compile Backend and Compile Frontend commands — zero errors |
+| 3 | Lint clean | Run lint command from config (if configured) — zero errors |
+| 4 | All manual test cases pass | PROGRESS.md Testing section shows all stories passed |
+| 5 | E2E tests pass | Run E2E suite if qa-automation produced tests — all green |
+| 6 | No open P0/Critical bugs | TaskList: zero open bug tasks with Critical severity |
+| 7 | AC traceability complete | qa-engineer's AC Traceability Matrix shows "Full" for every acceptance criterion |
+| 8 | PROGRESS.md up to date | All sections populated, no stale "Pending" entries for completed work |
+| 9 | No scope creep | `git diff --stat origin/main...HEAD` — verify no unexpected files outside the feature scope |
+| 10 | Integration verification passed | Phase 5 completed: full restart + smoke test + E2E + full-diff review all green |
+
+**Process**:
+1. Run through each check sequentially
+2. Log results in PROGRESS.md under a new **Definition of Done** section:
+   ```
+   ## Definition of Done
+   | # | Check | Status | Notes |
+   |---|-------|--------|-------|
+   | 1 | All tasks completed + reviewed | PASS | 12/12 tasks done |
+   | 2 | Compile passes | PASS | — |
+   | ... | ... | ... | ... |
+   ```
+3. If any check shows FAIL: report the failure to the team lead, do NOT proceed to PR creation
+4. Only after all 10 checks show PASS, proceed to PR creation
+
+## 11. Create PR (Phase 7)
+After DoD gate, rebase, and migration check pass:
 - Create a PR from the feature branch to main using `gh pr create`
 - Include a summary of all changes in the PR description
+- Include a **Rollback Plan** section in the PR description (see below)
 - Capture the PR URL and write it to PROGRESS.md:
   ```bash
   PR_URL=$(gh pr create --title "..." --body "...")
@@ -231,6 +262,38 @@ After rebase and migration check pass:
   # Change "| PR URL | — |" to "| PR URL | $PR_URL |"
   ```
 - Signal completion to the team lead
+
+<rollback_plan>
+Every PR description MUST include a Rollback Plan section. Generate this by analyzing the feature branch changes:
+
+```markdown
+## Rollback Plan
+
+### Revert Command
+\`\`\`bash
+git revert --no-commit <first-commit>..<last-commit> && git commit -m "revert: <feature-name>"
+\`\`\`
+
+### Migration Rollback
+<!-- If migrations were added, list the rollback steps -->
+- [ ] Run: `<migration rollback command>` (e.g., `flyway undo`, `alembic downgrade <previous-rev>`, `python manage.py migrate <app> <previous-migration>`)
+- [ ] Verify schema matches pre-feature state
+
+### Config Changes to Revert
+<!-- List any environment variables, feature flags, or config files changed -->
+- None / List each config change
+
+### Expected Rollback Duration
+- Estimated time: <X minutes> (revert + migration rollback + verification)
+- Risk level: Low/Medium/High
+```
+
+**How to populate**:
+1. Check `git log --oneline origin/main..HEAD` for commit range
+2. Check for migration files in the diff — if present, determine the rollback command for the project's migration tool
+3. Check for changes to config files (`.env*`, `application.properties`, `*.config.*`)
+4. Estimate duration based on: number of migrations to roll back + deployment pipeline time
+</rollback_plan>
 
 <progress_tracking>
 Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool at these milestones:
@@ -244,7 +307,7 @@ Directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool 
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
-## 11. Finalize and Commit PROGRESS.md (after PR is created)
+## 12. Finalize and Commit PROGRESS.md (after PR is created)
 After the PR is created, finalize the PROGRESS.md and commit it to git:
 
 1. **Update `## Session Cost`** in PROGRESS.md:

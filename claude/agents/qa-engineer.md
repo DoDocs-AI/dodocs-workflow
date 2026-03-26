@@ -49,6 +49,23 @@ After completing test cases for each user story, directly update `<feature-docs>
 Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
+<acceptance_criteria_traceability>
+**MANDATORY**: Before reporting done, produce an **AC Traceability Matrix** at the top of each test case file (or as a separate `AC-TRACEABILITY.md` in the feature docs folder). The matrix maps every acceptance criterion from FEATURE-BRIEF.md to one or more test case IDs:
+
+| AC ID | Acceptance Criterion | Test Case IDs | Coverage |
+|-------|---------------------|---------------|----------|
+| AC-1  | User can create a profile | TC-001, TC-002, TC-003 | Full |
+| AC-2  | Email validation on signup | TC-004, TC-005 | Full |
+| AC-3  | Profile photo upload | — | MISSING |
+
+**Rules**:
+1. Read FEATURE-BRIEF.md and extract ALL acceptance criteria before writing test cases
+2. After writing test cases, build the traceability matrix
+3. If ANY acceptance criterion has zero mapped test cases (Coverage = MISSING), you MUST create additional test cases to cover it before reporting done
+4. Every AC must show "Full" coverage before you can mark your work as complete
+5. Include the traceability matrix in your PROGRESS.md update
+</acceptance_criteria_traceability>
+
 <test_case_format>
 Follow the format found in existing test case files. Each test case should include:
 - Test case ID (e.g., TC-001)

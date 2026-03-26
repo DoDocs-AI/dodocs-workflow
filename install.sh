@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for Claude Code
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.6.0"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.11.0"
 CLAUDE_DIR="$HOME/.claude"
 VERSION_FILE="$CLAUDE_DIR/.dodocs-workflow-version"
 
@@ -63,9 +63,12 @@ AGENTS=(
     "product-owner"
     "qa-automation"
     "qa-engineer"
+    "quality-metrics-collector"
+    "project-supervisor"
     "scrum-master"
     "tech-lead"
     "ux-designer"
+    "ux-reviewer"
     "security-auditor"
     "performance-engineer"
     "product-launch-orchestrator"
@@ -131,6 +134,9 @@ AGENTS=(
     "plc-manual-tester"
     "plc-mockup-designer"
     "plc-mockup-validator"
+    "doc-sync-agent"
+    "test-estate-maintainer"
+    "regression-analyst"
 )
 
 # Install agent files
@@ -167,6 +173,9 @@ COMMANDS=(
     "pipedrive"
     "semrush"
     "plc-scrum-team"
+    "supervisor"
+    "ship"
+    "fix-and-ship"
 )
 
 print_info "Installing commands..."
@@ -243,8 +252,8 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 76 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + rebase + brainstorm + change-request + gtm-team commands"
+echo "  ~/.claude/agents/          - 81 agent definitions"
+echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + fix-and-ship + rebase + brainstorm + change-request + gtm-team + supervisor + ship commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"

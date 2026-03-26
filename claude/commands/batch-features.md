@@ -97,6 +97,8 @@ All subsequent phases operate on the **topologically sorted** feature list.
 
 ### Phase 2: Plan
 
+#### Phase 2a: Execution Planning
+
 If `AUTO_DISCOVER=true`:
 ```
 Batch: auto-discover mode | Size: <size or "auto">
@@ -118,6 +120,41 @@ Execution order (dependency-sorted):
 ```
 
 Features with no dependencies show no `[after: ...]` annotation. Features with dependencies list their direct dependencies in the `[after: ...]` column.
+
+#### Phase 2b: Cross-Feature Conflict Analysis (parallel mode only)
+
+When `--parallel` is set (or auto-discover resolves multiple features), perform conflict detection before execution:
+
+1. **Collect file inventories**: For each feature in the batch, read `docs/features/<slug>/ARCHITECTURE.md` (if it exists). Extract the **File Inventory** section — the list of files that will be created or modified.
+   - If ARCHITECTURE.md doesn't exist yet (feature hasn't been through architect), skip that feature for conflict analysis.
+
+2. **Build a shared-file map**: Create a mapping of `file_path → [feature-slugs]` for every file that appears in 2+ feature inventories.
+
+3. **Detect conflicts**: If any file appears in multiple feature inventories:
+   ```
+   ⚠️  Cross-Feature File Conflicts Detected:
+   ─────────────────────────────────────────
+   src/components/Header.tsx     → user-auth, dark-mode
+   src/services/api.ts           → billing-dashboard, user-auth
+   src/styles/global.css         → dark-mode, header-redesign
+   ─────────────────────────────────────────
+   ```
+
+4. **Force sequential execution for conflicting features**: For each pair of features that share files, add a synthetic dependency from the later feature (in topological order) to the earlier one. This ensures they never run in parallel.
+   ```
+   Synthetic dependency added: dark-mode → user-auth (shared: Header.tsx)
+   ```
+
+5. **Re-run topological sort** with the synthetic dependencies added. Check for cycles — if adding synthetic dependencies creates a cycle, report the cycle and ask the user to resolve (which feature should go first).
+
+6. **Log the conflict resolution** in the batch plan output:
+   ```
+   Conflict resolution:
+   - dark-mode will run AFTER user-auth (shared files: Header.tsx)
+   - billing-dashboard will run AFTER user-auth (shared files: api.ts)
+   ```
+
+In sequential mode, all features already run one-at-a-time, so conflict analysis is informational only — print warnings but don't modify execution order.
 
 ### Phase 3: Execute
 

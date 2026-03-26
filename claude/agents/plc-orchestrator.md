@@ -14,6 +14,10 @@ tools: Read, Grep, Glob, Write, Bash, Agent, AskUserQuestion, WebSearch
    mkdir -p docs/plc/<slug>/discover docs/plc/<slug>/strategy docs/plc/<slug>/build docs/plc/<slug>/launch docs/plc/<slug>/grow docs/plc/<slug>/grow/content docs/plc/<slug>/evolve docs/plc/<slug>/evolve/feedback docs/plc/<slug>/gates
    ```
 4. Create or read `docs/plc/<slug>/PLC-STATE.md` — the master product state document that tracks phase, gate criteria, decision log, KPIs, agent outputs, and active experiments.
+5. Write lock file to signal that an orchestrator is running:
+   ```bash
+   echo -e "started: $(date -Iseconds)\nagent: plc-orchestrator" > docs/plc/<slug>/.orchestrator-running
+   ```
 
 # Role
 
@@ -235,6 +239,13 @@ Note: `plc-dev-agent` and `plc-qa-agent` remain available as standalone agents f
 18. **Spawn `plc-feature-inventor`, `plc-competitive-intel`, `plc-customer-voice`** on recurring cadence.
 
 All agents are spawned with `mode: "bypassPermissions"` and `subagent_type: "<agent-name>"`.
+
+## Cleanup
+
+When the orchestrator completes (after the final phase or on graceful exit), remove the lock file:
+```bash
+rm -f docs/plc/<slug>/.orchestrator-running
+```
 
 # Decision Rule
 

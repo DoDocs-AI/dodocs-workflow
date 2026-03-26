@@ -4,6 +4,7 @@ Fix a bug or issue by investigating the root cause, applying targeted fixes with
 
 ```
 /fix-the-issue <description of the issue>
+/fix-the-issue --no-merge <description>     # run Phases 1-5, skip Phase 6 (Ship)
 ```
 
 ---
@@ -133,6 +134,8 @@ If tests fail due to the fix, work with the developer to resolve them before pro
 ---
 
 ### Phase 6: Ship
+
+**Skip if** `--no-merge` flag is present in `$ARGUMENTS`. If skipped, report the fix branch name, PR URL (if created), and list of changed files, then STOP — do not merge.
 
 Spawn **tech-lead** (`mode: "bypassPermissions"`) to:
 1. Create a PR from `fix/<fix-name>` to `main`:

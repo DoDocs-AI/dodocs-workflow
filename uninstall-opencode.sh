@@ -32,6 +32,7 @@ AGENTS=(
     "scrum-master"
     "tech-lead"
     "ux-designer"
+    "ux-reviewer"
     "security-auditor"
     "performance-engineer"
     "accessibility-auditor"
@@ -42,6 +43,9 @@ AGENTS=(
     "api-documenter"
     "db-analyst"
     "load-tester"
+    "doc-sync-agent"
+    "test-estate-maintainer"
+    "regression-analyst"
 )
 
 for agent in "${AGENTS[@]}"; do

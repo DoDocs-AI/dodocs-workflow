@@ -1,8 +1,8 @@
 # dodocs-workflow Features
 
-> v1.7.0 | Autonomous Scrum Team + Product Lifecycle Framework for Claude Code & OpenCode
+> v1.11.0 | Autonomous Scrum Team + Product Lifecycle Framework for Claude Code & OpenCode
 
-dodocs-workflow turns a one-line feature description into a production-ready pull request. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation. The Product Lifecycle (PLC) framework extends this with 20+ agents across 6 phases taking any product from concept to profitable business.
+dodocs-workflow turns a one-line feature description into a production-ready pull request. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation. The `/ship` command wraps each feature with post-build hygiene — doc sync, test maintenance, regression analysis, and multi-perspective validation — ensuring every feature leaves the project in a clean state. The `/fix-and-ship` command applies the same hygiene to bug fixes, preventing docs and tests from going stale when shared components change. The Product Lifecycle (PLC) framework extends this with 20+ agents across 6 phases taking any product from concept to profitable business. The Project Supervisor provides automated health monitoring and auto-fix for stalled projects.
 
 ---
 
@@ -22,6 +22,9 @@ dodocs-workflow turns a one-line feature description into a production-ready pul
   - [Product Lifecycle](#11-product-lifecycle)
   - [Product Launch](#12-product-launch)
   - [GTM Team](#13-gtm-team)
+  - [Project Supervisor](#14-project-supervisor)
+  - [Ship](#15-ship)
+  - [Fix and Ship](#16-fix-and-ship)
 - [Agent Roster](#agent-roster)
   - [Scrum Team Agents](#scrum-team-agents-13)
   - [PLC Scrum Team Agents](#plc-scrum-team-agents-13)
@@ -305,6 +308,103 @@ Full-cycle product lifecycle pipeline — 20+ agents across 6 phases taking a pr
 
 ---
 
+### 14. Project Supervisor
+
+**Command**: `/supervisor`
+
+Hourly health check and auto-fix service. Scans all active PLC projects and scrum-team feature branches, produces a health dashboard, and auto-spawns the right agents to unblock stalled work.
+
+**What it does**:
+- Discovers all active PLC projects (`docs/plc/*/PLC-STATE.md`) and scrum-team features (`feature/*` branches)
+- Assesses health of each project: HEALTHY, AT_RISK, STALLED, BLOCKED, or ACTIVE
+- Detects running orchestrators via lock files — never interferes with active work
+- Produces a dashboard at `docs/supervisor/DASHBOARD.md`
+- Auto-spawns agents to fix stalled projects (max 3 per run)
+- Tracks history in `docs/supervisor/SUPERVISOR-LOG.md`
+- Escalates to human when auto-fix fails repeatedly or systemic issues detected
+
+**Flags**:
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--report-only` | false | Dashboard only, no auto-fix |
+| `--fix-only <slug>` | (none) | Target single project |
+| `--stall-threshold <hours>` | 2 | Hours before declaring stalled |
+| `--verbose` | false | Per-agent detail in dashboard |
+
+**Automated monitoring**: `/loop 1h /supervisor` — each run is stateless, reads filesystem, acts, exits.
+
+**Use case**: Keep projects moving when orchestrator sessions end due to context limits, timeouts, or user disconnection.
+
+---
+
+### 15. Ship
+
+**Command**: `/ship`
+
+Full development lifecycle command — wraps each feature implementation with post-build hygiene (documentation sync, test maintenance, regression analysis, multi-perspective validation) and feeds issues back to developers for fixes before moving to the next feature.
+
+**What it does**:
+- **Phase 0**: Discovers approved features from `docs/features/`, captures E2E baseline on main
+- **Phase 1**: Parses dependency annotations, topological sort for execution order
+- **Per feature (Phases 2-6)**:
+  - Phase 2: Delegates to `/scrum-team --auto` to build the feature
+  - Phase 3: `doc-sync-agent` updates project docs (README, API docs, architecture)
+  - Phase 4: `test-estate-maintainer` updates existing tests broken by the feature
+  - Phase 5: `regression-analyst` runs full E2E suite, classifies failures, coordinates fixes
+  - Phase 6: Smart-triggered auditors (UX, security, performance, accessibility) validate quality
+  - If issues found → developers fix → code-reviewer reviews → re-run failing phases
+- **Phase 7**: Produces SHIP-REPORT.md with per-feature results and project health comparison
+
+**Key design**: Hygiene phases run PER FEATURE, not once at the end. Each feature leaves the project in a clean state before the next one starts.
+
+**Flags**:
+| Flag | Effect |
+|------|--------|
+| `--features "a, b, c"` | Explicit feature list (otherwise auto-discover) |
+| `--skip-validation` | Skip Phase 6 (multi-perspective validation) |
+| `--skip-docs` | Skip Phase 3 (documentation sync) |
+| `--skip-regression` | Skip Phase 5 (regression analysis) |
+| `--merge` | Auto-merge all passing PRs after Phase 7 |
+| `--parallel` | Parallel features when no file conflicts |
+| `--size small\|medium\|large` | Team size for scrum-team |
+
+**Use case**: Overnight autonomous pipeline — prepare features during the day with `/prepare-feature`, then run `/ship` overnight to build, validate, and ship them all.
+
+---
+
+### 16. Fix and Ship
+
+**Command**: `/fix-and-ship <description>`
+
+Fix a bug with full hygiene — applies the fix via `/fix-the-issue`, then runs documentation sync, test estate maintenance, regression analysis, and optional multi-perspective validation before shipping. Prevents docs and tests from going stale when a fix touches shared components, endpoints, or data models.
+
+**What it does**:
+- **Phase 1**: Captures E2E baseline on main
+- **Phase 2**: Delegates to `/fix-the-issue --no-merge` (investigation, fix, code review, QA)
+- **Phase 3**: `doc-sync-agent` updates project docs affected by the fix
+- **Phase 4**: `test-estate-maintainer` updates existing tests from other features that reference changed areas
+- **Phase 5**: `regression-analyst` runs full E2E suite, classifies failures, coordinates fixes (max 2 iterations)
+- **Phase 6**: Smart-triggered validation auditors (only for security/auth fixes or when `--validate` flag set)
+- **Phase 7**: Squash-merge the fix PR
+- **Phase 8**: Produces FIX-SHIP-REPORT.md with hygiene results summary
+
+**Agents**: tech-lead, frontend-dev, backend-dev, code-reviewer, qa-automation (from `/fix-the-issue`) + doc-sync-agent, test-estate-maintainer, regression-analyst (from `/ship`)
+
+**Flags**:
+| Flag | Effect |
+|------|--------|
+| `--skip-docs` | Skip Phase 3 (documentation sync) |
+| `--skip-tests` | Skip Phase 4 (test estate maintenance) |
+| `--skip-regression` | Skip Phase 5 (regression check) |
+| `--validate` | Force Phase 6 (multi-perspective validation) |
+| `--no-merge` | Do everything but don't merge the PR |
+
+**Output**: Fix branch with atomic commits, hygiene reports in `docs/fixes/<fix-name>/`, and a merged PR.
+
+**Use case**: When a bug fix changes a shared component, endpoint, or data model and you need to ensure existing tests and docs from other features don't go stale.
+
+---
+
 ## Agent Roster
 
 ### Scrum Team Agents (13)
@@ -346,6 +446,11 @@ Full-cycle product lifecycle pipeline — 20+ agents across 6 phases taking a pr
 | Mockup Validator | Sonnet | `/prepare-feature` — validates mockups against requirements |
 | Brainstorm Facilitator | Opus | `/brainstorm` — adversarial feature idea testing |
 | Feature Manager | Sonnet | `/batch-features` — DAG-aware batch scheduling |
+| Quality Metrics Collector | Sonnet | Phase 5 — collects quality metrics (lines changed, test ratio, AC coverage, complexity) |
+| Project Supervisor | Opus | `/supervisor` — hourly health check, dashboard, auto-fix for stalled projects |
+| Doc Sync Agent | Sonnet | `/ship` — post-feature documentation synchronization |
+| Test Estate Maintainer | Sonnet | `/ship` — project-wide test maintenance after feature changes |
+| Regression Analyst | Sonnet | `/ship` — regression classification and fix coordination |
 
 ### PLC Scrum Team Agents (13)
 
@@ -450,9 +555,13 @@ Phase 5: Integration Verification
   Complete E2E suite run
   Final smoke test
   Full-diff code review
+  Quality metrics collection (test ratio, complexity, AC coverage)
+  Security review (auto-triggered for auth/security/migration changes)
 
 Phase 6: Ship
-  Tech Lead creates PR to main
+  Definition of Done gate (10-item checklist)
+  Phase Gates enforcement (all gates must PASS)
+  Tech Lead creates PR with rollback plan
   Team lead reports summary
 ```
 
@@ -469,6 +578,12 @@ Phase 6: Ship
 **Atomic commits**: One commit per completed task. Cleaner history, easier reviews, task-level rollbacks.
 
 **Model strategy**: Planning and review roles (Product Owner, Architect, Code Reviewer, Scrum Master) use Opus for higher reasoning capability. Execution roles (developers, tech lead, QA) use Sonnet for speed and cost efficiency. Manual Tester uses Haiku for frequent browser interactions.
+
+**Quality gates**: 10-item Definition of Done checklist enforced by tech-lead before PR creation. Acceptance criteria traceability ensures every AC maps to test cases. Automated pre-review checks (compile, lint, scope, size) run before manual code review. Quality metrics (test ratio, complexity, AC coverage) collected during integration verification.
+
+**Predictability**: Phase timeout detection warns when phases exceed time budgets. Effort estimation (XS–XL with hour ranges) provides visibility into task scope. Regression baseline captures pre-existing test failures before work begins so they aren't confused with new regressions. Rollback plans included in every PR.
+
+**Safety nets**: Security-auditor auto-triggered when feature diffs touch auth/security/migration/route files. Cross-feature conflict detection in batch mode prevents parallel features from editing shared files. Phase Gates table in PROGRESS.md acts as a control mechanism — phases cannot advance when gates show blockers.
 
 **Communication**: Agents coordinate via shared task lists, direct messages, shared files on disk (Feature Brief, Architecture, test cases), and a real-time PROGRESS.md dashboard.
 
@@ -517,8 +632,8 @@ cd dodocs-workflow && bash install-opencode.sh
 **Check version**: `/dodocs-workflow version`
 
 **What gets installed** (to `~/.claude/` or `~/.opencode/`):
-- 76 agent definitions in `agents/` (Claude Code) / 21 in `agents/` (OpenCode)
-- 21 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
+- 82 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
+- 24 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
 - Docker runtime files in `docker/`
 - Config template
 - Status line script with auto-update notifications

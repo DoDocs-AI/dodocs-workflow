@@ -4,7 +4,7 @@ set -euo pipefail
 # dodocs-workflow installer
 # Installs the Scrum Team workflow for OpenCode
 
-REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.6.0"
+REPO_URL="https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.11.0"
 OPENCODE_DIR="$HOME/.opencode"
 VERSION_FILE="$OPENCODE_DIR/.dodocs-workflow-version"
 
@@ -66,6 +66,7 @@ AGENTS=(
     "scrum-master"
     "tech-lead"
     "ux-designer"
+    "ux-reviewer"
     "security-auditor"
     "performance-engineer"
     "accessibility-auditor"
@@ -76,6 +77,9 @@ AGENTS=(
     "api-documenter"
     "db-analyst"
     "load-tester"
+    "doc-sync-agent"
+    "test-estate-maintainer"
+    "regression-analyst"
 )
 
 # Install agent files
@@ -148,7 +152,7 @@ echo ""
 echo "Installed to: $OPENCODE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.opencode/agents/          - 21 agent definitions"
+echo "  ~/.opencode/agents/          - 24 agent definitions"
 echo "  ~/.opencode/commands/        - scrum-team + prepare-for-production + dodocs-workflow + change-request commands"
 echo "  ~/.opencode/statusline-dodocs-workflow.sh"
 echo "  ~/.opencode/scrum-team-config.template.md"

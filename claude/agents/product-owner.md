@@ -87,6 +87,24 @@ Use Edit tool to make these changes directly to the file.
 
 <feature_brief_format>
 The Feature Brief must include:
+- **Frontmatter** (first thing in the file):
+  ```yaml
+  ---
+  feature: <slug>
+  title: <Feature Name>
+  status: draft
+  type: feature
+  tags: []
+  created: <YYYY-MM-DD>
+  ---
+  ```
+- **Related Docs** (last section):
+  ```
+  ## Related Docs
+  - [[ARCHITECTURE|Architecture]]
+  - [[UX-DESIGN|UX Design]]
+  - [[PROGRESS|Progress]]
+  ```
 - **Problem Statement**: What user problem this solves
 - **Target Users**: Who will use this feature
 - **User Stories**: As a [role], I want [action], so that [benefit]

@@ -285,6 +285,11 @@ If "Abandon": print "Feature '<slug>' abandoned. Folder kept at docs/features/<s
 ## PROGRESS.md Template
 
 ```markdown
+---
+feature: <feature-name>
+type: progress
+---
+
 # Progress: <feature-name>
 
 ## Current Phase: D1 — Requirements
@@ -318,6 +323,11 @@ If "Abandon": print "Feature '<slug>' abandoned. Folder kept at docs/features/<s
 
 ## Timeline
 - [timestamp] prepare-feature: Feature folder created, STATUS=draft
+
+## Related Docs
+- [[FEATURE-BRIEF|Feature Brief]]
+- [[ARCHITECTURE|Architecture]]
+- [[UX-DESIGN|UX Design]]
 ```
 
 The feature to prepare: $ARGUMENTS

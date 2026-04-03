@@ -78,6 +78,13 @@ Use Edit tool to make these changes directly to the file.
 
 <architecture_doc_format>
 The Architecture document must include:
+- **Frontmatter** (first thing in the file):
+  ```yaml
+  ---
+  feature: <slug>
+  type: architecture
+  ---
+  ```
 - **Backend Endpoints**: HTTP method, path, request/response bodies, auth requirements
 - **Database Entities**: New tables/columns, migration SQL (using the **Migration Tool** from the project config)
 - **Services**: Business logic layer design
@@ -88,6 +95,12 @@ The Architecture document must include:
 - **Routes**: New routes (all routes under the **Route Prefix** from the project config)
 - **API Contracts**: Full request/response examples for each endpoint
 - **File Inventory**: Exact list of files to create/modify
+- **Related Docs** (last section):
+  ```
+  ## Related Docs
+  - [[FEATURE-BRIEF|Feature Brief]]
+  - [[UX-DESIGN|UX Design]]
+  ```
 </architecture_doc_format>
 
 <auto_mode>

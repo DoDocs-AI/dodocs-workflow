@@ -373,6 +373,11 @@ The team maintains a shared **PROGRESS.md** file at `<feature-docs>/<feature-nam
 The team lead creates the initial PROGRESS.md using this template:
 
 ```markdown
+---
+feature: <feature-name>
+type: progress
+---
+
 # Progress: <feature-name>
 
 ## Current Phase
@@ -453,6 +458,11 @@ Phase 1 — Requirements + UX Research
 | Feature Branch | feature/<feature-name> |
 | PR URL | — |
 | Completed | <!-- tech-lead: fill with completion date --> |
+
+## Related Docs
+- [[FEATURE-BRIEF|Feature Brief]]
+- [[ARCHITECTURE|Architecture]]
+- [[UX-DESIGN|UX Design]]
 ```
 
 > **Note on mockup rows**: When creating PROGRESS.md, if `docs/features/<feature-slug>/mockups/` already

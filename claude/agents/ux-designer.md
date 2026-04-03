@@ -70,6 +70,13 @@ Use Edit tool to make these changes directly to the file.
 
 <ux_design_format>
 The UX Design document must include:
+- **Frontmatter** (first thing in the file):
+  ```yaml
+  ---
+  feature: <slug>
+  type: ux-design
+  ---
+  ```
 - **Existing Patterns Referenced**: Which existing pages/components were used as reference
 - **Navigation & Entry Points**: How users access the feature (sidebar, buttons, routes — using the **Route Prefix** from the project config)
 - **User Flows**: Step-by-step journeys with decision points
@@ -78,4 +85,10 @@ The UX Design document must include:
 - **Form Interactions**: Validation, error messages, submit behavior
 - **Responsive Behavior**: Desktop vs mobile considerations
 - **Accessibility**: Keyboard navigation, screen reader support
+- **Related Docs** (last section):
+  ```
+  ## Related Docs
+  - [[FEATURE-BRIEF|Feature Brief]]
+  - [[ARCHITECTURE|Architecture]]
+  ```
 </ux_design_format>

@@ -67,11 +67,25 @@ Use Edit tool to make these changes directly to the file.
 </acceptance_criteria_traceability>
 
 <test_case_format>
-Follow the format found in existing test case files. Each test case should include:
+Follow the format found in existing test case files. Each test case file must start with frontmatter:
+```yaml
+---
+feature: <slug>
+type: test-cases
+area: <User Story Name>
+---
+```
+Each test case should include:
 - Test case ID (e.g., TC-001)
 - Description
 - Preconditions
 - Steps to execute
 - Expected results
 - Priority (Critical/High/Medium/Low)
+
+End each file with a related docs section:
+```
+## Related Docs
+- [[../features/<slug>/FEATURE-BRIEF|Feature Brief]]
+```
 </test_case_format>

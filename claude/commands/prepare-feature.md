@@ -240,10 +240,18 @@ Write `approved` to `docs/features/<slug>/STATUS`.
 Update PROGRESS.md: D4 → Done, all daytime phases complete.
 Print:
 ```
-Feature '<slug>' approved and queued for development.
+✅ Feature "<feature-name>" is approved and ready for development!
 
-Run /batch-features when ready to start overnight development.
-Only approved features will be picked up by batch-features.
+**Next step — continue in OpenHands:**
+1. Push the feature branch:
+   git push -u origin feature/<slug>
+
+2. Open https://oh.dodocs.ai
+3. Select repository and branch: feature/<slug>
+4. In the chat, type:
+   /scrum-team <feature-name> --auto
+
+OpenHands will detect the existing artifacts and skip straight to Task Breakdown → Build → Ship.
 ```
 
 **If "Request changes":**

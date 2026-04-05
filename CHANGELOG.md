@@ -2,6 +2,10 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.13.1] - 2026-04-05
+
+feat: add OpenHands handoff message to prepare-feature; add SKIP_PREP artifact detection to scrum-team
+
 ## [v1.5.20] - 2026-02-27
 
 feat: /change-request command — targeted changes to existing feature areas

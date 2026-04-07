@@ -2,6 +2,20 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.14.0] - 2026-04-07
+
+feat: add /wiki command and wiki-maintainer agent — compiled knowledge layer at docs/wiki/
+
+Adds `/wiki` command with four sub-commands:
+- `init` — bootstraps `docs/wiki/` with README.md, COVERAGE.md, and _template.md
+- `ingest <slug>` — synthesizes a feature's docs into a concise wiki entry at `docs/wiki/<slug>.md`
+- `coverage` — reports which features have/haven't been ingested (runs bash directly, no agent)
+- `lint` — validates all wiki entries for consistency and completeness, writes LINT-REPORT.md
+
+Companion `wiki-maintainer` agent handles all three write tasks (init/ingest/lint) with
+full Read/Write/Edit/Bash/Grep/Glob access. Non-destructive: never modifies `docs/features/`
+or `docs/e2e-testcases/`.
+
 ## [v1.13.1] - 2026-04-05
 
 feat: add OpenHands handoff message to prepare-feature; add SKIP_PREP artifact detection to scrum-team

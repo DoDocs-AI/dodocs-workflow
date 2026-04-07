@@ -139,6 +139,7 @@ AGENTS=(
     "regression-analyst"
     "web-designer"
     "design-validator"
+    "wiki-maintainer"
 )
 
 # Install agent files
@@ -179,6 +180,7 @@ COMMANDS=(
     "ship"
     "fix-and-ship"
     "web-design"
+    "wiki"
 )
 
 print_info "Installing commands..."
@@ -255,8 +257,8 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 83 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + fix-and-ship + rebase + brainstorm + change-request + gtm-team + supervisor + ship + web-design commands"
+echo "  ~/.claude/agents/          - 84 agent definitions"
+echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + fix-and-ship + rebase + brainstorm + change-request + gtm-team + supervisor + ship + web-design + wiki commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"

@@ -1,13 +1,19 @@
-Maintain a compiled knowledge layer at `docs/wiki/` — init the wiki, ingest feature docs, check coverage, or lint entries. Non-destructive: never modifies `docs/features/` or `docs/e2e-testcases/`.
+Maintain a compiled knowledge layer at `docs/wiki/` — init the wiki, ingest any docs from the `docs/` folder, check coverage, or lint entries. Non-destructive: never modifies source doc directories.
 
 ## Usage
 
 ```
 /wiki init                        # bootstrap docs/wiki/ structure
-/wiki ingest <feature-slug>       # compile one feature's docs into a wiki entry
-/wiki coverage                    # report which features are missing wiki entries
+/wiki ingest <doc-path>           # compile any docs/  into a wiki entry
+/wiki coverage                    # report which doc directories are missing wiki entries
 /wiki lint                        # validate all wiki entries for consistency
 ```
+
+`<doc-path>` is a path relative to `docs/` — examples:
+- `features/my-feature`  → reads `docs/features/my-feature/`
+- `plc/my-project/build` → reads `docs/plc/my-project/build/`
+- `api`                  → reads `docs/api/`
+- `my-feature`           → backward-compat: falls back to `docs/features/my-feature/`
 
 ---
 
@@ -23,15 +29,18 @@ When calling the Agent tool, ALWAYS include `mode: "bypassPermissions"` in the p
 
 **Parse `$ARGUMENTS`:**
 - First token → `WIKI_CMD` (one of: `init`, `ingest`, `coverage`, `lint`)
-- Second token (if present) → `FEATURE_SLUG`
+- Remaining tokens joined → `INPUT_PATH`
 
 If `WIKI_CMD` is empty or not one of the four valid values, STOP and print:
 ```
-Usage: /wiki <init|ingest|coverage|lint> [feature-slug]
+Usage: /wiki <init|ingest|coverage|lint> [doc-path]
   init                 — bootstrap docs/wiki/ directory structure
-  ingest <slug>        — compile docs/features/<slug>/ into docs/wiki/<slug>.md
-  coverage             — list features missing wiki entries
+  ingest <doc-path>    — compile docs/<doc-path>/ into docs/wiki/<entry-slug>.md
+  coverage             — list doc directories missing wiki entries
   lint                 — validate all existing wiki entries
+
+<doc-path> examples: features/my-feature, plc/my-project, api
+Bare slug (no /) falls back to docs/features/<slug>/ for backward compat.
 ```
 
 **Read config:**
@@ -63,7 +72,11 @@ Wiki initialized at docs/wiki/
   docs/wiki/COVERAGE.md     — coverage tracker
   docs/wiki/_template.md    — entry template
 
-Run `/wiki ingest <feature-slug>` to add your first entry.
+Run `/wiki ingest <doc-path>` to add your first entry.
+Examples:
+  /wiki ingest features/my-feature
+  /wiki ingest plc/my-project
+  /wiki ingest api
 ```
 
 ---
@@ -72,11 +85,21 @@ Run `/wiki ingest <feature-slug>` to add your first entry.
 
 **Trigger**: `WIKI_CMD == "ingest"`
 
-If `FEATURE_SLUG` is empty, STOP:
-> "Usage: `/wiki ingest <feature-slug>` — provide the slug of the feature to ingest."
+If `INPUT_PATH` is empty, STOP:
+> "Usage: `/wiki ingest <doc-path>` — provide a path relative to `docs/` (e.g. `features/my-feature`, `plc/my-project`, `api`)."
 
-Check that `docs/features/$FEATURE_SLUG/` exists. If it does not exist, STOP:
-> "Feature directory not found: `docs/features/$FEATURE_SLUG/`. Check the slug and try again."
+**Resolve source directory and entry slug:**
+
+1. If `docs/$INPUT_PATH/` exists as a directory:
+   - `SOURCE_DIR = docs/$INPUT_PATH`
+   - `ENTRY_SLUG` = `$INPUT_PATH` with all `/` replaced by `-`
+
+2. Else if `$INPUT_PATH` contains no `/` and `docs/features/$INPUT_PATH/` exists (backward compat):
+   - `SOURCE_DIR = docs/features/$INPUT_PATH`
+   - `ENTRY_SLUG = $INPUT_PATH`
+
+3. Otherwise STOP:
+   > "Directory not found: `docs/$INPUT_PATH/`. Check the path and try again."
 
 Check that `docs/wiki/` exists (wiki must be initialized). If it does not exist, STOP:
 > "Wiki not initialized. Run `/wiki init` first."
@@ -86,17 +109,18 @@ Spawn the `wiki-maintainer` agent (`mode: "bypassPermissions"`) with this prompt
 ```
 WIKI_TASK=ingest
 APP_NAME=<APP_NAME from config>
-FEATURE_SLUG=<FEATURE_SLUG>
-FEATURE_DIR=docs/features/<FEATURE_SLUG>
+INPUT_PATH=<INPUT_PATH>
+SOURCE_DIR=<SOURCE_DIR>
+ENTRY_SLUG=<ENTRY_SLUG>
 WIKI_DIR=docs/wiki
-WIKI_ENTRY=docs/wiki/<FEATURE_SLUG>.md
+WIKI_ENTRY=docs/wiki/<ENTRY_SLUG>.md
 
-Ingest the feature docs into the wiki. Follow the TASK: INGEST instructions in your system prompt.
+Ingest the documentation into the wiki. Follow the TASK: INGEST instructions in your system prompt.
 ```
 
 After the agent completes, print:
 ```
-Wiki entry created: docs/wiki/<FEATURE_SLUG>.md
+Wiki entry created: docs/wiki/<ENTRY_SLUG>.md
 Coverage updated:  docs/wiki/COVERAGE.md
 Index updated:     docs/wiki/README.md
 
@@ -115,38 +139,53 @@ Check that `docs/wiki/` exists. If it does not exist, STOP:
 Run this directly (no agent needed):
 
 ```bash
-# List all feature slugs
-FEATURES=$(ls docs/features/ 2>/dev/null | sort)
-# List all wiki entry slugs (exclude special files)
-WIKI=$(ls docs/wiki/*.md 2>/dev/null | xargs -I{} basename {} .md | grep -v '^README$' | grep -v '^COVERAGE$' | grep -v '^_template$' | sort)
+# Collect all doc directories (any dir under docs/ that contains .md files, excluding docs/wiki/)
+DOC_DIRS=$(find docs/ -mindepth 1 -type d ! -path 'docs/wiki' ! -path 'docs/wiki/*' 2>/dev/null | while read d; do
+  if ls "$d"/*.md >/dev/null 2>&1; then
+    # Produce path relative to docs/
+    echo "${d#docs/}"
+  fi
+done | sort)
+
+# Build wiki slug list (exclude special files)
+WIKI=$(ls docs/wiki/*.md 2>/dev/null | xargs -I{} basename {} .md | grep -v '^README$' | grep -v '^COVERAGE$' | grep -v '^LINT-REPORT$' | grep -v '^_template$' | sort)
 
 echo "=== Wiki Coverage Report ==="
 echo ""
-echo "Features with wiki entries:"
-for slug in $FEATURES; do
+echo "Doc directories with wiki entries:"
+for rel_path in $DOC_DIRS; do
+  slug=$(echo "$rel_path" | tr '/' '-')
   if echo "$WIKI" | grep -q "^${slug}$"; then
-    echo "  [x] $slug"
+    echo "  [x] $rel_path  →  docs/wiki/${slug}.md"
   fi
 done
 
 echo ""
-echo "Features MISSING wiki entries:"
+echo "Doc directories MISSING wiki entries:"
 MISSING=0
-for slug in $FEATURES; do
+for rel_path in $DOC_DIRS; do
+  slug=$(echo "$rel_path" | tr '/' '-')
   if ! echo "$WIKI" | grep -q "^${slug}$"; then
-    echo "  [ ] $slug"
+    echo "  [ ] $rel_path"
     MISSING=$((MISSING + 1))
   fi
 done
 
 echo ""
-TOTAL=$(echo "$FEATURES" | wc -l | tr -d ' ')
+TOTAL=$(echo "$DOC_DIRS" | grep -c . || echo 0)
 COVERED=$((TOTAL - MISSING))
-echo "Coverage: $COVERED / $TOTAL features"
+echo "Coverage: $COVERED / $TOTAL doc directories"
 
 if [ "$MISSING" -gt 0 ]; then
   echo ""
-  echo "Run: /wiki ingest <slug>  for each missing feature."
+  echo "Run: /wiki ingest <doc-path>  for each missing directory."
+  echo "Example slugs missing:"
+  for rel_path in $DOC_DIRS; do
+    slug=$(echo "$rel_path" | tr '/' '-')
+    if ! echo "$WIKI" | grep -q "^${slug}$"; then
+      echo "  /wiki ingest $rel_path"
+    fi
+  done | head -5
 fi
 ```
 
@@ -173,5 +212,5 @@ Lint all wiki entries for consistency. Follow the TASK: LINT instructions in you
 
 After the agent completes, print the lint report summary returned by the agent. If there were issues, remind the user:
 ```
-Fix issues by re-running: /wiki ingest <feature-slug>
+Fix issues by re-running: /wiki ingest <doc-path>
 ```

@@ -2,6 +2,23 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.14.1] - 2026-04-08
+
+fix: extend /wiki ingest to support any docs/ path, not just features/
+
+The `/wiki ingest` command now accepts any documentation path under `docs/`, not just
+`docs/features/<slug>/`. This enables ingesting PLC phase outputs, architecture docs,
+API references, or any other structured documentation directory.
+
+### Changed
+- `/wiki ingest <doc-path>` — `<doc-path>` is now relative to `docs/` (e.g. `plc/my-project`, `api`, `features/my-feature`)
+- Backward compatible: bare slug with no `/` still falls back to `docs/features/<slug>/`
+- Entry slug derived from full path with `/` → `-` (e.g. `plc/my-project` → `docs/wiki/plc-my-project.md`)
+- `/wiki coverage` now scans all `docs/` subdirectories (not just `docs/features/`) for undocumented content
+- `wiki-maintainer` agent updated: flexible discovery adapts to any doc structure (feature, PLC, README-only, etc.)
+- Wiki entry frontmatter uses generic `slug:` field (backward-compat: `feature:` still accepted by lint)
+- Sections in wiki entries are now optional — only included when relevant content exists in source
+
 ## [v1.14.0] - 2026-04-07
 
 feat: add /wiki command and wiki-maintainer agent — compiled knowledge layer at docs/wiki/

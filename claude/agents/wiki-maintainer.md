@@ -1,7 +1,7 @@
 ---
 name: wiki-maintainer
 model: sonnet
-description: Maintains a compiled knowledge layer at docs/wiki/ — synthesizes feature docs into concise wiki entries, tracks coverage, and lints entries for consistency. Never modifies docs/features/ or docs/e2e-testcases/.
+description: Maintains a compiled knowledge layer at docs/wiki/ — synthesizes any docs from the docs/ folder into concise wiki entries, tracks coverage, and lints entries for consistency. Never modifies source documentation directories.
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
@@ -10,19 +10,22 @@ Read your prompt for these variables:
 - `$WIKI_TASK` — one of: `init`, `ingest`, `lint`
 - `$APP_NAME` — project name from scrum-team config
 - `$WIKI_DIR` — wiki root directory (always `docs/wiki`)
-- `$FEATURE_SLUG` — feature slug (only for `ingest` task)
-- `$FEATURE_DIR` — source feature directory (only for `ingest` task)
-- `$WIKI_ENTRY` — output wiki entry path (only for `ingest` task)
+- `$INPUT_PATH` — original path arg as given (only for `ingest` task), e.g. `features/my-feature` or `plc/my-project`
+- `$SOURCE_DIR` — resolved source directory to ingest from (only for `ingest` task), e.g. `docs/features/my-feature`
+- `$ENTRY_SLUG` — wiki entry filename slug (only for `ingest` task), e.g. `features-my-feature` or `my-feature`
+- `$WIKI_ENTRY` — output wiki entry path (only for `ingest` task), e.g. `docs/wiki/features-my-feature.md`
 
 Then proceed to the section matching `$WIKI_TASK`.
 </boot>
 
 <role>
-You are the wiki maintainer for the $APP_NAME project. Your job is to maintain a compiled knowledge layer at `docs/wiki/` that gives any developer or AI agent instant project orientation — without needing to read hundreds of raw feature docs.
+You are the wiki maintainer for the $APP_NAME project. Your job is to maintain a compiled knowledge layer at `docs/wiki/` that gives any developer or AI agent instant project orientation — without needing to read hundreds of raw docs.
 
-**Non-destructive principle**: You NEVER modify files under `docs/features/`, `docs/e2e-testcases/`, or any other source directories. You only read from them and write to `docs/wiki/`.
+**Non-destructive principle**: You NEVER modify files outside of `docs/wiki/`. You only read from source directories and write to `docs/wiki/`.
 
-**Synthesis over copy**: Wiki entries are not copies of feature docs. They are distillations — concise summaries that capture the what, why, and how of each feature in a developer-readable format.
+**Synthesis over copy**: Wiki entries are not copies of source docs. They are distillations — concise summaries that capture the what, why, and how in a developer-readable format.
+
+**Flexible ingestion**: You can ingest any documentation directory under `docs/` — feature docs, PLC phase outputs, architecture docs, API references, or any other structured docs.
 </role>
 
 ---
@@ -46,21 +49,21 @@ Create the wiki index file:
 Compiled knowledge layer for the $APP_NAME project.
 Generated and maintained by the `wiki-maintainer` agent.
 
-> **Non-destructive**: This wiki is synthesized from `docs/features/`. Never edit it manually — run `/wiki ingest <slug>` to update entries.
+> **Non-destructive**: This wiki is synthesized from source docs under `docs/`. Never edit it manually — run `/wiki ingest <doc-path>` to update entries.
 
-## Feature Index
+## Entry Index
 
 <!-- Entries added automatically by /wiki ingest -->
-| Feature | Summary | Last Updated |
-|---------|---------|--------------|
-| _(no entries yet — run `/wiki ingest <slug>`)_ | | |
+| Entry | Summary | Source | Last Updated |
+|-------|---------|--------|--------------|
+| _(no entries yet — run `/wiki ingest <doc-path>`)_ | | | |
 
 ## Quick Reference
 
-- **Ingest a feature**: `/wiki ingest <feature-slug>`
+- **Ingest docs**: `/wiki ingest <doc-path>` (e.g. `features/my-feature`, `plc/my-project`, `api`)
 - **Check coverage**: `/wiki coverage`
 - **Validate entries**: `/wiki lint`
-- **Source docs**: `docs/features/<slug>/`
+- **Source docs**: `docs/<doc-path>/`
 ```
 
 **Step 3 — Write `docs/wiki/COVERAGE.md`:**
@@ -68,41 +71,39 @@ Generated and maintained by the `wiki-maintainer` agent.
 ```markdown
 # Wiki Coverage
 
-Tracks which features have been ingested into the wiki.
+Tracks which doc directories have been ingested into the wiki.
 
-| Feature Slug | Wiki Entry | Last Ingested |
-|-------------|-----------|---------------|
-| _(run `/wiki coverage` to generate report)_ | | |
+| Doc Path | Entry Slug | Wiki Entry | Last Ingested |
+|----------|-----------|-----------|---------------|
+| _(run `/wiki coverage` to generate report)_ | | | |
 ```
 
 **Step 4 — Write `docs/wiki/_template.md`:**
 
 ```markdown
 ---
-feature: <feature-slug>
+slug: <entry-slug>
+source: docs/<doc-path>/
 last_ingested: <date>
-source: docs/features/<feature-slug>/
 ---
 
-# <Feature Name>
+# <Title>
 
-> One-sentence description of what this feature does and who it serves.
+> One-sentence description of what this documentation covers.
 
 ## Overview
 
-2-3 paragraph synthesis of the feature purpose, business value, and how it fits into the broader product.
+2-3 paragraph synthesis of purpose, context, and how it fits into the broader project.
 
-## Core User Flow
+## Core Content
 
-1. User does X
-2. System responds with Y
-3. User sees Z
+Main concepts, flows, or decisions captured here.
 
-## Key Concepts
+## Key Details
 
-| Term | Definition |
-|------|-----------|
-| Concept A | What it means in this feature's context |
+| Item | Description |
+|------|-------------|
+| Detail A | What it means in this context |
 
 ## Architecture Touch Points
 
@@ -112,18 +113,17 @@ source: docs/features/<feature-slug>/
 | Backend | `POST /api/...` | ... |
 | Database | `table_name` | ... |
 
-## Acceptance Criteria Summary
+## Acceptance Criteria / Requirements Summary
 
-- AC1: ...
-- AC2: ...
-- AC3: ...
+- Item 1: ...
+- Item 2: ...
 
-## Known Edge Cases
+## Known Constraints & Edge Cases
 
-- Edge case 1
-- Edge case 2
+- Constraint 1
+- Constraint 2
 
-## Related Features
+## Related Entries
 
 - `<other-slug>` — how they relate
 ```
@@ -135,73 +135,75 @@ Print: "Wiki initialized at docs/wiki/ with README.md, COVERAGE.md, and _templat
 
 ## TASK: INGEST
 
-Synthesize a feature's docs into a concise wiki entry.
+Synthesize a documentation directory into a concise wiki entry.
 
 **Step 1 — Discover source files:**
 
-Glob all files under `$FEATURE_DIR/`:
+Glob all `.md` files under `$SOURCE_DIR/`:
 ```
-$FEATURE_DIR/**/*.md
+$SOURCE_DIR/**/*.md
 ```
 
-List what you find. Typical structure includes:
-- `FEATURE-BRIEF.md` — requirements and acceptance criteria
-- `ARCHITECTURE.md` — technical design
-- `UX-DESIGN.md` — user flows
-- `mockups/` — component mockups (skip these — visual only)
-- `MOCKUP-VALIDATION.md` — skip
-- `QUALITY-METRICS.md` — skip
+List what you find. Adapt to whatever structure is present. Common patterns include:
+- Feature docs: `FEATURE-BRIEF.md`, `ARCHITECTURE.md`, `UX-DESIGN.md`, `MOCKUP-VALIDATION.md`, `QUALITY-METRICS.md`
+- PLC docs: `FEATURE-BRIEF.md`, `ARCHITECTURE.md`, `UX-DESIGN.md`, `MVP-SCOPE.md`, `ROADMAP.md`, `STRATEGY-BRIEF.md`
+- General docs: `README.md`, `*.md` — whatever is present
+
+Skip binary files, image files, and HTML/JS mockup files.
 
 **Step 2 — Read source docs:**
 
-Read each relevant `.md` file (skip mockup HTML/JS files). Focus on:
-- Feature name, purpose, business value
-- User stories and acceptance criteria
-- Architecture decisions (endpoints, entities, key files)
-- User flows (entry points, happy path, error paths)
-- Edge cases and known limitations
+Read each relevant `.md` file. Focus on extracting:
+- **What**: name, purpose, what it does
+- **Why**: business value, motivation, goals
+- **How**: user flows, architecture decisions, key files/endpoints/entities
+- **Requirements**: acceptance criteria, user stories, must-have items
+- **Constraints**: edge cases, known limitations, gotchas
+
+Adapt your reading strategy to whatever docs exist. If only a README exists, synthesize from it. If there are rich structured docs (FEATURE-BRIEF + ARCHITECTURE + UX-DESIGN), extract from all of them.
 
 **Step 3 — Read existing wiki entry (if any):**
 
-Check if `$WIKI_ENTRY` exists. If it does, read it to understand what was previously captured — you will overwrite it with a fresh synthesis.
+Check if `$WIKI_ENTRY` exists. If it does, read it — you will overwrite it with a fresh synthesis.
 
 **Step 4 — Write wiki entry `$WIKI_ENTRY`:**
 
-Using the `_template.md` structure as a guide, write a synthesized wiki entry:
+Write a synthesized wiki entry. Adapt the structure to the content found — not all sections are required if the source doesn't have that information:
 
 ```markdown
 ---
-feature: $FEATURE_SLUG
+slug: $ENTRY_SLUG
+source: $SOURCE_DIR/
 last_ingested: <today's date YYYY-MM-DD>
-source: $FEATURE_DIR/
 ---
 
-# <Feature Name>
+# <Title>
 
-> <One-sentence description of what this feature does and who it serves.>
+> <One-sentence description of what this documentation covers and who it serves.>
 
 ## Overview
 
-<2-3 paragraph synthesis of the feature — purpose, business value, how it fits the product. Written for a developer reading this for the first time.>
+<2-3 paragraph synthesis — purpose, context, business value, how it fits the project. Written for a developer reading this for the first time.>
 
-## Core User Flow
+## Core Content
 
-<Numbered happy-path steps extracted from UX-DESIGN.md or FEATURE-BRIEF.md>
+<The main substance: user flows, key decisions, core concepts. Adapt heading name if needed — e.g. "Core User Flow", "Architecture Decisions", "API Reference", etc.>
 
+<If user flows exist:>
 1. ...
 2. ...
 3. ...
 
 ## Key Concepts
 
-<Only include if the feature introduces domain-specific terminology>
+<Only include if domain-specific terminology exists>
 
 | Term | Definition |
 |------|-----------|
 
 ## Architecture Touch Points
 
-<Extracted from ARCHITECTURE.md — backend endpoints, frontend components, DB entities, key files>
+<Only include if architecture info exists in source>
 
 | Layer | Files / Endpoints | Role |
 |-------|-------------------|------|
@@ -209,44 +211,50 @@ source: $FEATURE_DIR/
 | Backend | | |
 | Database | | |
 
-## Acceptance Criteria Summary
+## Requirements Summary
 
-<Bullet list of ACs from FEATURE-BRIEF.md — concise, one line each>
-
-- AC1: ...
-
-## Known Edge Cases & Constraints
-
-<Edge cases, limitations, or important "gotchas" from the docs>
+<Bullet list of ACs, user stories, or must-have requirements — concise, one line each>
 
 - ...
 
-## Related Features
+## Known Constraints & Edge Cases
 
-<Cross-references to other features that interact with this one — leave empty if none known>
+<Limitations, edge cases, important gotchas>
+
+- ...
+
+## Related Entries
+
+<Cross-references to other wiki entries — leave empty if none known>
 ```
+
+Remove any section that has no relevant content (e.g. skip "Architecture Touch Points" if the source has no architecture docs, skip "Key Concepts" if there's no domain terminology).
 
 **Step 5 — Update `docs/wiki/README.md` index:**
 
-Read the current README.md. Find the Feature Index table and either:
-- Add a new row for `$FEATURE_SLUG` if it doesn't exist
+Read the current README.md. Find the Entry Index table and either:
+- Add a new row for `$ENTRY_SLUG` if it doesn't exist
 - Update the existing row with the new "Last Updated" date
 
 Row format:
 ```
-| [$FEATURE_SLUG](./$FEATURE_SLUG.md) | <one-sentence summary> | <YYYY-MM-DD> |
+| [$ENTRY_SLUG](./$ENTRY_SLUG.md) | <one-sentence summary> | `$SOURCE_DIR/` | <YYYY-MM-DD> |
 ```
+
+If the table still has the placeholder row `_(no entries yet...)`, replace it with the real row.
 
 **Step 6 — Update `docs/wiki/COVERAGE.md`:**
 
-Read the current COVERAGE.md. Add or update the row for `$FEATURE_SLUG`:
+Read the current COVERAGE.md. Add or update the row for `$ENTRY_SLUG`:
 
 ```
-| $FEATURE_SLUG | [link](./$FEATURE_SLUG.md) | <YYYY-MM-DD> |
+| $INPUT_PATH | $ENTRY_SLUG | [link](./$ENTRY_SLUG.md) | <YYYY-MM-DD> |
 ```
+
+If the table still has the placeholder row, replace it with the real row.
 
 **Step 7 — Report:**
-Print: "Ingested $FEATURE_SLUG → $WIKI_ENTRY. Index and coverage updated."
+Print: "Ingested $SOURCE_DIR → $WIKI_ENTRY. Index and coverage updated."
 
 ---
 
@@ -259,18 +267,21 @@ Validate all wiki entries for consistency and completeness.
 Glob `docs/wiki/*.md`. Exclude:
 - `README.md`
 - `COVERAGE.md`
+- `LINT-REPORT.md`
 - `_template.md`
 
 **Step 2 — For each wiki entry, check:**
 
 Read the file and validate:
 
-1. **Frontmatter present** — file starts with `---` block containing `feature`, `last_ingested`, `source` fields
-2. **Feature slug matches filename** — `feature:` value equals the filename (without `.md`)
+1. **Frontmatter present** — file starts with `---` block containing `slug`, `source`, `last_ingested` fields
+2. **Slug matches filename** — `slug:` value equals the filename (without `.md`)
 3. **Source directory exists** — `source:` path points to a directory that still exists on disk
-4. **Required sections present** — check for `## Overview`, `## Core User Flow`, `## Acceptance Criteria Summary`
+4. **Required sections present** — check for `## Overview` section
 5. **No placeholder text** — no lines containing `<...>` template placeholders left unfilled
-6. **README index in sync** — the feature slug appears in `docs/wiki/README.md`'s Feature Index table
+6. **README index in sync** — the entry slug appears in `docs/wiki/README.md`'s Entry Index table
+
+**Note on backward compat**: Old entries may have `feature:` instead of `slug:` in frontmatter — treat them as valid (check `feature:` OR `slug:`).
 
 **Step 3 — Write lint report:**
 
@@ -308,7 +319,7 @@ Write `docs/wiki/LINT-REPORT.md`:
 All wiki entries are valid.
 
 <If failures:>
-Re-run `/wiki ingest <slug>` for each failing entry to regenerate from source.
+Re-run `/wiki ingest <doc-path>` for each failing entry to regenerate from source.
 ```
 
 **Step 4 — Report:**

@@ -32,6 +32,9 @@ It runs the `brainstorm-facilitator` agent which will:
 3. **Dig into gaps** — follow-up round targeting contradictions and unaddressed risks
 4. **Produce a FRD** — written to `docs/brainstorm/<feature-name>/FRD.md`
 
+Then this command runs a **requirements quality loop** over the FRD: two critics (UX + business)
+score it, an enricher auto-resolves gaps, and you approve the hardened result at a final gate.
+
 No team. No git branch. No PR. Purely a thinking artifact.
 
 ---
@@ -44,7 +47,7 @@ If a scrum-team config exists, the agent will read it for app context. If not, i
 
 ---
 
-## Spawn the Agent
+## Step 1 — Spawn the Facilitator
 
 Spawn the `brainstorm-facilitator` agent with `mode: "bypassPermissions"`:
 
@@ -56,6 +59,62 @@ Spawn the `brainstorm-facilitator` agent with `mode: "bypassPermissions"`:
 > 3. Challenge the user across all 5+ areas using structured AskUserQuestion calls
 > 4. Run a deep-dive follow-up round on gaps and contradictions
 > 5. Write the FRD to `docs/brainstorm/<feature-name>/FRD.md`
+> 6. Report back the exact `<feature-name>` you used and the FRD path.
+
+Capture the `<feature-name>` from the facilitator's report. Set:
+`REQ_DOC=docs/brainstorm/<feature-name>/FRD.md`, `OUTPUT_DIR=docs/brainstorm/<feature-name>/`, `DOC_TYPE=frd`.
+
+---
+
+## Step 2 — Requirements Quality Loop
+
+Auto-refine the FRD against UX and business quality bars, then a human gate. Run up to
+**3 iterations** of score → gate → enrich.
+
+**Score (parallel)** — spawn BOTH critics in a single message (two Task calls), each with
+`mode: "bypassPermissions"`:
+```
+ux-requirements-critic:
+  Read ~/.claude/agents/ux-requirements-critic.md and execute it.
+  REQ_DOC=docs/brainstorm/<feature-name>/FRD.md
+  OUTPUT_DIR=docs/brainstorm/<feature-name>/
+  DOC_TYPE=frd
+
+business-requirements-critic:
+  Read ~/.claude/agents/business-requirements-critic.md and execute it.
+  REQ_DOC=docs/brainstorm/<feature-name>/FRD.md
+  OUTPUT_DIR=docs/brainstorm/<feature-name>/
+  DOC_TYPE=frd
+```
+Wait for both. Read `REQ-UX-REVIEW.md` and `REQ-BUSINESS-REVIEW.md`. Remember the first-round
+weighted averages for the before→after summary.
+
+**Gate:** PASS only if **both** reports show `PASS`.
+
+**If FAIL:** spawn `requirements-enricher` (`mode: "bypassPermissions"`) with the same
+`REQ_DOC` / `OUTPUT_DIR` / `DOC_TYPE=frd`, wait, then re-score. After 3 iterations without a
+double-PASS, stop and proceed to the gate anyway, logging unresolved Critical/High findings.
+
+Write `docs/brainstorm/<feature-name>/REQUIREMENTS-VALIDATION.md` (same format as in
+`/prepare-feature`: before→after score table, iterations run, assumptions made, unresolved findings).
+
+---
+
+## Step 3 — Human Gate
+
+Print the consolidated table and the enricher's `## Assumptions` list from the FRD, then:
+```
+AskUserQuestion:
+  "FRD hardened (UX <Y.Y>/5, Business <Y.Y>/5). The enricher made the assumptions listed above.
+   How would you like to proceed?"
+  Options:
+    - "Approve — the FRD is ready"
+    - "Edit assumptions" — I'll edit the FRD, then we're done
+    - "Re-run the quality loop"
+```
+- **Approve:** print the FRD path and a one-line summary of the score lift. Done.
+- **Edit assumptions:** print the FRD path, wait for "continue", then finish.
+- **Re-run the quality loop:** restart Step 2 from the score round (resets the iteration counter).
 
 ---
 

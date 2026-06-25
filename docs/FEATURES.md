@@ -204,8 +204,9 @@ AI-driven feature idea stress-testing — research the market, challenge the ide
 - Performs 5-6 web searches to research the competitive landscape
 - Asks you tough questions across 5+ areas (user need, technical feasibility, scope, edge cases, alternatives)
 - Produces a structured FRD.md with validated requirements
+- Runs a **requirements quality loop** on the FRD: UX + business critics score it, an enricher auto-resolves gaps (up to 3×), then you approve the hardened result at a gate
 
-**Output**: `docs/brainstorm/<feature-name>/FRD.md`
+**Output**: `docs/brainstorm/<feature-name>/FRD.md`, plus `REQ-UX-REVIEW.md`, `REQ-BUSINESS-REVIEW.md`, `REQUIREMENTS-VALIDATION.md`
 
 **No project config required** — works as a standalone discovery tool.
 
@@ -218,12 +219,13 @@ AI-driven feature idea stress-testing — research the market, challenge the ide
 Daytime preparation pipeline: interactive requirements gathering, framework-native mockups, and validation — without building anything.
 
 **What it does**:
-- Product Owner gathers requirements and writes FEATURE-BRIEF.md
-- Mockup Designer creates framework-native UI components using your real design system
-- Mockup Validator cross-checks mockups against the Feature Brief
-- You approve the outputs
+- Product Owner gathers requirements and writes FEATURE-BRIEF.md (Phase D1)
+- **Requirements quality loop (Phase D1.5)** — UX + business critics score the brief, an enricher auto-resolves gaps (up to 3×), then you approve at a gate before any mockup work
+- Mockup Designer creates framework-native UI components using your real design system (D2)
+- Mockup Validator cross-checks mockups against the Feature Brief (D3)
+- You approve the outputs (D4)
 
-**Output**: FEATURE-BRIEF.md, mockup components in `docs/features/<feature>/mockups/`, MOCKUP-VALIDATION.md
+**Output**: FEATURE-BRIEF.md, REQ-UX-REVIEW.md, REQ-BUSINESS-REVIEW.md, REQUIREMENTS-VALIDATION.md, mockup components in `docs/features/<feature>/mockups/`, MOCKUP-VALIDATION.md
 
 **Use case**: Prepare features during the day (interactive), then batch-run `/scrum-team` overnight in `--auto` mode.
 
@@ -495,6 +497,9 @@ Creative website design generator — spawns a designer agent to create an award
 |-------|-------|---------|
 | Mockup Designer | Sonnet | `/prepare-feature` — creates framework-native UI mockups |
 | Mockup Validator | Sonnet | `/prepare-feature` — validates mockups against requirements |
+| UX Requirements Critic | Opus | `/prepare-feature`, `/brainstorm` — scores the brief/FRD on 6 UX-requirement dimensions (PASS/FAIL) |
+| Business Requirements Critic | Opus | `/prepare-feature`, `/brainstorm` — scores the brief/FRD on 6 business dimensions (PASS/FAIL) |
+| Requirements Enricher | Opus | `/prepare-feature`, `/brainstorm` — non-interactive rewrite that resolves critic findings, marking assumptions |
 | Brainstorm Facilitator | Opus | `/brainstorm` — adversarial feature idea testing |
 | Feature Manager | Sonnet | `/batch-features` — DAG-aware batch scheduling |
 | Quality Metrics Collector | Sonnet | Phase 5 — collects quality metrics (lines changed, test ratio, AC coverage, complexity) |
@@ -683,7 +688,7 @@ cd dodocs-workflow && bash install-opencode.sh
 **Check version**: `/dodocs-workflow version`
 
 **What gets installed** (to `~/.claude/` or `~/.opencode/`):
-- 84 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
+- 88 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
 - 25 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
 - Docker runtime files in `docker/`
 - Config template

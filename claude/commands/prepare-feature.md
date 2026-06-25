@@ -72,7 +72,101 @@ Wait for the task to complete.
 If invalid: re-spawn product-owner with: "FEATURE-BRIEF.md is missing required sections. Regenerate with: problem statement, user stories (as a [role]...), and acceptance criteria." Wait and re-validate.
 
 On valid: Write `requirements-ready` to `docs/features/<slug>/STATUS`.
-Update PROGRESS.md: D1 → Done, D2 → In Progress.
+Update PROGRESS.md: D1 → Done, D1.5 → In Progress.
+
+---
+
+### Phase D1.5 — Requirements Quality Loop
+
+Harden the brief against UX and business quality bars before any mockup work. This is an
+auto-refine loop with a human gate at the end (same shape as the mockup loop in D3/D3.5).
+
+Set `OUTPUT_DIR=docs/features/<slug>/`, `REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md`, `DOC_TYPE=brief`.
+
+**Capture baseline:** after the first score round, remember both weighted averages for the
+before→after summary.
+
+Run up to **3 iterations** of score → gate → enrich:
+
+**Score (parallel)** — spawn BOTH critics in a single message (two Task calls):
+```
+Spawn Task:
+  subagent_type = "ux-requirements-critic"
+  mode          = "bypassPermissions"
+  prompt        = """
+    Read ~/.claude/agents/ux-requirements-critic.md and execute it.
+    REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md
+    OUTPUT_DIR=docs/features/<slug>/
+    DOC_TYPE=brief
+  """
+
+Spawn Task:
+  subagent_type = "business-requirements-critic"
+  mode          = "bypassPermissions"
+  prompt        = """
+    Read ~/.claude/agents/business-requirements-critic.md and execute it.
+    REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md
+    OUTPUT_DIR=docs/features/<slug>/
+    DOC_TYPE=brief
+  """
+```
+Wait for both. Read `REQ-UX-REVIEW.md` and `REQ-BUSINESS-REVIEW.md`; read each Overall Result.
+
+**Gate:** PASS only if **both** reports show `PASS`. Otherwise FAIL.
+
+**If PASS:** exit the loop → go to the D1.5 human gate below.
+
+**If FAIL:** spawn the enricher, then re-score:
+```
+Spawn Task:
+  subagent_type = "requirements-enricher"
+  mode          = "bypassPermissions"
+  prompt        = """
+    Read ~/.claude/agents/requirements-enricher.md and execute it.
+    REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md
+    OUTPUT_DIR=docs/features/<slug>/
+    DOC_TYPE=brief
+  """
+```
+Wait, then run another score round. After **3 iterations** without a double-PASS, stop refining
+and proceed to the human gate anyway, logging unresolved Critical/High findings (matches the
+mockup loop's fall-through).
+
+**Write the consolidated report** `docs/features/<slug>/REQUIREMENTS-VALIDATION.md`:
+```markdown
+# Requirements Validation: <feature-name>
+
+**Date:** <timestamp>
+**Brief:** docs/features/<slug>/FEATURE-BRIEF.md
+
+## Result: PASS | PASS WITH WARNINGS | FAIL (proceeded after 3 iterations)
+| Lens | Before | After | Final verdict |
+|------|--------|-------|---------------|
+| UX (REQ-UX-REVIEW.md) | <X.X> | <Y.Y> | PASS/FAIL |
+| Business (REQ-BUSINESS-REVIEW.md) | <X.X> | <Y.Y> | PASS/FAIL |
+
+Iterations run: <n>/3
+
+## Assumptions made by enricher (verify these)
+- <copied from the FEATURE-BRIEF.md `## Assumptions` section>
+
+## Unresolved findings (if any)
+- <remaining Critical/High after iteration cap>
+```
+
+**D1.5 human gate** — print the consolidated table and the Assumptions list, then:
+```
+AskUserQuestion:
+  "Requirements hardened (UX <Y.Y>/5, Business <Y.Y>/5). The enricher made the assumptions
+   listed above. How would you like to proceed?"
+  Options:
+    - "Approve — proceed to mockups"
+    - "Edit assumptions first" — I'll edit FEATURE-BRIEF.md, then continue
+    - "Re-run the quality loop"
+```
+- **Approve:** Update PROGRESS.md: D1.5 → Done, D2 → In Progress. Go to Phase D2.
+- **Edit assumptions first:** print the brief path, wait for the user's "continue", then go to Phase D2.
+- **Re-run the quality loop:** restart D1.5 from the score round (resets the iteration counter).
 
 ---
 
@@ -306,6 +400,7 @@ type: progress
 | Phase | Status | Agent |
 |-------|--------|-------|
 | D1: Requirements | In Progress | product-owner |
+| D1.5: Requirements Quality Loop | Pending | ux/business-requirements-critic + requirements-enricher |
 | D2: Mockup Design | Pending | mockup-designer |
 | D3: Mockup Validation | Pending | mockup-validator |
 | D4: Human Approval | Pending | — |
@@ -314,6 +409,9 @@ type: progress
 | File | Status | Author |
 |------|--------|--------|
 | FEATURE-BRIEF.md | Pending | product-owner |
+| REQ-UX-REVIEW.md | Pending | ux-requirements-critic |
+| REQ-BUSINESS-REVIEW.md | Pending | business-requirements-critic |
+| REQUIREMENTS-VALIDATION.md | Pending | prepare-feature |
 | docs/features/<slug>/mockups/ | Pending | mockup-designer |
 | MOCKUP-VALIDATION.md | Pending | mockup-validator |
 | UX-DESIGN.md | Pending | ux-designer |

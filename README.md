@@ -8,6 +8,8 @@ A Scrum Team workflow for [Claude Code](https://docs.anthropic.com/en/docs/claud
 
 That single command launches the full team. You answer a few product questions, approve UX flows and architecture, then watch it build, review, test, and ship.
 
+**[→ See the workflow map](https://dodocs-ai.github.io/dodocs-workflow/workflow-map.html)** — every command as a stop on one line, from idea to production. Click any stop for its timetable: which agents run, in which phase, and what runs at the same time. Source: [`docs/workflow-map.html`](docs/workflow-map.html).
+
 ---
 
 ## Table of Contents

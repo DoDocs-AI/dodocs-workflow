@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dodocs-workflow — the line</title>
+<meta name="description" content="A route diagram of dodocs-workflow: 26 commands and 88 agents that take a feature description to a production pull request.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ─── tokens ─────────────────────────────────────────────────────── */
+:root {
+  --ground:    #0E252E;
+  --panel:     #133039;
+  --panel-2:   #173B46;
+  --hair:      #24505C;
+  --rail:      #C8D8DA;
+  --text:      #E4EDEE;
+  --text-dim:  #8FA9AF;
+  --text-mute: #5F7D85;
+
+  --signal:    #E8992F;  /* opus   */
+  --verdigris: #4FA294;  /* sonnet */
+  --violet:    #9084C4;  /* haiku  */
+
+  --display: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --body:    'Public Sans', ui-sans-serif, system-ui, sans-serif;
+  --mono:    'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --pad: clamp(1.25rem, 4vw, 4rem);
+  --maxw: 1240px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground:   #EDF1F1;
+    --panel:    #FFFFFF;
+    --panel-2:  #F4F7F7;
+    --hair:     #CBD8DA;
+    --rail:     #1D454F;
+    --text:     #0E252E;
+    --text-dim: #4A6A73;
+    --text-mute:#7B959B;
+    --signal:   #B96E12;
+    --verdigris:#2E7A6D;
+    --violet:   #6355A0;
+  }
+}
+:root[data-theme="light"] {
+  --ground:   #EDF1F1; --panel: #FFFFFF; --panel-2: #F4F7F7; --hair: #CBD8DA;
+  --rail: #1D454F; --text: #0E252E; --text-dim: #4A6A73; --text-mute: #7B959B;
+  --signal: #B96E12; --verdigris: #2E7A6D; --violet: #6355A0;
+}
+:root[data-theme="dark"] {
+  --ground: #0E252E; --panel: #133039; --panel-2: #173B46; --hair: #24505C;
+  --rail: #C8D8DA; --text: #E4EDEE; --text-dim: #8FA9AF; --text-mute: #5F7D85;
+  --signal: #E8992F; --verdigris: #4FA294; --violet: #9084C4;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 2px; }
+
+.wrap { max-width: var(--maxw); margin: 0 auto; padding-inline: var(--pad); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .72rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  margin: 0;
+}
+
+/* ─── hero ───────────────────────────────────────────────────────── */
+.hero { padding-block: clamp(3rem, 9vw, 6.5rem) clamp(2rem, 5vw, 3.5rem); }
+.hero__top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.theme {
+  appearance: none; background: none; cursor: pointer;
+  border: 1px solid var(--hair); border-radius: 3px; color: var(--text-dim);
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
+  padding: .3rem .55rem; flex-shrink: 0;
+}
+.theme:hover { color: var(--text); border-color: var(--text-mute); }
+.hero__title {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' 112, 'wght' 780;
+  font-size: clamp(2.1rem, 6.4vw, 4.6rem);
+  line-height: .98;
+  letter-spacing: -.02em;
+  text-transform: uppercase;
+  margin: 1.25rem 0 0;
+  max-width: 17ch;
+}
+.hero__title em {
+  font-style: normal;
+  color: var(--signal);
+  font-variation-settings: 'wdth' 96, 'wght' 780;
+}
+.hero__lede {
+  margin: 1.5rem 0 0;
+  max-width: 56ch;
+  font-size: clamp(1rem, 1.6vw, 1.15rem);
+  color: var(--text-dim);
+}
+.hero__lede code {
+  font-family: var(--mono);
+  font-size: .9em;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  padding: .1em .4em;
+}
+
+.figures { display: flex; flex-wrap: wrap; gap: 0; margin-top: 2.75rem; border-top: 1px solid var(--hair); }
+.figure { padding: 1.1rem 1.75rem 1.1rem 0; margin-right: 1.75rem; border-right: 1px solid var(--hair); }
+.figure:last-child { border-right: 0; }
+.figure__n {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' 118, 'wght' 720;
+  font-size: 2.1rem;
+  line-height: 1;
+  display: block;
+}
+.figure__l {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--text-mute); display: block; margin-top: .4rem;
+}
+
+/* ─── the line ───────────────────────────────────────────────────── */
+.line-sec { padding-block: clamp(2rem, 5vw, 3rem) 1rem; }
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.sec-title {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' 108, 'wght' 700;
+  text-transform: uppercase;
+  font-size: clamp(1.15rem, 2.2vw, 1.5rem);
+  letter-spacing: .01em;
+  margin: .4rem 0 0;
+}
+.sec-note { color: var(--text-mute); font-size: .85rem; max-width: 46ch; margin: 0; }
+
+.rail-scroll { overflow-x: auto; overflow-y: hidden; margin-top: 2.25rem; padding-bottom: .5rem; }
+.rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(178px, 1fr);
+  min-width: 940px;
+  position: relative;
+}
+/* Terminates at the centre of the last dot — a route line shouldn't
+   trail off into empty space. 6 stages, so the last column is 1/6 wide. */
+.rail::before {
+  content: "";
+  position: absolute;
+  top: 30px;
+  left: 6px;
+  right: calc(100% / 6 - 6px);
+  height: 2px;
+  background: var(--rail);
+  opacity: .32;
+}
+.stage { position: relative; padding-right: 1rem; }
+.stage__name {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--text-dim); margin: 0 0 .85rem;
+}
+.stage__dot {
+  width: 13px; height: 13px; border-radius: 50%;
+  background: var(--ground); border: 2px solid var(--rail);
+  position: relative; z-index: 1; margin-bottom: 1.15rem;
+}
+.stage--live .stage__dot { background: var(--signal); border-color: var(--signal); }
+.stage__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+
+.stn {
+  appearance: none; -webkit-appearance: none;
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font-family: var(--mono); font-size: .8rem; font-weight: 500;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-left: 2px solid var(--text-mute);
+  border-radius: 0 3px 3px 0;
+  padding: .5rem .6rem;
+  transition: border-color .16s, background .16s, transform .16s;
+}
+.stn:hover { border-left-color: var(--signal); background: var(--panel-2); transform: translateX(2px); }
+.stn[aria-expanded="true"] { border-left-color: var(--signal); background: var(--panel-2); }
+.stn__meta { display: block; font-family: var(--body); font-size: .68rem; color: var(--text-mute); margin-top: .15rem; }
+
+/* ─── timetable panel ────────────────────────────────────────────── */
+.tt {
+  margin-top: 1.5rem;
+  border: 1px solid var(--hair);
+  border-top: 2px solid var(--signal);
+  background: var(--panel);
+  border-radius: 0 0 4px 4px;
+  padding: clamp(1.1rem, 2.6vw, 2rem);
+}
+.tt[hidden] { display: none; }
+.tt__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.tt__cmd {
+  font-family: var(--mono); font-size: clamp(1rem, 2vw, 1.3rem); font-weight: 600;
+  color: var(--signal); margin: 0;
+}
+.tt__sub { margin: .35rem 0 0; color: var(--text-dim); font-size: .9rem; max-width: 62ch; }
+.tt__close {
+  appearance: none; background: none; border: 1px solid var(--hair); color: var(--text-dim);
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+  padding: .35rem .6rem; border-radius: 3px; cursor: pointer; flex-shrink: 0;
+}
+.tt__close:hover { color: var(--text); border-color: var(--text-mute); }
+
+.tt__grid { margin-top: 1.75rem; display: flex; flex-direction: column; gap: .1rem; }
+
+.ph { display: grid; grid-template-columns: 132px 1fr; gap: 1rem; padding: .75rem 0; border-top: 1px solid var(--hair); }
+.ph:first-child { border-top: 0; }
+.ph__label { padding-top: .1rem; }
+.ph__id {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; color: var(--signal);
+  text-transform: uppercase; display: block;
+}
+.ph__name { font-size: .82rem; color: var(--text-dim); display: block; line-height: 1.35; margin-top: .15rem; }
+.ph__par {
+  font-family: var(--mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-mute); border: 1px solid var(--hair); border-radius: 2px;
+  padding: 0 .25rem; display: inline-block; margin-top: .35rem;
+}
+.ph__lanes { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+
+.lane { display: grid; grid-template-columns: repeat(12, 1fr); align-items: center; gap: 0; height: 26px; }
+.bar {
+  height: 100%;
+  display: flex; align-items: center;
+  padding: 0 .55rem;
+  border-radius: 2px;
+  font-family: var(--mono); font-size: .68rem; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-left: 3px solid currentColor;
+  min-width: 0;
+}
+.bar--opus   { color: var(--signal);    background: color-mix(in srgb, var(--signal) 15%, transparent); }
+.bar--sonnet { color: var(--verdigris); background: color-mix(in srgb, var(--verdigris) 15%, transparent); }
+.bar--haiku  { color: var(--violet);    background: color-mix(in srgb, var(--violet) 15%, transparent); }
+.bar__txt { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.bar__x { color: var(--text-mute); margin-left: .35rem; font-size: .62rem; }
+
+.gate {
+  display: flex; align-items: center; gap: .6rem;
+  margin: .3rem 0; padding: .4rem .6rem;
+  border: 1px dashed var(--signal);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--signal) 7%, transparent);
+}
+.gate__d { width: 7px; height: 7px; background: var(--signal); transform: rotate(45deg); flex-shrink: 0; }
+.gate__t {
+  font-family: var(--mono); font-size: .66rem; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--signal);
+}
+.loop {
+  font-family: var(--mono); font-size: .66rem; color: var(--text-mute);
+  padding-left: .1rem; display: flex; align-items: center; gap: .4rem;
+}
+.loop__a { color: var(--verdigris); }
+
+.tt__out { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--hair); display: flex; flex-wrap: wrap; gap: 2rem; }
+.out__b { min-width: 190px; }
+.out__h {
+  font-family: var(--mono); font-size: .64rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text-mute); margin: 0 0 .5rem;
+}
+.out__l { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
+.out__l li {
+  font-family: var(--mono); font-size: .7rem; color: var(--text-dim);
+  background: var(--panel-2); border: 1px solid var(--hair); border-radius: 2px; padding: .15rem .4rem;
+}
+
+/* ─── roster ─────────────────────────────────────────────────────── */
+.roster-sec { padding-block: clamp(3rem, 7vw, 5rem); }
+.legend { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: 1.25rem; }
+.leg { display: flex; align-items: center; gap: .45rem; font-family: var(--mono); font-size: .7rem; color: var(--text-dim); }
+.leg__s { width: 9px; height: 9px; border-radius: 2px; }
+.leg--opus .leg__s { background: var(--signal); }
+.leg--sonnet .leg__s { background: var(--verdigris); }
+.leg--haiku .leg__s { background: var(--violet); }
+
+.teams { margin-top: 2.25rem; display: flex; flex-direction: column; gap: 2rem; }
+.team__h { display: flex; align-items: baseline; gap: .6rem; border-bottom: 1px solid var(--hair); padding-bottom: .5rem; }
+.team__n {
+  font-family: var(--display); font-variation-settings: 'wdth' 105, 'wght' 650;
+  text-transform: uppercase; font-size: .95rem; margin: 0;
+}
+.team__c { font-family: var(--mono); font-size: .7rem; color: var(--text-mute); }
+.team__d { font-size: .82rem; color: var(--text-mute); margin: 0 0 0 auto; text-align: right; }
+/* Wide enough for the longest name (business-requirements-critic) without clipping. */
+.team__g { display: grid; grid-template-columns: repeat(auto-fill, minmax(214px, 1fr)); gap: .3rem; margin-top: .85rem; }
+.ag {
+  font-family: var(--mono); font-size: .7rem;
+  padding: .35rem .5rem; border-radius: 2px;
+  border-left: 2px solid; background: var(--panel);
+  color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ag--opus { border-left-color: var(--signal); }
+.ag--sonnet { border-left-color: var(--verdigris); }
+.ag--haiku { border-left-color: var(--violet); }
+
+/* ─── foot ───────────────────────────────────────────────────────── */
+.foot { border-top: 1px solid var(--hair); padding-block: 2rem 3rem; }
+.foot p { margin: 0; color: var(--text-mute); font-size: .8rem; }
+.foot a { color: var(--text-dim); }
+.foot__cmd {
+  font-family: var(--mono); font-size: .85rem; color: var(--text);
+  background: var(--panel); border: 1px solid var(--hair); border-radius: 3px;
+  padding: .5rem .7rem; display: inline-block; margin-bottom: 1.25rem;
+}
+
+@media (max-width: 720px) {
+  .ph { grid-template-columns: 1fr; gap: .5rem; }
+  .figure { padding-right: 1.15rem; margin-right: 1.15rem; }
+  .team__d { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="wrap hero">
+  <div class="hero__top">
+    <p class="eyebrow">dodocs-workflow · v1.16.0 · claude code &amp; opencode</p>
+    <button class="theme" type="button" id="theme" aria-pressed="false">Dark</button>
+  </div>
+  <h1 class="hero__title">One line in.<br>A <em>pull request</em> out.</h1>
+  <p class="hero__lede">
+    Describe a feature. A team of specialist agents interviews you, designs it, breaks it into tasks,
+    writes it, reviews it, tests it in a real browser, and opens the PR. Same ceremony a human
+    scrum team runs — <code>/scrum-team</code> just runs it at 3am.
+  </p>
+  <div class="figures">
+    <div class="figure"><span class="figure__n" id="fig-cmd">26</span><span class="figure__l">commands</span></div>
+    <div class="figure"><span class="figure__n" id="fig-ag">88</span><span class="figure__l">agents</span></div>
+    <div class="figure"><span class="figure__n">13</span><span class="figure__l">on the core team</span></div>
+    <div class="figure"><span class="figure__n">6</span><span class="figure__l">phases to a PR</span></div>
+  </div>
+</header>
+
+<section class="wrap line-sec" aria-labelledby="line-h">
+  <div class="sec-head">
+    <div>
+      <p class="eyebrow">the line</p>
+      <h2 class="sec-title" id="line-h">Idea to production, left to right</h2>
+    </div>
+    <p class="sec-note">Every command is a stop. Pick one to see its timetable — who runs, in what phase, and what runs at the same time.</p>
+  </div>
+  <div class="rail-scroll">
+    <div class="rail" id="rail"></div>
+  </div>
+  <div class="tt" id="tt" hidden aria-live="polite"></div>
+</section>
+
+<section class="wrap roster-sec" aria-labelledby="roster-h">
+  <div class="sec-head">
+    <div>
+      <p class="eyebrow">the roster</p>
+      <h2 class="sec-title" id="roster-h">Everyone on the payroll</h2>
+    </div>
+    <p class="sec-note">Model tier is assigned per role: deep reasoning where judgment is expensive, speed where volume is.</p>
+  </div>
+  <div class="legend">
+    <span class="leg leg--opus"><span class="leg__s"></span>Opus — judgment &amp; design</span>
+    <span class="leg leg--sonnet"><span class="leg__s"></span>Sonnet — execution</span>
+    <span class="leg leg--haiku"><span class="leg__s"></span>Haiku — high-volume browser work</span>
+  </div>
+  <div class="teams" id="teams"></div>
+</section>
+
+<footer class="wrap foot">
+  <div class="foot__cmd">git clone https://github.com/DoDocs-AI/dodocs-workflow.git &amp;&amp; bash install.sh</div>
+  <p>
+    Generated from the command and agent definitions in this repository.
+    See <a href="FEATURES.md">FEATURES.md</a> for the written reference, or the
+    <a href="https://github.com/DoDocs-AI/dodocs-workflow">repository</a>.
+  </p>
+</footer>
+
+<script>
+/* ── data ─────────────────────────────────────────────────────────
+   Sourced from claude/commands/*.md and claude/agents/*.md frontmatter.
+   Bars use a 12-column axis local to their phase: [from, to].
+   Update here when the workflow changes; the DOM is built from this.
+─────────────────────────────────────────────────────────────────── */
+const M = { o: 'opus', s: 'sonnet', h: 'haiku' };
+
+const COMMANDS = {
+  'brainstorm': {
+    stage: 'discover', tagline: 'Stress-test the idea before it costs anything',
+    blurb: 'Researches the market, argues with you across five-plus angles, then hardens the result until two critics sign off.',
+    phases: [
+      { id: 'B1', name: 'Market research', lanes: [ ['brainstorm-facilitator', M.o, 1, 12] ] },
+      { id: 'B2', name: 'Adversarial questioning', lanes: [ ['brainstorm-facilitator', M.o, 1, 12] ] },
+      { id: 'B3', name: 'Requirements quality loop', parallel: 'critics in parallel · max 3×', lanes: [
+          ['ux-requirements-critic', M.o, 1, 6],
+          ['business-requirements-critic', M.o, 1, 6],
+          ['requirements-enricher', M.o, 6, 12]
+        ], loop: 'critics re-score after each enrichment' },
+      { id: 'B4', name: 'You approve', gate: 'human gate — approve the hardened FRD' }
+    ],
+    outputs: ['FRD.md', 'REQ-UX-REVIEW.md', 'REQ-BUSINESS-REVIEW.md', 'REQUIREMENTS-VALIDATION.md'],
+    flags: ['no project config needed']
+  },
+  'product-lifecycle': {
+    stage: 'discover', tagline: 'Concept to profitable business, 6 phases',
+    blurb: 'The widest pipeline here. Discovery through evolution, with the Build phase handing off to the full 13-agent PLC scrum team.',
+    phases: [
+      { id: '1', name: 'Discover', parallel: 'parallel', lanes: [
+          ['plc-market-scout', M.s, 1, 5], ['plc-icp-profiler', M.s, 3, 8], ['plc-validation-agent', M.s, 6, 12] ] },
+      { id: '2', name: 'Strategy', lanes: [
+          ['plc-product-strategist', M.o, 1, 5], ['plc-roadmap-planner', M.o, 4, 8],
+          ['plc-pricing-architect', M.o, 4, 9], ['plc-mvp-scoper', M.o, 8, 12] ] },
+      { id: '3', name: 'Build', parallel: 'delegates to plc-scrum-team (13 agents)', lanes: [
+          ['plc-scrum-team →', M.s, 1, 12] ] },
+      { id: '4', name: 'Launch', parallel: 'parallel', lanes: [
+          ['plc-analytics-agent', M.s, 1, 6], ['plc-copy-agent', M.s, 1, 7],
+          ['plc-distribution-agent', M.s, 5, 12], ['plc-revenue-agent', M.s, 4, 12] ] },
+      { id: '5', name: 'Grow', parallel: 'parallel', lanes: [
+          ['plc-growth-hacker', M.o, 1, 8], ['plc-retention-engineer', M.s, 3, 11], ['plc-seo-content-agent', M.s, 1, 12] ] },
+      { id: '6', name: 'Evolve', parallel: 'parallel · feeds back to Discover', lanes: [
+          ['plc-feature-inventor', M.o, 1, 7], ['plc-competitive-intel', M.s, 1, 12], ['plc-customer-voice', M.s, 4, 12] ],
+        loop: 'evolve findings re-enter discovery' }
+    ],
+    outputs: ['PLC-STATE.md', 'MVP-SCOPE.md', 'ROADMAP.md', 'gates/'],
+    flags: ['--auto', '--skip-discover', '--skip-build', '--resume']
+  },
+  'product-launch': {
+    stage: 'discover', tagline: 'Idea to launch, 10 phases',
+    blurb: 'A narrower cousin of /product-lifecycle: validate, pre-sell, spec, build, harden, monetise, launch, smoke-test, optimise, invent. Built entirely from agents that already exist.',
+    phases: [
+      { id: '1', name: 'Validate', lanes: [ ['plc-validation-agent', M.s, 1, 12] ] },
+      { id: '2', name: 'Pre-sell', lanes: [ ['plc-distribution-agent', M.s, 1, 12] ] },
+      { id: '3', name: 'Spec MVP', lanes: [ ['plc-mvp-scoper', M.o, 1, 12] ] },
+      { id: '4', name: 'Build MVP', parallel: 'delegates to plc-scrum-team', lanes: [ ['plc-scrum-team →', M.s, 1, 12] ] },
+      { id: '5', name: 'Audit & harden', parallel: 'delegates to /prepare-for-production', lanes: [
+          ['prepare-for-production →', M.o, 1, 12] ] },
+      { id: '6', name: 'Monetise', lanes: [ ['plc-revenue-agent', M.s, 1, 12] ] },
+      { id: '7', name: 'Launch & distribute', parallel: 'parallel', lanes: [
+          ['plc-copy-agent', M.s, 1, 7], ['plc-distribution-agent', M.s, 5, 12] ] },
+      { id: '8', name: 'Prod smoke test', lanes: [ ['plc-qa-agent', M.s, 1, 12] ] },
+      { id: '9', name: 'Optimise & scale', lanes: [ ['plc-growth-hacker', M.o, 1, 12] ] },
+      { id: '10', name: 'Feature invention', lanes: [ ['plc-feature-inventor', M.o, 1, 12] ], loop: 'findings re-enter the pipeline' }
+    ],
+    outputs: ['launched product', 'per-phase reports'],
+    flags: ['no new specialist agents required']
+  },
+  'gtm-team': {
+    stage: 'discover', tagline: 'A full go-to-market strategy, 16 agents',
+    blurb: 'Positioning, ICP, pricing, channels and the collateral to run them.',
+    phases: [
+      { id: 'G1', name: 'Strategy', lanes: [ ['gtm-strategist', M.o, 1, 12] ] },
+      { id: 'G2', name: 'Research', parallel: 'parallel', lanes: [
+          ['gtm-market-research', M.s, 1, 7], ['gtm-icp-discovery', M.s, 1, 8], ['gtm-trend-monitor', M.s, 5, 12] ] },
+      { id: 'G3', name: 'Content & copy', parallel: 'parallel', lanes: [
+          ['gtm-copywriter', M.s, 1, 8], ['gtm-seo-content', M.s, 1, 10], ['gtm-localization', M.s, 7, 12] ] },
+      { id: 'G4', name: 'Channels', parallel: 'parallel', lanes: [
+          ['gtm-outbound', M.s, 1, 7], ['gtm-paid-ads', M.s, 1, 8], ['gtm-community', M.s, 4, 12] ] },
+      { id: 'G5', name: 'Pipeline ops', parallel: 'parallel', lanes: [
+          ['gtm-crm', M.s, 1, 6], ['gtm-lead-scoring', M.s, 3, 9], ['gtm-proposal', M.s, 6, 12] ] },
+      { id: 'G6', name: 'Measure', parallel: 'parallel', lanes: [
+          ['gtm-metrics', M.s, 1, 7], ['gtm-experiment', M.s, 3, 10], ['gtm-reporting', M.s, 7, 12] ] }
+    ],
+    outputs: ['GTM-STRATEGY.md', 'ICP-PROFILES.md', 'BATTLE-CARDS.md', 'COMPETITIVE-ANALYSIS.md']
+  },
+
+  'prepare-feature': {
+    stage: 'prepare', tagline: 'Do the thinking by day, build by night',
+    blurb: 'Requirements, real mockups in your own design system, and validation — without writing production code. Pairs with an overnight /ship run.',
+    phases: [
+      { id: 'D1', name: 'Requirements', lanes: [ ['product-owner', M.o, 1, 12] ] },
+      { id: 'D1.5', name: 'Requirements quality loop', parallel: 'critics in parallel · max 3×', lanes: [
+          ['ux-requirements-critic', M.o, 1, 6],
+          ['business-requirements-critic', M.o, 1, 6],
+          ['requirements-enricher', M.o, 6, 12]
+        ], loop: 'critics re-score after each enrichment' },
+      { id: 'D1.6', name: 'You approve', gate: 'human gate — before any mockup work' },
+      { id: 'D2', name: 'Mockups', lanes: [ ['mockup-designer', M.s, 1, 12] ] },
+      { id: 'D3', name: 'Validation', lanes: [ ['mockup-validator', M.s, 1, 12] ] },
+      { id: 'D4', name: 'You approve', gate: 'human gate — approve the outputs' }
+    ],
+    outputs: ['FEATURE-BRIEF.md', 'REQUIREMENTS-VALIDATION.md', 'mockups/', 'MOCKUP-VALIDATION.md']
+  },
+  'prepare-features': {
+    stage: 'prepare', tagline: 'The same preparation, batched',
+    blurb: 'Runs the preparation pipeline across a list of features so a night of /ship has something to chew on.',
+    phases: [
+      { id: 'P1', name: 'Per feature → /prepare-feature', parallel: 'sequential per feature', lanes: [ ['prepare-feature →', M.o, 1, 12] ] }
+    ],
+    outputs: ['docs/features/<slug>/ per feature']
+  },
+
+  'scrum-team': {
+    stage: 'build', tagline: 'The flagship — 13 agents, 6 phases, one PR',
+    blurb: 'Development and testing overlap on purpose: a story goes to the tester the moment its tasks are reviewed, not when the whole feature is done.',
+    phases: [
+      { id: '1', name: 'Requirements + UX research', parallel: 'parallel', lanes: [
+          ['product-owner', M.o, 1, 12], ['ux-designer', M.s, 1, 9] ] },
+      { id: '2', name: 'UX design + mockups', parallel: 'parallel', lanes: [
+          ['ux-designer', M.s, 1, 7], ['architect', M.o, 1, 10],
+          ['mockup-designer', M.s, 4, 11], ['mockup-validator', M.s, 9, 12] ] },
+      { id: '2.5', name: 'Checkpoint', gate: 'human gate — approve architecture, UX + mockups · skipped by --auto' },
+      { id: '3', name: 'Task breakdown', lanes: [
+          ['scrum-master', M.s, 1, 9], ['tech-lead', M.s, 8, 12] ] },
+      { id: '4', name: 'Build + test', parallel: 'all parallel · story granularity', lanes: [
+          ['frontend-dev', M.s, 1, 8, '×2'], ['backend-dev', M.s, 1, 8, '×2'],
+          ['code-reviewer', M.s, 3, 10], ['qa-engineer', M.s, 1, 6],
+          ['tech-lead', M.s, 2, 12], ['manual-tester', M.h, 6, 12],
+          ['qa-automation', M.s, 8, 12] ],
+        loop: 'bug filed → fixed → reviewed → retested' },
+      { id: '5', name: 'Integration verification', parallel: 'parallel', lanes: [
+          ['tech-lead', M.s, 1, 8], ['code-reviewer', M.s, 2, 9],
+          ['quality-metrics-collector', M.s, 5, 11], ['security-auditor', M.o, 6, 12, 'if auth touched'] ] },
+      { id: '6', name: 'Ship', lanes: [ ['tech-lead', M.s, 1, 12] ] }
+    ],
+    outputs: ['feature branch', 'atomic commits', 'FEATURE-BRIEF.md', 'ARCHITECTURE.md', 'UX-DESIGN.md', 'PROGRESS.md', 'open PR'],
+    flags: ['--auto', '--size small|medium|large', '--retest <name>']
+  },
+  'container-team': {
+    stage: 'build', tagline: 'The same team, in a box',
+    blurb: 'Runs /scrum-team inside Docker with your project mounted, so your own Claude Code session stays free. Run several at once.',
+    phases: [
+      { id: 'C1', name: 'Build image', lanes: [ ['docker build', M.s, 1, 12] ] },
+      { id: 'C2', name: 'Mount + launch', lanes: [ ['scrum-team → (in container)', M.s, 1, 12] ] },
+      { id: 'C3', name: 'Live dashboard', lanes: [ ['live dashboard poll', M.s, 1, 12] ], loop: 'polls phase progress + logs' }
+    ],
+    outputs: ['same as /scrum-team, written to the mounted repo'],
+    flags: ['--detach', '--attach <id>', '--status', '--k8s']
+  },
+  'batch-features': {
+    stage: 'build', tagline: 'A backlog, scheduled by dependency',
+    blurb: 'Takes a feature list or a backlog file, reads the depends-on annotations, and runs them in an order that respects the graph.',
+    phases: [
+      { id: 'F1', name: 'Parse + topological sort', lanes: [ ['feature-manager', M.s, 1, 12] ] },
+      { id: 'F2', name: 'Per feature → /scrum-team', parallel: 'DAG-aware · --parallel when no file conflicts', lanes: [
+          ['scrum-team →', M.s, 1, 12] ], loop: 'retry on failure · stall detection' },
+      { id: 'F3', name: 'Batch report', lanes: [ ['feature-manager', M.s, 1, 12] ] }
+    ],
+    outputs: ['one branch + PR per feature', 'batch report'],
+    flags: ['--features "a, b, c"', '--file <path>', '--parallel', '--size']
+  },
+  'change-request': {
+    stage: 'build', tagline: 'Change what exists, in place',
+    blurb: 'Product decides first whether this is really a change or a new feature. If it is a change, the existing docs, code and tests are edited in place — no sibling folder.',
+    phases: [
+      { id: 'R1', name: 'Read existing feature docs', lanes: [ ['product-owner', M.o, 1, 12] ] },
+      { id: 'R2', name: 'Product decision gate', lanes: [ ['product-owner', M.o, 1, 12, 'classification mode'] ],
+        gate: 'human gate — confirm CHANGE vs NEW_FEATURE' },
+      { id: 'R3', name: 'Update docs in place', lanes: [ ['product-owner', M.o, 1, 12, 'change-update mode'] ] },
+      { id: 'R4', name: 'Build the change', parallel: 'scrum-team with in-place overrides', lanes: [
+          ['scrum-team →', M.s, 1, 12] ] }
+    ],
+    outputs: ['edited FEATURE-BRIEF.md / ARCHITECTURE.md / UX-DESIGN.md', 'per-feature CHANGELOG.md', 'PR'],
+    flags: ['NEW_FEATURE verdict hands off to /scrum-team']
+  },
+  'plc-scrum-team': {
+    stage: 'build', tagline: 'The MVP cut of the core team',
+    blurb: 'Thirteen agents mirroring the scrum team, tuned for MVP scope: always autonomous, core flow only, lighter review.',
+    phases: [
+      { id: '1', name: 'Requirements (auto)', lanes: [ ['plc-product-owner', M.o, 1, 12] ] },
+      { id: '2', name: 'Design', parallel: 'parallel', lanes: [
+          ['plc-ux-designer', M.s, 1, 7], ['plc-architect', M.o, 1, 10],
+          ['plc-mockup-designer', M.s, 4, 11], ['plc-mockup-validator', M.s, 9, 12] ] },
+      { id: '3', name: 'Breakdown', lanes: [ ['plc-scrum-master', M.s, 1, 12] ] },
+      { id: '4', name: 'Build + test', parallel: 'all parallel', lanes: [
+          ['plc-frontend-dev', M.s, 1, 8], ['plc-backend-dev', M.s, 1, 8],
+          ['plc-code-reviewer', M.s, 3, 10], ['plc-qa-engineer', M.s, 1, 6],
+          ['plc-manual-tester', M.h, 6, 12, 'mom test'], ['plc-qa-automation', M.s, 8, 12] ],
+        loop: 'bug → fix → review → retest' },
+      { id: '5', name: 'Ship', lanes: [ ['plc-tech-lead', M.s, 1, 12] ] }
+    ],
+    outputs: ['BUILD-SUMMARY.md', 'PR URL', 'branch name']
+  },
+
+  'prepare-for-production': {
+    stage: 'harden', tagline: 'Ten auditors, at once',
+    blurb: 'Every auditor runs simultaneously, findings are deduplicated and triaged, then developers fix anything Critical or High until nothing is left.',
+    phases: [
+      { id: 'A1', name: 'Audit', parallel: 'all 10 in parallel', lanes: [
+          ['security-auditor', M.o, 1, 12], ['performance-engineer', M.s, 1, 11],
+          ['accessibility-auditor', M.s, 1, 9], ['seo-analyst', M.s, 1, 7],
+          ['devops-engineer', M.s, 1, 10], ['error-handler', M.s, 1, 8],
+          ['dependency-auditor', M.s, 1, 6], ['api-documenter', M.s, 1, 9],
+          ['db-analyst', M.s, 1, 10], ['load-tester', M.s, 1, 12] ] },
+      { id: 'A2', name: 'Triage', lanes: [ ['consolidate · dedupe · severity', M.o, 1, 12] ] },
+      { id: 'A3', name: 'Fix', parallel: 'parallel', lanes: [
+          ['frontend-dev', M.s, 1, 9], ['backend-dev', M.s, 1, 9], ['code-reviewer', M.s, 5, 12] ],
+        loop: 'fix → review → re-audit' },
+      { id: 'A4', name: 'Re-audit', lanes: [ ['failed auditors only', M.s, 1, 12] ] }
+    ],
+    outputs: ['per-auditor reports', 'SUMMARY.md'],
+    flags: ['--only security,performance,db', 'pass = zero Critical, zero High']
+  },
+  'fix-the-issue': {
+    stage: 'harden', tagline: 'Five agents, no ceremony',
+    blurb: 'For bugs and small improvements that do not need a full scrum team.',
+    phases: [
+      { id: 'X1', name: 'Root cause', lanes: [ ['tech-lead', M.s, 1, 12] ] },
+      { id: 'X2', name: 'Fix', parallel: 'parallel', lanes: [
+          ['frontend-dev', M.s, 1, 12], ['backend-dev', M.s, 1, 12] ] },
+      { id: 'X3', name: 'Review', lanes: [ ['code-reviewer', M.s, 1, 12] ] },
+      { id: 'X4', name: 'Verify in browser', lanes: [ ['manual-tester', M.h, 1, 12] ] }
+    ],
+    outputs: ['FIX-PLAN.md', 'fix/<name> branch', 'squash-merged PR']
+  },
+  'fix-and-ship': {
+    stage: 'harden', tagline: 'A fix, plus the cleanup it implies',
+    blurb: 'When a fix touches a shared component, other features’ docs and tests go stale quietly. This runs the hygiene that catches that.',
+    phases: [
+      { id: 'S1', name: 'E2E baseline on main', lanes: [ ['regression-analyst', M.s, 1, 12] ] },
+      { id: 'S2', name: 'Fix', parallel: 'delegates to /fix-the-issue', lanes: [ ['fix-the-issue →', M.s, 1, 12] ] },
+      { id: 'S3', name: 'Doc sync', lanes: [ ['doc-sync-agent', M.s, 1, 12] ] },
+      { id: 'S4', name: 'Test estate', lanes: [ ['test-estate-maintainer', M.s, 1, 12] ] },
+      { id: 'S5', name: 'Regression', lanes: [ ['regression-analyst', M.s, 1, 12] ], loop: 'classify → fix → re-run · max 2×' },
+      { id: 'S6', name: 'Validation', parallel: 'auto-triggered for security/auth fixes', lanes: [
+          ['security-auditor', M.o, 1, 12, 'conditional'] ] },
+      { id: 'S7', name: 'Merge + report', lanes: [ ['tech-lead', M.s, 1, 12] ] }
+    ],
+    outputs: ['FIX-SHIP-REPORT.md', 'merged PR'],
+    flags: ['--skip-docs', '--skip-tests', '--skip-regression', '--validate', '--no-merge']
+  },
+
+  'ship': {
+    stage: 'ship', tagline: 'Overnight: build, clean up, repeat',
+    blurb: 'The hygiene runs per feature, not once at the end — so every feature leaves the repo clean before the next one starts.',
+    phases: [
+      { id: '0', name: 'Discover + baseline', lanes: [ ['regression-analyst', M.s, 1, 12, 'E2E baseline on main'] ] },
+      { id: '1', name: 'Dependency sort', lanes: [ ['topological order', M.s, 1, 12] ] },
+      { id: '2', name: 'Build', parallel: 'delegates to /scrum-team --auto', lanes: [ ['scrum-team →', M.s, 1, 12] ] },
+      { id: '3', name: 'Doc sync', lanes: [ ['doc-sync-agent', M.s, 1, 12] ] },
+      { id: '4', name: 'Test estate', lanes: [ ['test-estate-maintainer', M.s, 1, 12] ] },
+      { id: '5', name: 'Regression', lanes: [ ['regression-analyst', M.s, 1, 12] ] },
+      { id: '6', name: 'Validation', parallel: 'smart-triggered · parallel', lanes: [
+          ['ux-reviewer', M.o, 1, 9], ['security-auditor', M.o, 1, 12],
+          ['performance-engineer', M.s, 1, 10], ['accessibility-auditor', M.s, 1, 8] ],
+        loop: 'issues → developers fix → re-run failing phases' },
+      { id: '7', name: 'Report', lanes: [ ['SHIP-REPORT.md', M.s, 1, 12] ] }
+    ],
+    outputs: ['SHIP-REPORT.md', 'one PR per feature', 'project health comparison'],
+    flags: ['--features', '--merge', '--parallel', '--skip-validation', '--skip-docs', '--skip-regression']
+  },
+  'merge-features': {
+    stage: 'ship', tagline: 'Drain the PR queue',
+    blurb: 'Merges open feature PRs in creation order, gating on CI and rebasing what conflicts — re-checking the rest each time main moves.',
+    phases: [
+      { id: 'M1', name: 'List + CI check', lanes: [ ['gh pr list', M.s, 1, 12] ] },
+      { id: 'M2', name: 'Squash-merge passing', lanes: [ ['squash-merge', M.s, 1, 12] ] },
+      { id: 'M3', name: 'Auto-rebase conflicts', lanes: [ ['tech-lead', M.s, 1, 12, 'complex rebases'] ],
+        loop: 're-check remaining PRs — main has moved' }
+    ],
+    outputs: ['merged PRs', 'summary report'],
+    flags: ['--dry-run', '--only 42,38', '--skip-ci']
+  },
+  'rebase': {
+    stage: 'ship', tagline: 'Rebase without breaking migration order',
+    blurb: 'Rebases onto main, then checks the thing rebases quietly break: database migration ordering.',
+    phases: [
+      { id: 'B1', name: 'Fetch + rebase onto main', lanes: [ ['git rebase', M.s, 1, 12] ] },
+      { id: 'B2', name: 'Validate migration order', lanes: [ ['migration check', M.s, 1, 12] ] }
+    ],
+    outputs: ['rebased branch', 'conflict report']
+  },
+
+  'web-design': {
+    stage: 'grow', tagline: 'A designer and a critic, arguing',
+    blurb: 'The designer builds a Next.js site from a concept; the validator screenshots it and scores it on seven weighted criteria. Below 7.0, it goes back.',
+    phases: [
+      { id: 'W1', name: 'Creative brief', lanes: [ ['write creative brief', M.s, 1, 12] ] },
+      { id: 'W2', name: 'Design', lanes: [ ['web-designer', M.s, 1, 12, 'Next.js + Tailwind'] ] },
+      { id: 'W3', name: 'Validate', lanes: [ ['design-validator', M.o, 1, 12, 'desktop + mobile shots'] ] },
+      { id: 'W3.5', name: 'Iterate', parallel: 'max 3 iterations', lanes: [
+          ['web-designer', M.s, 1, 7], ['design-validator', M.o, 6, 12] ],
+        loop: 'score < 7.0 → fix → re-score' },
+      { id: 'W4', name: 'Summary', lanes: [ ['preview instructions', M.s, 1, 12] ] }
+    ],
+    outputs: ['Next.js app', 'screenshots', 'validation report'],
+    flags: ['--pages N', '--port N', '--theme "..."', '--max-iterations N']
+  },
+  'supervisor': {
+    stage: 'grow', tagline: 'Notices when a run dies at 4am',
+    blurb: 'Stateless: reads the filesystem, judges each project’s health, unblocks what it can, escalates what it cannot. Run it on a loop.',
+    phases: [
+      { id: 'V1', name: 'Discover active work', lanes: [ ['project-supervisor', M.o, 1, 12, 'PLC states + feature/* branches'] ] },
+      { id: 'V2', name: 'Assess health', lanes: [ ['project-supervisor', M.o, 1, 12, 'healthy · at_risk · stalled · blocked'] ] },
+      { id: 'V3', name: 'Auto-fix', parallel: 'max 3 per run · skips live orchestrators', lanes: [
+          ['spawns the right agent', M.o, 1, 12] ], loop: 'escalates to human when auto-fix keeps failing' }
+    ],
+    outputs: ['DASHBOARD.md', 'SUPERVISOR-LOG.md'],
+    flags: ['--report-only', '--fix-only <slug>', '--stall-threshold <hours>', '/loop 1h /supervisor']
+  },
+  'wiki': {
+    stage: 'grow', tagline: 'Compress the docs into something readable',
+    blurb: 'Synthesises anything under docs/ into short wiki entries, tracks coverage, and never edits the sources.',
+    phases: [
+      { id: 'K1', name: 'Ingest', lanes: [ ['wiki-maintainer', M.s, 1, 12] ] },
+      { id: 'K2', name: 'Synthesise + lint', lanes: [ ['wiki-maintainer', M.s, 1, 12] ] }
+    ],
+    outputs: ['docs/wiki/', 'coverage tracker']
+  }
+};
+
+const STAGES = [
+  { id: 'discover', name: 'Discover', live: true },
+  { id: 'prepare',  name: 'Prepare' },
+  { id: 'build',    name: 'Build' },
+  { id: 'harden',   name: 'Harden' },
+  { id: 'ship',     name: 'Ship' },
+  { id: 'grow',     name: 'Grow' }
+];
+
+const TEAMS = [
+  { name: 'Core scrum team', desc: 'The 13 that build a feature', agents: [
+    ['product-owner', M.o], ['architect', M.o], ['ux-designer', M.s], ['scrum-master', M.s],
+    ['tech-lead', M.s], ['frontend-dev', M.s], ['backend-dev', M.s], ['code-reviewer', M.s],
+    ['qa-engineer', M.s], ['manual-tester', M.h], ['qa-automation', M.s],
+    ['mockup-designer', M.s], ['mockup-validator', M.s] ] },
+  { name: 'Production auditors', desc: 'Run together by /prepare-for-production', agents: [
+    ['security-auditor', M.o], ['performance-engineer', M.s], ['accessibility-auditor', M.s],
+    ['seo-analyst', M.s], ['devops-engineer', M.s], ['error-handler', M.s],
+    ['dependency-auditor', M.s], ['api-documenter', M.s], ['db-analyst', M.s], ['load-tester', M.s] ] },
+  { name: 'Requirements & hygiene', desc: 'Keep briefs sharp and the repo clean', agents: [
+    ['brainstorm-facilitator', M.o], ['ux-requirements-critic', M.o], ['business-requirements-critic', M.o],
+    ['requirements-enricher', M.o], ['ux-reviewer', M.o], ['doc-sync-agent', M.s],
+    ['test-estate-maintainer', M.s], ['regression-analyst', M.s], ['quality-metrics-collector', M.s],
+    ['wiki-maintainer', M.s], ['feature-manager', M.s], ['project-supervisor', M.o] ] },
+  { name: 'PLC — strategy & discovery', desc: 'Concept to a defensible position', agents: [
+    ['plc-orchestrator', M.o], ['plc-market-scout', M.s], ['plc-icp-profiler', M.s],
+    ['plc-validation-agent', M.s], ['plc-product-strategist', M.o], ['plc-roadmap-planner', M.o],
+    ['plc-pricing-architect', M.o], ['plc-mvp-scoper', M.o], ['plc-architect-agent', M.o],
+    ['plc-dev-agent', M.s], ['plc-qa-agent', M.s], ['plc-analytics-agent', M.s],
+    ['plc-copy-agent', M.s], ['plc-distribution-agent', M.s], ['plc-revenue-agent', M.s],
+    ['plc-growth-hacker', M.o], ['plc-retention-engineer', M.s], ['plc-seo-content-agent', M.s],
+    ['plc-feature-inventor', M.o], ['plc-competitive-intel', M.s], ['plc-customer-voice', M.s],
+    ['product-launch-orchestrator', M.o] ] },
+  { name: 'PLC — scrum team', desc: 'The MVP cut of the core 13', agents: [
+    ['plc-product-owner', M.o], ['plc-architect', M.o], ['plc-ux-designer', M.s],
+    ['plc-scrum-master', M.s], ['plc-tech-lead', M.s], ['plc-frontend-dev', M.s],
+    ['plc-backend-dev', M.s], ['plc-code-reviewer', M.s], ['plc-qa-engineer', M.s],
+    ['plc-manual-tester', M.h], ['plc-qa-automation', M.s], ['plc-mockup-designer', M.s],
+    ['plc-mockup-validator', M.s] ] },
+  { name: 'Go-to-market', desc: 'Positioning through pipeline', agents: [
+    ['gtm-strategist', M.o], ['gtm-market-research', M.s], ['gtm-icp-discovery', M.s],
+    ['gtm-copywriter', M.s], ['gtm-seo-content', M.s], ['gtm-outbound', M.s],
+    ['gtm-paid-ads', M.s], ['gtm-community', M.s], ['gtm-crm', M.s],
+    ['gtm-lead-scoring', M.s], ['gtm-proposal', M.s], ['gtm-metrics', M.s],
+    ['gtm-experiment', M.s], ['gtm-reporting', M.s], ['gtm-localization', M.s],
+    ['gtm-trend-monitor', M.s] ] },
+  { name: 'Design', desc: 'Used by /web-design', agents: [
+    ['web-designer', M.s], ['design-validator', M.o] ] }
+];
+
+/* Every real agent, derived from the roster — the single source of truth
+   for telling an agent lane apart from a plain step in a timetable. */
+const AGENT_NAMES = new Set(TEAMS.flatMap(t => t.agents.map(a => a[0])));
+
+/* ── build the line ──────────────────────────────────────────────── */
+const rail = document.getElementById('rail');
+const tt = document.getElementById('tt');
+
+STAGES.forEach(stage => {
+  const col = document.createElement('div');
+  col.className = 'stage' + (stage.live ? ' stage--live' : '');
+  const stops = Object.entries(COMMANDS).filter(([, c]) => c.stage === stage.id);
+  col.innerHTML = `<p class="stage__name">${stage.name}</p><div class="stage__dot"></div>`;
+  const ul = document.createElement('ul');
+  ul.className = 'stage__list';
+  stops.forEach(([slug, cmd]) => {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.className = 'stn';
+    b.type = 'button';
+    b.setAttribute('aria-expanded', 'false');
+    b.setAttribute('aria-controls', 'tt');
+    b.dataset.slug = slug;
+    b.innerHTML = `/${slug}<span class="stn__meta">${cmd.tagline}</span>`;
+    b.addEventListener('click', () => toggle(slug, b));
+    li.appendChild(b);
+    ul.appendChild(li);
+  });
+  col.appendChild(ul);
+  rail.appendChild(col);
+});
+
+let open = null;
+
+function toggle(slug, btn) {
+  if (open === slug) { close(); return; }
+  document.querySelectorAll('.stn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  btn.setAttribute('aria-expanded', 'true');
+  open = slug;
+  render(slug);
+  tt.hidden = false;
+  tt.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest' });
+}
+
+function close() {
+  open = null;
+  tt.hidden = true;
+  document.querySelectorAll('.stn').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+
+function render(slug) {
+  const c = COMMANDS[slug];
+  // Only count lanes that are real agents — some lanes are plain steps
+  // ("squash-merge") or delegations to another command ("scrum-team →").
+  const agents = new Set();
+  c.phases.forEach(p => (p.lanes || []).forEach(l => { if (AGENT_NAMES.has(l[0])) agents.add(l[0]); }));
+  const gates = c.phases.filter(p => p.gate).length;
+  // A gate-only entry is a checkpoint, not a phase — don't inflate the count with it.
+  const phaseCount = c.phases.filter(p => p.lanes && p.lanes.length).length;
+
+  const phases = c.phases.map(p => {
+    const lanes = (p.lanes || []).map(([name, model, from, to, note]) => {
+      const span = `grid-column: ${from} / ${to + 1};`;
+      return `<div class="lane"><div class="bar bar--${model}" style="${span}" title="${name}${note ? ' — ' + note : ''}">
+        <span class="bar__txt">${name}</span>${note ? `<span class="bar__x">${note}</span>` : ''}
+      </div></div>`;
+    }).join('');
+    const gate = p.gate ? `<div class="gate"><span class="gate__d"></span><span class="gate__t">${p.gate}</span></div>` : '';
+    const loop = p.loop ? `<div class="loop"><span class="loop__a">↺</span>${p.loop}</div>` : '';
+    return `<div class="ph">
+      <div class="ph__label">
+        <span class="ph__id">Phase ${p.id}</span>
+        <span class="ph__name">${p.name}</span>
+        ${p.parallel ? `<span class="ph__par">${p.parallel}</span>` : ''}
+      </div>
+      <div class="ph__lanes">${lanes}${gate}${loop}</div>
+    </div>`;
+  }).join('');
+
+  tt.innerHTML = `
+    <div class="tt__head">
+      <div>
+        <p class="tt__cmd">/${slug}</p>
+        <p class="tt__sub">${c.blurb}</p>
+      </div>
+      <button class="tt__close" type="button">Close</button>
+    </div>
+    <div class="tt__grid">${phases}</div>
+    <div class="tt__out">
+      <div class="out__b">
+        <p class="out__h">Leaves behind</p>
+        <ul class="out__l">${c.outputs.map(o => `<li>${o}</li>`).join('')}</ul>
+      </div>
+      ${c.flags ? `<div class="out__b"><p class="out__h">Flags &amp; notes</p>
+        <ul class="out__l">${c.flags.map(f => `<li>${f}</li>`).join('')}</ul></div>` : ''}
+      <div class="out__b">
+        <p class="out__h">At a glance</p>
+        <ul class="out__l">
+          <li>${phaseCount} phase${phaseCount > 1 ? 's' : ''}</li>
+          ${agents.size
+            ? `<li>${agents.size} agent${agents.size > 1 ? 's' : ''}</li>`
+            : '<li>delegates its agents</li>'}
+          ${gates ? `<li>${gates} human gate${gates > 1 ? 's' : ''}</li>` : '<li>runs unattended</li>'}
+        </ul>
+      </div>
+    </div>`;
+  tt.querySelector('.tt__close').addEventListener('click', () => {
+    const btn = document.querySelector(`.stn[data-slug="${slug}"]`);
+    close();
+    if (btn) btn.focus();
+  });
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && open) close(); });
+
+/* ── theme ───────────────────────────────────────────────────────── */
+const themeBtn = document.getElementById('theme');
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+
+function setTheme(dark) {
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  themeBtn.textContent = dark ? 'Light' : 'Dark';
+  themeBtn.setAttribute('aria-pressed', String(dark));
+}
+// Follow the system until the reader overrides it.
+setTheme(systemDark.matches);
+systemDark.addEventListener('change', e => setTheme(e.matches));
+themeBtn.addEventListener('click', () => setTheme(document.documentElement.dataset.theme !== 'dark'));
+
+/* ── build the roster ────────────────────────────────────────────── */
+const teamsEl = document.getElementById('teams');
+let total = 0;
+TEAMS.forEach(t => {
+  total += t.agents.length;
+  const sec = document.createElement('section');
+  sec.className = 'team';
+  sec.innerHTML = `
+    <div class="team__h">
+      <h3 class="team__n">${t.name}</h3>
+      <span class="team__c">${t.agents.length}</span>
+      <p class="team__d">${t.desc}</p>
+    </div>
+    <div class="team__g">
+      ${t.agents.map(([n, m]) => `<div class="ag ag--${m}" title="${n} — ${m}">${n}</div>`).join('')}
+    </div>`;
+  teamsEl.appendChild(sec);
+});
+/* Commands that exist but aren't workflows, so they get no stop on the line:
+   integrations (/apollo /linkedin /pipedrive /semrush) and installer plumbing
+   (/dodocs-workflow /dw-upgrade). Counted in the headline figure, not charted. */
+const UNCHARTED = ['apollo', 'linkedin', 'pipedrive', 'semrush', 'dodocs-workflow', 'dw-upgrade'];
+
+document.getElementById('fig-ag').textContent = total;
+document.getElementById('fig-cmd').textContent = Object.keys(COMMANDS).length + UNCHARTED.length;
+</script>
+</body>
+</html>

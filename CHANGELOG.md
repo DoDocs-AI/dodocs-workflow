@@ -2,6 +2,54 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.16.0] - 2026-07-14
+
+feat: /change-request now updates the existing feature in place, with a product decision gate
+
+`/change-request <area-slug>` previously created a brand-new sibling folder
+(`docs/features/<area-slug>-<change>/`) with a fresh delta FEATURE-BRIEF.md and treated the
+original feature docs as read-only. It now updates the **existing** feature's docs, code, and
+tests in place, and asks product to decide first whether the request is a change or a new feature.
+
+### Added
+- **Product decision gate (Phase 4)** — `product-owner` runs in CLASSIFICATION MODE to judge
+  the request as `CHANGE` vs `NEW_FEATURE` and returns a verdict + reasoning. The user confirms;
+  if it's really a new feature, `/change-request` hands off to `/scrum-team` and leaves the
+  existing feature untouched.
+- **CHANGELOG.md per feature** — each change appends a dated entry to
+  `docs/features/<area-slug>/CHANGELOG.md` as the audit trail.
+
+### Changed
+- `product-owner` CHANGE-UPDATE MODE edits `FEATURE-BRIEF.md` in place (targeted edits, no rewrite)
+  instead of writing a separate delta brief.
+- Phase 7 runs the scrum-team against the existing `docs/features/<area-slug>/` folder with
+  overrides so `architect`/`ux-designer` edit `ARCHITECTURE.md`/`UX-DESIGN.md` in place and the
+  devs/QA modify the existing feature's code and tests. Branch is `feature/<area-slug>-<change-slug>`.
+- Removed the old `<CR_SLUG>` sibling-folder / `CHANGE-REQUEST.md` / delta-docs model.
+- Mirrored the rework to the OpenCode copy; updated `docs/FEATURES.md` Change Request section.
+
+## [v1.15.0] - 2026-06-25
+
+feat: add requirements quality agentic loop (UX + business critics)
+
+Adds a critic + auto-refine loop over requirements docs, modeled on the existing
+mockup-validator pattern.
+
+### Added
+- **`ux-requirements-critic`** (Opus) — scores a FEATURE-BRIEF.md/FRD.md on 6 UX-requirement
+  dimensions and writes `REQ-UX-REVIEW.md` with a 1–5 matrix, weighted average, and PASS/FAIL.
+- **`business-requirements-critic`** (Opus) — scores the same doc on 6 business dimensions and
+  writes `REQ-BUSINESS-REVIEW.md`.
+- **`requirements-enricher`** (Opus) — non-interactive rewrite that resolves every Critical and
+  High finding from both critics, recording inferred decisions under an `## Assumptions` section.
+
+### Changed
+- `/prepare-feature` gains **Phase D1.5**, running before any mockup work.
+- `/brainstorm` runs the loop over the FRD after it is produced.
+- Loop shape in both: score (both critics in parallel) → gate → enrich, max 3×, then a human gate.
+  Writes `REQUIREMENTS-VALIDATION.md` with before→after scores.
+- `install.sh` agent count updated to 88.
+
 ## [v1.14.1] - 2026-04-08
 
 fix: extend /wiki ingest to support any docs/ path, not just features/

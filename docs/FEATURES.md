@@ -163,15 +163,16 @@ Processes multiple features autonomously, one after another or in parallel.
 
 **Command**: `/change-request <area-slug>`
 
-Makes targeted changes to an existing feature area without rebuilding everything from scratch.
+Makes targeted changes to an existing feature area — updating that feature's docs, code, and tests **in place** rather than rebuilding from scratch or spawning a new feature.
 
 **What it does**:
-- Reads existing baseline docs (FEATURE-BRIEF.md, ARCHITECTURE.md, UX-DESIGN.md) as immutable context
+- Reads the existing feature docs (FEATURE-BRIEF.md, ARCHITECTURE.md, UX-DESIGN.md)
 - Captures your change description through interactive questioning
-- Produces a CHANGE-REQUEST.md and delta architecture/UX docs
-- Spawns the full team with per-phase overrides scoped to the change
+- **Product decision gate**: `product-owner` first classifies the request as a **change** to this feature or a genuinely **new feature**, presents the verdict + reasoning, and asks you to confirm. If it's really a new feature, you're handed off to `/scrum-team` (the existing feature is left untouched).
+- **Updates in place**: edits the existing FEATURE-BRIEF.md / ARCHITECTURE.md / UX-DESIGN.md directly and appends a dated entry to a CHANGELOG.md in the same folder (audit trail) — no sibling folder, no fresh delta brief
+- Spawns the full team with per-phase overrides that modify the current feature's code and tests in place
 
-**Use case**: "Add a filter dropdown to the existing invoices page" — the team understands the existing feature and only builds the delta.
+**Use case**: "Add a filter dropdown to the existing invoices page" — product confirms it's a change, the existing invoices docs are updated in place, and the team modifies the existing code and tests.
 
 ---
 

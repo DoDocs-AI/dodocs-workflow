@@ -1,4 +1,4 @@
-Make targeted changes to an existing feature area. Points at a feature that already has docs (FEATURE-BRIEF.md, ARCHITECTURE.md, UX-DESIGN.md), describes what to change, and runs the full scrum-team on the delta only — without losing the baseline context.
+Make targeted changes to an existing feature area. Points at a feature that already has docs (FEATURE-BRIEF.md, ARCHITECTURE.md, UX-DESIGN.md). Product first decides whether the request is a CHANGE to that feature or a genuinely NEW feature. When it is a change, the existing feature's docs, code, and tests are updated IN PLACE — no new feature brief, no sibling folder.
 
 ## Usage
 
@@ -15,6 +15,17 @@ Example: `/change-request billing-dashboard`
 **CRITICAL — READ THIS FIRST**: Every agent spawned via the Task tool MUST use `mode: "bypassPermissions"` to ensure fully autonomous execution with no permission prompts.
 
 Spawn all agents automatically as their phase begins — do NOT ask the user for permission to spawn any agent.
+
+---
+
+## Core Principle — Change In Place
+
+A change request modifies the **existing** feature. Do NOT create a new `<area-slug>-<change>` folder and do NOT write a fresh delta FEATURE-BRIEF. Instead:
+- **Edit** `docs/features/<AREA_SLUG>/FEATURE-BRIEF.md`, `ARCHITECTURE.md`, and `UX-DESIGN.md` in place.
+- **Append** a dated entry to `docs/features/<AREA_SLUG>/CHANGELOG.md` (the audit trail).
+- **Modify** the current feature's code and tests in place — never scaffold a parallel implementation.
+
+A new folder/brief is only ever created if product decides the request is actually a NEW feature, in which case the user is handed off to `/scrum-team`.
 
 ---
 
@@ -78,6 +89,7 @@ Read all files that exist in `docs/features/<AREA_SLUG>/`:
 - `ARCHITECTURE.md` (if present)
 - `UX-DESIGN.md` (if present)
 - `PROGRESS.md` (if present)
+- `CHANGELOG.md` (if present)
 - `STATUS` (if present)
 
 Print a context summary box:
@@ -112,72 +124,19 @@ Options:
 
 If "Refine" → ask again for the new description, loop back to confirm. Repeat until "Proceed".
 
----
-
-### Phase 4 — Derive CR Slug
-
-Derive `CR_SLUG` from the confirmed description:
-- Start with `<AREA_SLUG>-`
+**Derive `CHANGE_SLUG`** (used later for the branch name and for a new-feature suggestion):
 - Take 2–4 meaningful words from `USER_CHANGE_DESCRIPTION`
 - Strip stop words: a, an, the, for, to, of, in, on, with, and, or, by, from, that, this, is, are, be, it
 - Lowercase, spaces → hyphens, strip non-alphanumeric characters
-- Truncate total slug to max 50 characters
-
-Examples:
-- `billing-dashboard` + "add CSV export for invoices" → `billing-dashboard-add-csv-export`
-- `user-settings` + "allow changing email address" → `user-settings-change-email-address`
-- `notifications` + "add push notifications via Firebase" → `notifications-add-push-firebase`
-
-Create directory: `docs/features/<CR_SLUG>/`
-Write `draft` to `docs/features/<CR_SLUG>/STATUS`
-Create `docs/features/<CR_SLUG>/PROGRESS.md` with this content:
-```markdown
-# Progress: <CR_SLUG>
-
-## Change Request
-This is a change request targeting area: <AREA_SLUG>
-Description: <USER_CHANGE_DESCRIPTION>
-
-## Current Phase
-Phase CR1 — Change Intake
-
-## Phase Status
-
-| Phase | Status | Agent(s) |
-|-------|--------|----------|
-| CR1: Change Intake | In Progress | product-owner |
-| CR2: Delta Architecture + UX | Pending | architect, ux-designer |
-| CR3: Task Breakdown | Pending | scrum-master |
-| CR4: Build + Test | Pending | all |
-| CR5: Integration Verification | Pending | — |
-| CR6: Ship | Pending | — |
-
-## Artifacts
-
-| Document | Status | Author |
-|----------|--------|--------|
-| CHANGE-REQUEST.md | Pending | product-owner |
-| FEATURE-BRIEF.md (delta) | Pending | product-owner |
-| UX-DESIGN.md (delta) | Pending | ux-designer |
-| ARCHITECTURE.md (delta) | Pending | architect |
-
-## Baseline Reference
-
-| Document | Location |
-|----------|----------|
-| Original FEATURE-BRIEF.md | docs/features/<AREA_SLUG>/FEATURE-BRIEF.md |
-| Original ARCHITECTURE.md | docs/features/<AREA_SLUG>/ARCHITECTURE.md |
-| Original UX-DESIGN.md | docs/features/<AREA_SLUG>/UX-DESIGN.md |
-
-## Timeline
-- [start] change-request: CR folder created for area <AREA_SLUG>, STATUS=draft
-```
+- Examples: "add CSV export for invoices" → `add-csv-export`; "allow changing email address" → `change-email-address`
 
 ---
 
-### Phase 5 — Product-Owner (Change Mode)
+### Phase 4 — Product Decision Gate (Change vs New Feature)
 
-Spawn `product-owner` agent with `mode: "bypassPermissions"`:
+**This is the "product checks first" step.** Before touching any docs, product decides whether this request is a change to the existing feature or is really a new feature.
+
+Spawn `product-owner` agent with `mode: "bypassPermissions"` in CLASSIFICATION MODE:
 
 ```
 Spawn Task:
@@ -186,108 +145,171 @@ Spawn Task:
   prompt        = """
     Read ~/.claude/agents/product-owner.md and execute it.
 
-    You are operating in CHANGE REQUEST MODE for an existing feature area.
+    You are operating in CLASSIFICATION MODE. Do NOT write or edit any files.
+    Do NOT ask the user any questions. Return your verdict as text only.
 
-    AREA SLUG (baseline): <AREA_SLUG>
-    CR SLUG (this change request): <CR_SLUG>
+    AREA SLUG (existing feature): <AREA_SLUG>
     CHANGE DESCRIPTION: <USER_CHANGE_DESCRIPTION>
 
-    STEP 1 — Read the baseline documents:
+    STEP 1 — Read the existing documents:
       - docs/features/<AREA_SLUG>/FEATURE-BRIEF.md
       - docs/features/<AREA_SLUG>/ARCHITECTURE.md  (if it exists)
       - docs/features/<AREA_SLUG>/UX-DESIGN.md     (if it exists)
 
-    STEP 2 — Ask ONLY incremental clarifying questions about the change.
-    Do NOT re-ask anything that is already covered by the baseline documents.
-    Focus your questions solely on what is new, different, or ambiguous about
-    the requested change. 2-4 questions maximum.
+    STEP 2 — Classify the request:
+      - CHANGE = it modifies or extends the existing feature's user stories,
+        screens, endpoints, or data model, and fits inside this feature's
+        current problem statement.
+      - NEW_FEATURE = it introduces a distinct user journey, an independent
+        data model, or a separate module only loosely related to this area.
 
-    STEP 3 — Write TWO files to docs/features/<CR_SLUG>/:
+    STEP 3 — Return EXACTLY this format as your final message (no files):
+      VERDICT: CHANGE            (or)   VERDICT: NEW_FEATURE
+      REASONING: <1-2 sentences>
+      SUGGESTED_NAME: <only if NEW_FEATURE — a short human feature name>
+  """
+```
 
-    File 1: CHANGE-REQUEST.md
-    Sections (in order):
-      ## Original Area Summary
-        One-paragraph summary of what the baseline feature does.
-      ## Change Description
-        The user's change description verbatim, plus any clarifications.
-      ## Problem Being Solved
-        Why this change is needed.
-      ## What Stays the Same
-        Parts of the baseline feature that are NOT being changed.
-      ## What Changes
-        Specific modifications: UI changes, new endpoints, schema changes, etc.
-      ## New Acceptance Criteria
-        Criteria that are NEW or MODIFIED (delta only — do not repeat unchanged criteria).
-      ## Impact on Existing Functionality
-        Potential regressions, migration needs, or UX disruptions.
-      ## Dependencies
-        Depends On: <AREA_SLUG>
+Wait for the task to complete. Parse `VERDICT`, `REASONING`, and (if present) `SUGGESTED_NAME` from the agent's returned text.
 
-    File 2: FEATURE-BRIEF.md
-    Standard FEATURE-BRIEF.md format but scoped to the DELTA only.
-    Required sections:
-      - Problem Statement (explain the gap this change fills)
-      - User Stories (new/modified stories only)
-      - Acceptance Criteria (new/modified criteria only)
-      - Out of Scope: see docs/features/<AREA_SLUG>/FEATURE-BRIEF.md for baseline
-      - Depends On: <AREA_SLUG>
+**Present the verdict to the user** with `AskUserQuestion`:
 
-    After writing both files, write 'cr-ready' to docs/features/<CR_SLUG>/STATUS.
+**If VERDICT = CHANGE:**
+"Product's assessment: this is a **change** to `<AREA_SLUG>`.
+Reason: <REASONING>
+
+How would you like to proceed?"
+Options:
+1. "Proceed as a change to `<AREA_SLUG>`" (default)
+2. "Actually make this a new feature"
+
+- If option 1 → continue to Phase 5.
+- If option 2 → treat as NEW_FEATURE handoff (see below).
+
+**If VERDICT = NEW_FEATURE:**
+"Product's assessment: this looks like a **new feature**, not a change to `<AREA_SLUG>`.
+Reason: <REASONING>
+
+How would you like to proceed?"
+Options:
+1. "Create as a new feature via `/scrum-team`" (default)
+2. "No — treat it as a change to `<AREA_SLUG>` anyway"
+
+- If option 1 → **NEW_FEATURE handoff**: print and STOP (do not auto-run):
+  ```
+  This is better built as a new feature. Run:
+
+    /scrum-team "<SUGGESTED_NAME, or a name derived from the change>"
+
+  That will stand up a fresh feature with its own docs at
+  docs/features/<suggested-slug>/, leaving <AREA_SLUG> untouched.
+  ```
+- If option 2 → continue to Phase 5 (proceed as a change).
+
+---
+
+### Phase 5 — Update Product Docs In Place
+
+Spawn `product-owner` agent with `mode: "bypassPermissions"` in CHANGE-UPDATE MODE:
+
+```
+Spawn Task:
+  subagent_type = "product-owner"
+  mode          = "bypassPermissions"
+  prompt        = """
+    Read ~/.claude/agents/product-owner.md and execute it.
+
+    You are operating in CHANGE-UPDATE MODE for an existing feature area.
+    You UPDATE the existing docs in place. Do NOT create a new folder and do
+    NOT write a separate delta brief.
+
+    AREA SLUG: <AREA_SLUG>
+    CHANGE DESCRIPTION: <USER_CHANGE_DESCRIPTION>
+
+    STEP 1 — Read the existing documents:
+      - docs/features/<AREA_SLUG>/FEATURE-BRIEF.md
+      - docs/features/<AREA_SLUG>/ARCHITECTURE.md  (if it exists)
+      - docs/features/<AREA_SLUG>/UX-DESIGN.md     (if it exists)
+      - docs/features/<AREA_SLUG>/CHANGELOG.md      (if it exists)
+
+    STEP 2 — Ask ONLY incremental clarifying questions about the change
+    (2-4 max). Do NOT re-gather requirements already covered by the existing
+    FEATURE-BRIEF.md.
+
+    STEP 3 — EDIT docs/features/<AREA_SLUG>/FEATURE-BRIEF.md IN PLACE.
+      Use the Edit tool for targeted changes — do NOT rewrite the whole file.
+      Fold the change into the existing sections:
+        - Problem Statement: extend only if the change alters the problem
+        - User Stories: add new stories, modify affected ones, keep the rest
+        - Acceptance Criteria: add/modify only the criteria this change touches
+        - Edge Cases: add any new edge cases the change introduces
+      Everything not touched by the change must remain intact.
+
+    STEP 4 — APPEND a dated entry to docs/features/<AREA_SLUG>/CHANGELOG.md
+    (create the file with a `# Changelog` heading if it does not exist).
+    Prepend the new entry directly under the heading, format:
+
+      ## <YYYY-MM-DD> — <short change title>
+      **Change:** <USER_CHANGE_DESCRIPTION>
+      **What changed:** <bulleted summary of the brief/story/criteria edits>
+      **Impact on existing functionality:** <regressions / migration / UX notes>
+
+    Use the current date. If you cannot determine it, run `date +%F` via Bash.
   """
 ```
 
 Wait for the task to complete.
 
-**Validate:** Read both files.
-- `docs/features/<CR_SLUG>/CHANGE-REQUEST.md` — must exist and contain all 8 sections
-- `docs/features/<CR_SLUG>/FEATURE-BRIEF.md` — must exist, must contain Problem Statement and at least one User Story
+**Validate:**
+- `docs/features/<AREA_SLUG>/FEATURE-BRIEF.md` — still contains a Problem Statement and at least one User Story.
+- `docs/features/<AREA_SLUG>/CHANGELOG.md` — exists and contains a new dated entry referencing this change.
 
-If either file is missing or incomplete: re-spawn `product-owner` with `bypassPermissions` appending:
-"CHANGE-REQUEST.md or FEATURE-BRIEF.md is incomplete or missing. Regenerate both files with all required sections as specified in your prompt."
+If validation fails: re-spawn `product-owner` with `bypassPermissions`, appending:
+"The in-place FEATURE-BRIEF.md edit or the CHANGELOG.md entry is missing or incomplete. Apply the edits and append the changelog entry as specified."
 Wait and re-validate. Retry up to 2 times total.
 
 ---
 
 ### Phase 6 — Present and Confirm
 
-Read and print the full content of `docs/features/<CR_SLUG>/CHANGE-REQUEST.md`.
+Print a short summary of what changed in `FEATURE-BRIEF.md` and print the new `CHANGELOG.md` entry in full.
 
 Then use `AskUserQuestion`:
-"The change request document is ready (printed above). How would you like to proceed?"
+"The feature docs for `<AREA_SLUG>` have been updated in place (summary above). How would you like to proceed?"
 Options:
-1. "Launch scrum-team — implement now"
-2. "Save for later — I'll run `/scrum-team <CR_SLUG>` manually"
+1. "Launch scrum-team — implement the change now"
+2. "Save for later — I'll run `/change-request <AREA_SLUG>` again or `/scrum-team <AREA_SLUG>` manually"
 3. "Something is wrong — revise"
 
 **If "Save for later":**
 Print:
 ```
-Change request saved. Files created:
-  docs/features/<CR_SLUG>/CHANGE-REQUEST.md
-  docs/features/<CR_SLUG>/FEATURE-BRIEF.md
-  docs/features/<CR_SLUG>/STATUS  (cr-ready)
+Change saved. Updated in place:
+  docs/features/<AREA_SLUG>/FEATURE-BRIEF.md
+  docs/features/<AREA_SLUG>/CHANGELOG.md  (new entry)
 
 When ready to implement, run:
-  /scrum-team <CR_SLUG>
+  /scrum-team <AREA_SLUG>
 
-The scrum-team will use these docs as its starting point.
+The scrum-team will read the updated docs and modify the existing
+code and tests for this feature.
 ```
 Then STOP.
 
 **If "Revise":**
-Use `AskUserQuestion` to ask: "What should be revised in the change request?"
-Re-spawn `product-owner` with `bypassPermissions`, appending the revision feedback to the original prompt:
-"The user has reviewed CHANGE-REQUEST.md and requested revisions: <revision feedback>. Update both CHANGE-REQUEST.md and FEATURE-BRIEF.md accordingly."
-Wait for completion. Then loop back to Phase 6 (re-read and re-present CHANGE-REQUEST.md).
+Use `AskUserQuestion` to ask: "What should be revised?"
+Re-spawn `product-owner` with `bypassPermissions`, appending the revision feedback:
+"The user reviewed the updated docs and requested revisions: <revision feedback>. Update FEATURE-BRIEF.md in place and adjust the latest CHANGELOG.md entry accordingly."
+Wait for completion. Then loop back to Phase 6.
 
 **If "Launch":**
 Proceed to Phase 7.
 
 ---
 
-### Phase 7 — Scrum-Team Launch
+### Phase 7 — Scrum-Team Launch (In Place)
 
-Spawn a `general-purpose` agent with `mode: "bypassPermissions"` to run the scrum-team workflow:
+Spawn a `general-purpose` agent with `mode: "bypassPermissions"` to run the scrum-team workflow against the **existing** feature folder:
 
 ```
 Spawn Task:
@@ -296,44 +318,50 @@ Spawn Task:
   prompt        = """
     Read ~/.claude/commands/scrum-team.md and execute it fully.
 
-    $ARGUMENTS = <CR_SLUG>
+    $ARGUMENTS = <AREA_SLUG>
 
-    CHANGE REQUEST CONTEXT — inject these instructions into each phase:
+    This is a CHANGE to an existing feature. The docs already live at
+    docs/features/<AREA_SLUG>/ and the FEATURE-BRIEF.md has ALREADY been
+    updated to describe the change. Update everything IN PLACE — do not
+    create any new feature folder.
+
+    BRANCH OVERRIDE:
+      - Use branch feature/<AREA_SLUG>-<CHANGE_SLUG> instead of
+        feature/<AREA_SLUG>, so this change gets its own scoped PR.
 
     PHASE 1 OVERRIDE (product-owner):
-      - Read docs/features/<AREA_SLUG>/FEATURE-BRIEF.md as the baseline context
-      - Read docs/features/<CR_SLUG>/CHANGE-REQUEST.md for the change description
-      - Treat docs/features/<CR_SLUG>/FEATURE-BRIEF.md as PRE-APPROVED — do NOT re-ask the user for requirements that are already documented there
-      - Your role is to clarify implementation details only, not to re-gather baseline requirements
+      - docs/features/<AREA_SLUG>/FEATURE-BRIEF.md is ALREADY UPDATED and
+        PRE-APPROVED. Do NOT regenerate, re-ask, or overwrite it.
+      - Also read docs/features/<AREA_SLUG>/CHANGELOG.md (latest entry) to
+        understand exactly what is changing.
 
     PHASE 2 OVERRIDE (architect):
-      - Read docs/features/<AREA_SLUG>/ARCHITECTURE.md as the baseline architecture
-      - Produce a DELTA ARCHITECTURE.md at docs/features/<CR_SLUG>/ARCHITECTURE.md
-      - Structure it as: sections that are UNCHANGED (reference only), sections that are MODIFIED (show diff), and sections that are NEW
-      - Do NOT reproduce the full baseline architecture verbatim
+      - EDIT docs/features/<AREA_SLUG>/ARCHITECTURE.md IN PLACE to reflect the
+        change (targeted edits with the Edit tool — not a delta file, not a
+        full rewrite). Leave unaffected sections intact.
 
     PHASE 2 OVERRIDE (ux-designer):
-      - Read docs/features/<AREA_SLUG>/UX-DESIGN.md as the baseline UX
-      - Produce a DELTA UX-DESIGN.md at docs/features/<CR_SLUG>/UX-DESIGN.md
-      - Document only flows and states that CHANGE or are NEW
-      - Reference baseline flows by name rather than reproducing them
+      - EDIT docs/features/<AREA_SLUG>/UX-DESIGN.md IN PLACE for the flows and
+        states that change or are new. Leave unaffected flows intact.
+      - Skip mockup regeneration unless the change adds or removes screens.
 
-    PHASES 3-6: Run normally per the scrum-team workflow.
+    PHASE 4 OVERRIDE (developers + QA):
+      - Modify the existing feature's CODE and TESTS in place to implement the
+        change. Do NOT scaffold a parallel implementation.
+      - Update this feature's existing test cases to match the new behavior.
 
-    Baseline area: <AREA_SLUG>
-    CR docs: docs/features/<CR_SLUG>/
+    PHASES 3, 5-6: Run normally per the scrum-team workflow.
   """
 ```
 
 After spawning, report to the user:
 ```
-Scrum-team launched for change request '<CR_SLUG>'.
-Baseline area: <AREA_SLUG>
+Scrum-team launched for change to '<AREA_SLUG>'.
 
-The team will implement only the delta described in CHANGE-REQUEST.md,
-using the original <AREA_SLUG> docs as baseline context.
+Docs, code, and tests for this feature are being updated IN PLACE.
+Changelog entry: docs/features/<AREA_SLUG>/CHANGELOG.md
 
-Feature branch: feature/<CR_SLUG>
+Feature branch: feature/<AREA_SLUG>-<CHANGE_SLUG>
 ```
 
 ---

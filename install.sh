@@ -143,6 +143,7 @@ AGENTS=(
     "web-designer"
     "design-validator"
     "wiki-maintainer"
+    "spec-bootstrapper"
 )
 
 # Install agent files
@@ -184,6 +185,7 @@ COMMANDS=(
     "fix-and-ship"
     "web-design"
     "wiki"
+    "spec-bootstrap"
 )
 
 print_info "Installing commands..."
@@ -239,6 +241,15 @@ else
 fi
 print_success "  scrum-team-config.template.md"
 
+# Install OpenSpec conventions doc
+print_info "Installing OpenSpec conventions..."
+if [ "$SOURCE" = "local" ]; then
+    cp "$SOURCE_DIR/templates/openspec-conventions.md" "$CLAUDE_DIR/openspec-conventions.md"
+else
+    curl -fsSL "$REPO_URL/claude/templates/openspec-conventions.md" -o "$CLAUDE_DIR/openspec-conventions.md"
+fi
+print_success "  openspec-conventions.md"
+
 # Write version
 if [ "$SOURCE" = "local" ]; then
     VERSION=$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')
@@ -260,11 +271,12 @@ echo ""
 echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
-echo "  ~/.claude/agents/          - 88 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + fix-and-ship + rebase + brainstorm + change-request + gtm-team + supervisor + ship + web-design + wiki commands"
+echo "  ~/.claude/agents/          - 89 agent definitions"
+echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + fix-and-ship + rebase + brainstorm + change-request + gtm-team + supervisor + ship + web-design + wiki + spec-bootstrap commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"
+echo "  ~/.claude/openspec-conventions.md"
 echo ""
 
 if [ "$UPGRADE" = false ]; then

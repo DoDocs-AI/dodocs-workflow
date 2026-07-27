@@ -12,6 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Validate structure
         run: bash tests/validate-structure.sh
 
@@ -23,3 +27,9 @@ jobs:
 
       - name: Validate docs
         run: bash tests/validate-docs.sh
+
+      - name: Validate install scripts
+        run: bash tests/validate-install.sh
+
+      - name: Validate OpenSpec integration
+        run: bash tests/validate-openspec.sh

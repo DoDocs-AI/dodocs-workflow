@@ -52,6 +52,12 @@
 - **Auth Fixture**: <e.g., e2e/fixtures/auth.fixture.ts>
 - **Playwright Config**: <e.g., e2e/playwright.config.ts>
 
+## OpenSpec
+
+- **OpenSpec CLI**: npx -y @fission-ai/openspec@1.6.0
+- **OpenSpec Root**: openspec/
+- **Spec Domains**: <comma-separated capability domains, e.g. auth, billing, notifications — grows over time; leave blank on a new project and let /spec-bootstrap or the first feature propose them>
+
 ## Commands
 
 - **Start DB**: <e.g., docker compose up -d postgres>

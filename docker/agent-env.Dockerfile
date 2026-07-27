@@ -25,6 +25,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install OpenSpec CLI globally, pinned — must match the version in
+# claude/templates/scrum-team-config.template.md (checked by tests/validate-openspec.sh)
+RUN npm install -g @fission-ai/openspec@1.6.0
+
 # Set environment for agent teams
 ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 ENV NODE_ENV=production

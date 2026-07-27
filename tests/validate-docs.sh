@@ -36,8 +36,9 @@ actual_agent_count=$(find "$AGENTS_DIR" -maxdepth 1 -name '*.md' | wc -l | tr -d
 echo "INFO: Found $actual_agent_count agent files in claude/agents/"
 
 if [ -f "$FEATURES_MD" ]; then
-    # Look for patterns like "25 agent" or "N agent definitions"
-    features_agent_count=$(grep -oE '[0-9]+ agent' "$FEATURES_MD" | head -1 | grep -oE '[0-9]+' || true)
+    # Look specifically for the roster claim "N agent definitions" — a bare
+    # "N agent" matches incidental prose and hides real drift
+    features_agent_count=$(grep -oE '[0-9]+ agent definitions' "$FEATURES_MD" | head -1 | grep -oE '[0-9]+' || true)
     if [ -n "$features_agent_count" ]; then
         if [ "$actual_agent_count" -eq "$features_agent_count" ]; then
             pass "Agent count matches FEATURES.md ($actual_agent_count)"
@@ -58,8 +59,8 @@ actual_cmd_count=$(find "$COMMANDS_DIR" -maxdepth 1 -name '*.md' | wc -l | tr -d
 echo "INFO: Found $actual_cmd_count command files in claude/commands/"
 
 if [ -f "$FEATURES_MD" ]; then
-    # Look for patterns like "13 slash commands" or "N commands"
-    features_cmd_count=$(grep -oE '[0-9]+ (slash )?command' "$FEATURES_MD" | head -1 | grep -oE '[0-9]+' || true)
+    # Look specifically for the roster claim "N slash commands"
+    features_cmd_count=$(grep -oE '[0-9]+ slash command' "$FEATURES_MD" | head -1 | grep -oE '[0-9]+' || true)
     if [ -n "$features_cmd_count" ]; then
         if [ "$actual_cmd_count" -eq "$features_cmd_count" ]; then
             pass "Command count matches FEATURES.md ($actual_cmd_count)"

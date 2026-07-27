@@ -2,6 +2,37 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v1.17.0] - 2026-07-27
+
+feat: OpenSpec foundations — Phase 0 of the spec-driven requirements migration (inert, no pipeline behavior change)
+
+dodocs-workflow is migrating its requirements layer to OpenSpec (@fission-ai/openspec,
+pinned 1.6.0): living per-capability specs in openspec/specs/ and validated change
+proposals in openspec/changes/. This release ships the tooling ahead of the v2 cutover
+so projects can migrate at their own pace — the FEATURE-BRIEF pipeline is unchanged.
+
+### Added
+- claude/templates/openspec-conventions.md — single source of truth for agents:
+  directory split rule, artifact formats, pinned CLI usage, validation gates
+  (installed to ~/.claude/openspec-conventions.md)
+- /spec-bootstrap command + spec-bootstrapper agent — one-time migration that derives
+  openspec/specs/ living specs from existing FEATURE-BRIEFs and the codebase, and
+  seeds openspec/changes/ proposals for in-flight features
+- scrum-team config template: new "OpenSpec" section (CLI pin, root, spec domains)
+- dodocs-workflow init: doctor checks (Node >= 20, pinned CLI) + non-interactive
+  "openspec init --tools none" scaffolding; new "doctor" subcommand
+- docker/agent-env.Dockerfile pre-installs @fission-ai/openspec@1.6.0
+- tests/validate-openspec.sh — pin consistency + fixture validate/archive loop
+  against the real pinned CLI (hard-required in CI, warn-only offline)
+- tests/validate-install.sh — temp-HOME install/uninstall smoke test + array parity
+
+### Fixed
+- uninstall.sh was missing 62 agents and 22 commands vs install.sh — now fully synced
+- tests/validate-docs.sh count-drift grep matched incidental prose and never caught
+  real drift — now anchored to "N agent definitions" / "N slash commands"
+- release.sh: BSD awk multiline -v failure and blank-line-terminated stdin made
+  multi-paragraph changelog entries impossible to pipe
+
 ## [v1.16.0] - 2026-07-14
 
 feat: /change-request now updates the existing feature in place, with a product decision gate

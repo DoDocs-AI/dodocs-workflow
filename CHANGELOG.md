@@ -2,6 +2,44 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v2.0.0] - 2026-07-27
+
+feat!: spec-driven requirements — the pipeline is now built on OpenSpec (BREAKING)
+
+The requirements layer is restructured around OpenSpec (@fission-ai/openspec, pinned
+1.6.0). Every feature is now an OpenSpec change — openspec/changes/<slug>/ with
+proposal.md, validated delta specs, design.md, and tasks.md — and shipping archives
+the deltas into living per-capability specs at openspec/specs/, giving every project
+a canonical, always-current description of system behavior.
+
+### Breaking
+- product-owner writes proposal.md + delta specs (strict CLI validation) instead of
+  FEATURE-BRIEF.md; architect writes design.md instead of ARCHITECTURE.md;
+  scrum-master writes tasks.md as the canonical checklist
+- /change-request captures requests as delta changes against the living specs;
+  the per-feature CHANGELOG.md is retired (the change archive is the audit trail)
+- /scrum-team, /prepare-feature(s), /batch-features, /change-request, /ship STOP on
+  projects without openspec/ and point to the migration path
+- Requires Node.js >= 20 (for the pinned openspec CLI via npx)
+
+### Migration
+- Existing projects: run /spec-bootstrap once — it derives openspec/specs/ from your
+  legacy FEATURE-BRIEFs (kept untouched as read-only history) and seeds change
+  proposals for in-flight features
+- New projects: dodocs-workflow init now scaffolds openspec/ automatically
+- Staying on v1: curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install.sh | bash
+
+### Added
+- Post-merge archiving in /ship and /merge-features (never on feature branches)
+- /brainstorm FRD handoff into /prepare-feature; /wiki ingests openspec/specs and
+  changes; doc-sync-agent treats openspec/specs/ as behavioral truth
+- OpenCode mirror fully ported; FEATURE-BRIEF containment lint in CI
+- Requirements quality loop (UX + business critics + enricher) now scores OpenSpec
+  changes directly, with openspec validate --strict as a mechanical gate
+
+### Deferred
+- PLC and GTM pipelines stay on the legacy artifact model for now
+
 ## [v1.17.0] - 2026-07-27
 
 feat: OpenSpec foundations — Phase 0 of the spec-driven requirements migration (inert, no pipeline behavior change)

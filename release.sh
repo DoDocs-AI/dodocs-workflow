@@ -70,14 +70,20 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
 fi
 
 # Prompt for changelog entry
+# Interactive: read until an empty line. Piped stdin: read everything, so
+# multi-paragraph entries (with blank lines) can be provided non-interactively.
 echo ""
-echo -e "${YELLOW}Enter changelog entry for $TAG (end with empty line):${NC}"
-CHANGELOG_ENTRY=""
-while IFS= read -r line; do
-    [ -z "$line" ] && break
-    CHANGELOG_ENTRY="${CHANGELOG_ENTRY}${line}
+if [ -t 0 ]; then
+    echo -e "${YELLOW}Enter changelog entry for $TAG (end with empty line):${NC}"
+    CHANGELOG_ENTRY=""
+    while IFS= read -r line; do
+        [ -z "$line" ] && break
+        CHANGELOG_ENTRY="${CHANGELOG_ENTRY}${line}
 "
-done
+    done
+else
+    CHANGELOG_ENTRY=$(cat)
+fi
 
 if [ -z "$CHANGELOG_ENTRY" ]; then
     die "Changelog entry is required."
@@ -93,17 +99,21 @@ NEW_CHANGELOG_SECTION="## [$TAG] - $DATE
 $CHANGELOG_ENTRY"
 
 if [ -f "$CHANGELOG_FILE" ]; then
-    # Insert after the header line
+    # Insert before the first existing release section. The section goes through a
+    # temp file because BSD awk cannot take multiline strings via -v.
     TEMP_FILE=$(mktemp)
-    awk -v section="$NEW_CHANGELOG_SECTION" '
+    SECTION_FILE=$(mktemp)
+    printf '%s\n' "$NEW_CHANGELOG_SECTION" > "$SECTION_FILE"
+    awk -v sfile="$SECTION_FILE" '
         /^## \[v/ && !inserted {
-            print section
+            while ((getline sline < sfile) > 0) print sline
             print ""
             inserted=1
         }
         { print }
     ' "$CHANGELOG_FILE" > "$TEMP_FILE"
     mv "$TEMP_FILE" "$CHANGELOG_FILE"
+    rm -f "$SECTION_FILE"
 else
     cat > "$CHANGELOG_FILE" <<EOF
 # Changelog

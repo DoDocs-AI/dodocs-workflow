@@ -55,6 +55,7 @@ done
 rm -f "$OPENCODE_DIR/commands/scrum-team.md"
 rm -f "$OPENCODE_DIR/commands/prepare-for-production.md"
 rm -f "$OPENCODE_DIR/scrum-team-config.template.md"
+rm -f "$OPENCODE_DIR/openspec-conventions.md"
 rm -f "$VERSION_FILE"
 
 echo -e "${GREEN}dodocs-workflow uninstalled.${NC}"

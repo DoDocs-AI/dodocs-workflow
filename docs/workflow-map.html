@@ -498,7 +498,7 @@ const COMMANDS = {
       { id: 'D3', name: 'Validation', lanes: [ ['mockup-validator', M.s, 1, 12] ] },
       { id: 'D4', name: 'You approve', gate: 'human gate — approve the outputs' }
     ],
-    outputs: ['FEATURE-BRIEF.md', 'REQUIREMENTS-VALIDATION.md', 'mockups/', 'MOCKUP-VALIDATION.md']
+    outputs: ['openspec/changes/&lt;slug&gt;/ (proposal + delta specs)', 'REQUIREMENTS-VALIDATION.md', 'mockups/', 'MOCKUP-VALIDATION.md']
   },
   'prepare-features': {
     stage: 'prepare', tagline: 'The same preparation, batched',
@@ -532,7 +532,7 @@ const COMMANDS = {
           ['quality-metrics-collector', M.s, 5, 11], ['security-auditor', M.o, 6, 12, 'if auth touched'] ] },
       { id: '6', name: 'Ship', lanes: [ ['tech-lead', M.s, 1, 12] ] }
     ],
-    outputs: ['feature branch', 'atomic commits', 'FEATURE-BRIEF.md', 'ARCHITECTURE.md', 'UX-DESIGN.md', 'PROGRESS.md', 'open PR'],
+    outputs: ['feature branch', 'atomic commits', 'openspec/changes/&lt;slug&gt;/ (proposal, design.md, tasks.md, delta specs)', 'UX-DESIGN.md', 'PROGRESS.md', 'open PR'],
     flags: ['--auto', '--size small|medium|large', '--retest <name>']
   },
   'container-team': {
@@ -569,7 +569,7 @@ const COMMANDS = {
       { id: 'R4', name: 'Build the change', parallel: 'scrum-team with in-place overrides', lanes: [
           ['scrum-team →', M.s, 1, 12] ] }
     ],
-    outputs: ['edited FEATURE-BRIEF.md / ARCHITECTURE.md / UX-DESIGN.md', 'per-feature CHANGELOG.md', 'PR'],
+    outputs: ['edited openspec/changes/&lt;area&gt;-&lt;change&gt;/ (proposal + delta specs)', 'UX-DESIGN.md (edited in place)', 'PR'],
     flags: ['NEW_FEATURE verdict hands off to /scrum-team']
   },
   'plc-scrum-team': {

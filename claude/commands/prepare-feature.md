@@ -11,7 +11,7 @@ Example: `/prepare-feature notification-center`
 ## Overview
 
 This command runs the full daytime preparation conveyor for a single feature:
-1. **Requirements** — product-owner gathers requirements interactively → FEATURE-BRIEF.md
+1. **Requirements** — product-owner gathers requirements interactively → OpenSpec change (`openspec/changes/<slug>/`: proposal.md + delta specs)
 2. **Mockup Design** — mockup-designer creates framework-native screen components
 3. **Validation** — mockup-validator cross-checks mockups against requirements
 4. **Human Approval** — you review the live mockups in the dev server, approve or request changes
@@ -29,9 +29,13 @@ Read `.claude/scrum-team-config.md`. If it does not exist, STOP:
 
 Extract:
 - Feature Docs path (default: `docs/features/`)
+- `## OpenSpec` section: OpenSpec CLI invocation (`<openspec-cli>`, default `npx -y @fission-ai/openspec@1.6.0`), Spec Domains
 - Source Paths — Frontend (for mockup compile path)
 - Ports & URLs — Frontend Port
 - Commands — Compile Frontend
+
+If `openspec/` does not exist in the project root, STOP:
+"This project is not initialized for the OpenSpec pipeline. Run `dodocs-workflow init` (new project) or `/spec-bootstrap` (project with existing features) first. To stay on the pre-OpenSpec workflow, pin v1.17.0: `curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install.sh | bash`"
 
 Derive `<slug>` from `$ARGUMENTS`: lowercase, spaces → hyphens, strip special characters.
 Example: "Notification Center" → `notification-center`
@@ -57,19 +61,26 @@ Spawn Task:
     AUTO_MODE=false
 
     The human is present and will answer your questions interactively.
-    Write FEATURE-BRIEF.md to docs/features/<slug>/FEATURE-BRIEF.md
-    After writing the brief, write 'requirements-ready' to docs/features/<slug>/STATUS
+    Write the OpenSpec change to openspec/changes/<slug>/ (proposal.md + delta specs)
+    per ~/.claude/openspec-conventions.md, and self-validate with the pinned CLI.
+    After the change validates, write 'requirements-ready' to docs/features/<slug>/STATUS
   """
 ```
 
 Wait for the task to complete.
 
-**Validate:** Read `docs/features/<slug>/FEATURE-BRIEF.md`. Must exist and contain:
-- Non-empty Problem Statement (or Background)
-- At least one User Story
-- At least one Acceptance Criterion
+#### Phase D1.2 — Validate gate
 
-If invalid: re-spawn product-owner with: "FEATURE-BRIEF.md is missing required sections. Regenerate with: problem statement, user stories (as a [role]...), and acceptance criteria." Wait and re-validate.
+Run: `<openspec-cli> validate <slug> --strict`
+
+Also read `openspec/changes/<slug>/proposal.md`. Must contain a non-empty `## Why`
+section and at least one delta spec file under `openspec/changes/<slug>/specs/`.
+
+If the CLI fails or sections are missing: re-spawn product-owner with:
+"The OpenSpec change failed validation. Fix these findings and re-validate with
+`<openspec-cli> validate <slug> --strict` before reporting done:
+<validator output>"
+Wait and re-validate. Max 2 re-spawns; after that, print the validator output and ask the user how to proceed.
 
 On valid: Write `requirements-ready` to `docs/features/<slug>/STATUS`.
 Update PROGRESS.md: D1 → Done, D1.5 → In Progress.
@@ -81,7 +92,8 @@ Update PROGRESS.md: D1 → Done, D1.5 → In Progress.
 Harden the brief against UX and business quality bars before any mockup work. This is an
 auto-refine loop with a human gate at the end (same shape as the mockup loop in D3/D3.5).
 
-Set `OUTPUT_DIR=docs/features/<slug>/`, `REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md`, `DOC_TYPE=brief`.
+Set `OUTPUT_DIR=docs/features/<slug>/`, `CHANGE_DIR=openspec/changes/<slug>/`, `DOC_TYPE=change`.
+The critics and enricher read the whole change (proposal.md + all delta specs).
 
 **Capture baseline:** after the first score round, remember both weighted averages for the
 before→after summary.
@@ -95,9 +107,9 @@ Spawn Task:
   mode          = "bypassPermissions"
   prompt        = """
     Read ~/.claude/agents/ux-requirements-critic.md and execute it.
-    REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md
+    CHANGE_DIR=openspec/changes/<slug>/
     OUTPUT_DIR=docs/features/<slug>/
-    DOC_TYPE=brief
+    DOC_TYPE=change
   """
 
 Spawn Task:
@@ -105,9 +117,9 @@ Spawn Task:
   mode          = "bypassPermissions"
   prompt        = """
     Read ~/.claude/agents/business-requirements-critic.md and execute it.
-    REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md
+    CHANGE_DIR=openspec/changes/<slug>/
     OUTPUT_DIR=docs/features/<slug>/
-    DOC_TYPE=brief
+    DOC_TYPE=change
   """
 ```
 Wait for both. Read `REQ-UX-REVIEW.md` and `REQ-BUSINESS-REVIEW.md`; read each Overall Result.
@@ -123,12 +135,14 @@ Spawn Task:
   mode          = "bypassPermissions"
   prompt        = """
     Read ~/.claude/agents/requirements-enricher.md and execute it.
-    REQ_DOC=docs/features/<slug>/FEATURE-BRIEF.md
+    CHANGE_DIR=openspec/changes/<slug>/
     OUTPUT_DIR=docs/features/<slug>/
-    DOC_TYPE=brief
+    DOC_TYPE=change
   """
 ```
-Wait, then run another score round. After **3 iterations** without a double-PASS, stop refining
+Wait, then re-run `<openspec-cli> validate <slug> --strict` (the enricher must not
+break the strict format — if it did, re-spawn it with the validator output). Then run
+another score round. After **3 iterations** without a double-PASS, stop refining
 and proceed to the human gate anyway, logging unresolved Critical/High findings (matches the
 mockup loop's fall-through).
 
@@ -137,7 +151,7 @@ mockup loop's fall-through).
 # Requirements Validation: <feature-name>
 
 **Date:** <timestamp>
-**Brief:** docs/features/<slug>/FEATURE-BRIEF.md
+**Change:** openspec/changes/<slug>/ (proposal.md + delta specs)
 
 ## Result: PASS | PASS WITH WARNINGS | FAIL (proceeded after 3 iterations)
 | Lens | Before | After | Final verdict |
@@ -148,7 +162,7 @@ mockup loop's fall-through).
 Iterations run: <n>/3
 
 ## Assumptions made by enricher (verify these)
-- <copied from the FEATURE-BRIEF.md `## Assumptions` section>
+- <copied from the proposal.md `## Assumptions` section>
 
 ## Unresolved findings (if any)
 - <remaining Critical/High after iteration cap>
@@ -161,11 +175,11 @@ AskUserQuestion:
    listed above. How would you like to proceed?"
   Options:
     - "Approve — proceed to mockups"
-    - "Edit assumptions first" — I'll edit FEATURE-BRIEF.md, then continue
+    - "Edit assumptions first" — I'll edit proposal.md, then continue
     - "Re-run the quality loop"
 ```
 - **Approve:** Update PROGRESS.md: D1.5 → Done, D2 → In Progress. Go to Phase D2.
-- **Edit assumptions first:** print the brief path, wait for the user's "continue", then go to Phase D2.
+- **Edit assumptions first:** print the change folder path, wait for the user's "continue", then go to Phase D2.
 - **Re-run the quality loop:** restart D1.5 from the score round (resets the iteration counter).
 
 ---
@@ -182,7 +196,8 @@ Spawn Task:
     FEATURE_SLUG=<slug>
     Feature name: <feature-name>
 
-    Read docs/features/<slug>/FEATURE-BRIEF.md for requirements.
+    Read openspec/changes/<slug>/proposal.md and the delta specs under
+    openspec/changes/<slug>/specs/ for requirements.
     Create mockup components at docs/features/<slug>/mockups/
     Write 'mockups-ready' to docs/features/<slug>/STATUS when done.
   """
@@ -226,7 +241,8 @@ Spawn Task:
     FEATURE_SLUG=<slug>
     Feature name: <feature-name>
 
-    Validate docs/features/<slug>/mockups/ against docs/features/<slug>/FEATURE-BRIEF.md
+    Validate docs/features/<slug>/mockups/ against the OpenSpec change at
+    openspec/changes/<slug>/ (proposal.md + delta specs).
     Write results to docs/features/<slug>/MOCKUP-VALIDATION.md
   """
 ```
@@ -276,7 +292,7 @@ If still failing after 3 loops: fall through to manual review option.
 Print:
 ```
 Mockup files: docs/features/<slug>/mockups/
-Feature brief: docs/features/<slug>/FEATURE-BRIEF.md
+Change proposal: openspec/changes/<slug>/ (proposal.md + delta specs)
 Validation report: docs/features/<slug>/MOCKUP-VALIDATION.md
 
 To preview while editing:
@@ -408,14 +424,15 @@ type: progress
 ## Artifacts
 | File | Status | Author |
 |------|--------|--------|
-| FEATURE-BRIEF.md | Pending | product-owner |
+| openspec/changes/<slug>/ (proposal + deltas) | Pending | product-owner |
 | REQ-UX-REVIEW.md | Pending | ux-requirements-critic |
 | REQ-BUSINESS-REVIEW.md | Pending | business-requirements-critic |
 | REQUIREMENTS-VALIDATION.md | Pending | prepare-feature |
 | docs/features/<slug>/mockups/ | Pending | mockup-designer |
 | MOCKUP-VALIDATION.md | Pending | mockup-validator |
 | UX-DESIGN.md | Pending | ux-designer |
-| ARCHITECTURE.md | Pending | architect |
+| openspec/changes/<slug>/design.md | Pending | architect |
+| openspec/changes/<slug>/tasks.md | Pending | scrum-master |
 
 ## Nighttime Development Phases
 | Phase | Status |
@@ -431,8 +448,7 @@ type: progress
 - [timestamp] prepare-feature: Feature folder created, STATUS=draft
 
 ## Related Docs
-- [[FEATURE-BRIEF|Feature Brief]]
-- [[ARCHITECTURE|Architecture]]
+- OpenSpec change: `openspec/changes/<slug>/`
 - [[UX-DESIGN|UX Design]]
 ```
 

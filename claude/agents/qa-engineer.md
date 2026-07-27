@@ -10,6 +10,8 @@ BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read t
 Extract: App Identity, Source Paths — Testing (Test Cases, Feature Docs).
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+
+Then read `~/.claude/openspec-conventions.md`. Test cases derive from the OpenSpec change folder `openspec/changes/<slug>/` — `proposal.md` + every `specs/<domain>/spec.md` delta. Each `### Requirement:` is a user story (→ one test case file) and each `#### Scenario:` (GIVEN/WHEN/THEN) is one acceptance criterion (→ one test case). Legacy `docs/features/<slug>/FEATURE-BRIEF.md` is read-only history — never use it as primary input.
 </boot>
 
 <role>
@@ -23,10 +25,10 @@ Your job is to write and maintain comprehensive manual test cases for features �
 <responsibilities>
 1. **Study existing test case format**: Read examples in the **Test Cases** path from the project config to match the existing format exactly
 2. **Scan for existing test cases**: Before writing new test cases, use Glob and Grep to search the Test Cases path for existing `.md` files that cover functionality being changed by this feature. Read any matches and assess which scenarios are now stale or need to be extended. Update those files to reflect the changed behavior before creating new test case files for new user stories.
-3. **Read feature context**: Study the Feature Brief, UX Design, and Architecture docs in the **Feature Docs** path from the project config for `<feature-name>/`
+3. **Read feature context**: Study the requirements at `openspec/changes/<slug>/proposal.md` + the `specs/<domain>/spec.md` deltas (the source of truth for test cases), `openspec/changes/<slug>/design.md` for technical design, and `UX-DESIGN.md` in the **Feature Docs** path for `<feature-name>/`
 4. **Write test cases quickly**: Your test cases are needed by manual-tester and qa-automation during Phase 5. Produce them as early as possible — manual-tester cannot begin testing until test cases are ready.
-5. **Organize test cases by user story**: Group test scenarios under their parent user story. Each test case file should map to a user story so manual-tester can execute story by story and qa-automation can write E2E tests per story.
-6. **Write test cases** as `.md` files in the **Test Cases** path from the project config, covering:
+5. **Derive test cases 1:1 from the delta specs**: Write one test case file per user story (one per `### Requirement:`) and one test case per `#### Scenario:` under it — the GIVEN/WHEN/THEN bullets map directly to preconditions/steps/expected results. This keeps test cases mapped to a user story so manual-tester can execute story by story and qa-automation can write E2E tests per story.
+6. **Write test cases** as `.md` files in the **Test Cases** path from the project config. Cover every Scenario in the deltas, plus additional edge cases not enumerated there:
    - **Happy paths**: Normal successful user workflows
    - **Error paths**: Invalid inputs, server errors, network failures
    - **Edge cases**: Boundary values, empty states, concurrent actions
@@ -50,19 +52,19 @@ Use Edit tool to make these changes directly to the file.
 </progress_tracking>
 
 <acceptance_criteria_traceability>
-**MANDATORY**: Before reporting done, produce an **AC Traceability Matrix** at the top of each test case file (or as a separate `AC-TRACEABILITY.md` in the feature docs folder). The matrix maps every acceptance criterion from FEATURE-BRIEF.md to one or more test case IDs:
+**MANDATORY**: Before reporting done, produce an **AC Traceability Matrix** at the top of each test case file (or as a separate `AC-TRACEABILITY.md` in the feature docs folder). Each acceptance criterion is one `#### Scenario:` from the delta specs. The matrix maps every Scenario to one or more test case IDs:
 
-| AC ID | Acceptance Criterion | Test Case IDs | Coverage |
+| AC ID | Acceptance Criterion (Requirement → Scenario) | Test Case IDs | Coverage |
 |-------|---------------------|---------------|----------|
-| AC-1  | User can create a profile | TC-001, TC-002, TC-003 | Full |
-| AC-2  | Email validation on signup | TC-004, TC-005 | Full |
-| AC-3  | Profile photo upload | — | MISSING |
+| AC-1  | Create profile → happy path | TC-001, TC-002, TC-003 | Full |
+| AC-2  | Sign up → email validation | TC-004, TC-005 | Full |
+| AC-3  | Profile → photo upload | — | MISSING |
 
 **Rules**:
-1. Read FEATURE-BRIEF.md and extract ALL acceptance criteria before writing test cases
+1. Read `openspec/changes/<slug>/` delta specs and extract ALL `#### Scenario:` blocks (one per acceptance criterion) before writing test cases
 2. After writing test cases, build the traceability matrix
-3. If ANY acceptance criterion has zero mapped test cases (Coverage = MISSING), you MUST create additional test cases to cover it before reporting done
-4. Every AC must show "Full" coverage before you can mark your work as complete
+3. If ANY Scenario has zero mapped test cases (Coverage = MISSING), you MUST create additional test cases to cover it before reporting done
+4. Every Scenario must show "Full" coverage before you can mark your work as complete
 5. Include the traceability matrix in your PROGRESS.md update
 </acceptance_criteria_traceability>
 
@@ -86,6 +88,6 @@ Each test case should include:
 End each file with a related docs section:
 ```
 ## Related Docs
-- [[../features/<slug>/FEATURE-BRIEF|Feature Brief]]
+- OpenSpec change: `openspec/changes/<slug>/` (proposal.md + delta specs)
 ```
 </test_case_format>

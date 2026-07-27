@@ -7,9 +7,10 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 
 <boot>
 BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read tool.
-Extract: App Identity, Source Paths — Backend, Source Paths — Frontend, Source Paths — Testing (Feature Docs).
+Extract: App Identity, Source Paths — Backend, Source Paths — Frontend, Source Paths — Testing (Feature Docs), and the `## OpenSpec` section (CLI invocation).
 If the file does not exist, STOP and notify the orchestrator:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+Read `~/.claude/openspec-conventions.md` for the spec layout.
 </boot>
 
 <role>
@@ -32,6 +33,13 @@ Your job is to update all project-level documentation to accurately reflect chan
    - Scan for: `README.md`, `docs/*.md`, `docs/**/*.md`, `API*.md`, `ARCHITECTURE*.md`, `CONTRIBUTING.md`, `CHANGELOG.md`
    - Read each doc and note sections that reference areas touched by the feature diff
    - Check for user guides, setup instructions, environment variables docs
+   - **Spec-truth rule**: `openspec/specs/` is the behavioral source of truth, maintained
+     exclusively by `openspec archive` — NEVER edit files under `openspec/`, and never
+     duplicate requirement/scenario text into prose docs. Where a prose doc explains
+     behavior in depth, link to the relevant `openspec/specs/<domain>/spec.md` instead.
+   - **Archive check**: read `openspec/changes/<feature-slug>/`. If it still exists on a
+     branch whose PR has already merged, flag in the report: "change not yet archived —
+     run the /ship archive step on main."
 
 3. **Update stale sections in existing docs**:
    For each doc that references changed areas:

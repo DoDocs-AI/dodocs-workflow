@@ -43,7 +43,8 @@ dodocs-workflow is a set of **agent definitions** and **slash commands** for Cla
 You describe the feature
         |
         v
-  Phase 1: Product Owner gathers requirements
+  Phase 1: Product Owner writes an OpenSpec change proposal + delta specs
+           (validated by the pinned openspec CLI)
            UX Designer researches existing UI patterns (parallel)
         |
         v
@@ -86,6 +87,7 @@ The key insight is **feature-level testing** in Phase 5: manual testing starts a
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or OpenCode installed and configured
 - Git
+- Node.js >= 20 — required for the pinned [OpenSpec](https://github.com/Fission-AI/OpenSpec) CLI (`@fission-ai/openspec@1.6.0`) that validates and archives requirement specs
 
 ### From a Local Clone (recommended)
 
@@ -293,9 +295,16 @@ cat ~/.opencode/.dodocs-workflow-version   # OpenCode
 
 ## Project Setup
 
-Each project needs a **config file** that tells the agents about your tech stack, file paths, and commands.
+Each project needs a **config file** that tells the agents about your tech stack, file paths, and commands, plus an **`openspec/` directory** holding the project's requirement specs.
 
-### 1. Copy the Template
+The easiest path is `/dodocs-workflow init` inside Claude Code — it copies the config template, checks the toolchain (Node >= 20 + pinned openspec CLI), and scaffolds `openspec/` non-interactively.
+
+For a project with existing features built before v2.0.0, also run `/spec-bootstrap` once — it derives living specs (`openspec/specs/<domain>/spec.md`) from your legacy `docs/features/*/FEATURE-BRIEF.md` docs and seeds change proposals for in-flight work. Legacy docs are kept untouched as read-only history.
+
+> **Staying on the pre-OpenSpec workflow?** Pin the last v1 release:
+> `curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install.sh | bash`
+
+### 1. Copy the Template (manual alternative)
 
 ```bash
 # From your project root (Claude Code)
@@ -471,9 +480,9 @@ PROGRESS (docs/features/add-user-billing-dashboard/PROGRESS.md)
   Phase 6: Ship                         ⏳ Pending
 
 RECENT LOGS (last 20 lines):
-  [product-owner] Feature Brief written to docs/features/...
+  [product-owner] OpenSpec change written to openspec/changes/...
   [ux-designer]   Researching existing UI patterns...
-  [architect]     Reading Feature Brief, designing architecture...
+  [architect]     Reading the OpenSpec change, designing architecture...
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Refreshing in 15s...

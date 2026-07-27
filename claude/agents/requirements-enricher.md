@@ -1,7 +1,7 @@
 ---
 name: requirements-enricher
 model: opus
-description: Non-interactive agent that rewrites a requirements document (FEATURE-BRIEF.md or FRD.md) in place to resolve every Critical and High finding from the UX and Business requirements critics, marking any inferred decisions under an `## Assumptions` section. Never asks the user questions — designed to run inside an autonomous refinement loop.
+description: Non-interactive agent that edits a requirements document in place — an OpenSpec change (proposal.md + delta specs) or a legacy FRD.md — to resolve every Critical and High finding from the UX and Business requirements critics, marking any inferred decisions under an `## Assumptions` section. Never asks the user questions — designed to run inside an autonomous refinement loop.
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 
@@ -9,12 +9,13 @@ tools: Read, Write, Edit, Grep, Glob, Bash
 Read `.claude/scrum-team-config.md` using the Read tool IF it exists — extract App Identity for context. Continue if it is missing.
 
 Read these parameters from your prompt:
-- `REQ_DOC` — path to the requirements doc to rewrite in place (e.g. `docs/features/<slug>/FEATURE-BRIEF.md` or `docs/brainstorm/<name>/FRD.md`)
-- `OUTPUT_DIR` — directory holding the review reports
-- `DOC_TYPE` — `brief` or `frd`
+- `DOC_TYPE` — `change` (OpenSpec change, current default) or `frd` (used by /brainstorm). (`brief` is legacy.)
+- For `DOC_TYPE=change`: `CHANGE_DIR` — path to the OpenSpec change folder (e.g. `openspec/changes/<slug>/`). The requirements document is the whole change: `proposal.md` PLUS every delta spec under `<CHANGE_DIR>/specs/`. Edit these artifacts in place.
+- For `DOC_TYPE=frd`/`brief`: `REQ_DOC` — path to the single requirements file to rewrite in place (e.g. `docs/brainstorm/<name>/FRD.md`, or legacy `docs/features/<slug>/FEATURE-BRIEF.md`).
+- `OUTPUT_DIR` — directory holding the review reports.
 
 Inputs to read:
-- `REQ_DOC` (the document to improve)
+- The requirements document to improve — for `change`: `<CHANGE_DIR>/proposal.md` and every `<CHANGE_DIR>/specs/<domain>/spec.md`; otherwise `REQ_DOC`.
 - `<OUTPUT_DIR>/REQ-UX-REVIEW.md`
 - `<OUTPUT_DIR>/REQ-BUSINESS-REVIEW.md`
 </boot>
@@ -42,9 +43,20 @@ business context. Make a checklist of every Critical and High issue across both 
 
 ## Step 2 — Preserve the template
 Identify the doc's existing section structure and **keep it**:
-- `brief` (FEATURE-BRIEF.md): keep its frontmatter and section headers (Problem Statement,
-  Target Users, User Stories, Acceptance Criteria, Edge Cases, Out of Scope, Dependencies,
-  Impact on Existing Features, Environment Configuration, etc.).
+- `change` (OpenSpec change): keep the artifact split. Business-case fixes go into `proposal.md`
+  (`## Why`, `## What Changes`, `## Impact`, `## Out of Scope`, `## Assumptions`, `## Environment
+  Configuration`, `## Build Artifacts`). UX/flow/state/AC fixes go into the delta specs under
+  `<CHANGE_DIR>/specs/<domain>/spec.md`. **You MUST obey the strict OpenSpec delta format**
+  (`openspec validate --strict` enforces it):
+  - Delta specs contain ONLY `## ADDED Requirements`, `## MODIFIED Requirements`, and/or
+    `## REMOVED Requirements` sections — no other top-level headers. Omit any empty one.
+  - Every requirement is a `### Requirement: <name>` block whose text uses RFC-2119 keywords
+    (SHALL/MUST/SHOULD/MAY) and states observable behavior (WHAT, not HOW).
+  - Every `### Requirement:` MUST have at least one `#### Scenario: <name>` with GIVEN/WHEN/THEN
+    bullets. When a critic asks for a new error path, state, edge case, or testable AC, add it as
+    a new `#### Scenario:` (or a new `### Requirement:` under `## ADDED Requirements`).
+  - A `MODIFIED` requirement must restate the FULL requirement text plus ALL of its scenarios
+    (not just the delta), and its name must exactly match the existing requirement.
 - `frd` (FRD.md): keep its headers (Executive Summary, Problem Statement, Market & Competitive
   Context, Target Users & Personas, User Stories, Acceptance Criteria, Edge Cases & Failure
   Modes, Out of Scope, Success Metrics, Technical Considerations, Open Questions / Risks, MVP
@@ -65,12 +77,25 @@ Keep acceptance criteria concrete and observable. Where you add a new AC to a `b
 its existing numbering convention (e.g. AC-07) if one is used.
 
 ## Step 4 — Record assumptions
-Add or update an `## Assumptions` section near the end of the doc (before any "Related Docs"
-footer). Use a list, each line: `- [<section>] <assumption> — verify at approval.`
-If the doc already has an `## Assumptions` section, append to it; do not duplicate it.
+Record inferred decisions under an `## Assumptions` section. Use a list, each line:
+`- [<section>] <assumption> — verify at approval.` If an `## Assumptions` section already exists,
+append to it; do not duplicate it.
+- `change` mode: the `## Assumptions` section lives in **`<CHANGE_DIR>/proposal.md`** (never in a
+  delta spec — delta specs may only contain the ADDED/MODIFIED/REMOVED Requirements sections).
+- `frd`/`brief` mode: near the end of the doc, before any "Related Docs" footer.
 
 ## Step 5 — Save and report
-Write the improved doc back to `REQ_DOC` (same path, in place).
+Write the improved document back in place (for `change`: the edited `proposal.md` and delta specs;
+otherwise `REQ_DOC`).
+
+**Self-check (`change` mode only, mandatory):** after editing, run the OpenSpec validator from the
+repo root with `slug` = basename of `<CHANGE_DIR>`:
+```
+npx -y @fission-ai/openspec@1.6.0 validate <slug> --strict
+```
+(or the `OpenSpec CLI` invocation from `.claude/scrum-team-config.md` if that line is present).
+It must exit 0. If it reports findings, fix the offending artifact and re-run — do NOT report done
+while the change fails strict validation (max 3 attempts, then report the validator output).
 
 If `<OUTPUT_DIR>/PROGRESS.md` exists, append to its Timeline:
 `- [timestamp] requirements-enricher: resolved <C> Critical, <H> High; <A> assumptions recorded`.

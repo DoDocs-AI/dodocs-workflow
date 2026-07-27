@@ -145,7 +145,8 @@ $SOURCE_DIR/**/*.md
 ```
 
 List what you find. Adapt to whatever structure is present. Common patterns include:
-- Feature docs: `FEATURE-BRIEF.md`, `ARCHITECTURE.md`, `UX-DESIGN.md`, `MOCKUP-VALIDATION.md`, `QUALITY-METRICS.md`
+- OpenSpec artifacts: `proposal.md`, `design.md`, `tasks.md`, `spec.md` (living specs and delta specs)
+- Feature docs: `UX-DESIGN.md`, `MOCKUP-VALIDATION.md`, `QUALITY-METRICS.md` (legacy: `FEATURE-BRIEF.md`, `ARCHITECTURE.md`)
 - PLC docs: `FEATURE-BRIEF.md`, `ARCHITECTURE.md`, `UX-DESIGN.md`, `MVP-SCOPE.md`, `ROADMAP.md`, `STRATEGY-BRIEF.md`
 - General docs: `README.md`, `*.md` — whatever is present
 

@@ -29,6 +29,9 @@ Read `$ARGUMENTS` and extract:
 
 Verify `.claude/scrum-team-config.md` exists. If not, STOP and tell the user to run `dodocs-workflow init`.
 
+Verify `openspec/` exists in the project root. If not, STOP:
+"This project is not initialized for the OpenSpec pipeline. Run `dodocs-workflow init` (new project) or `/spec-bootstrap` (project with existing features) first. To stay on the pre-OpenSpec workflow, pin v1.17.0: `curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install.sh | bash`"
+
 **Auto-discover detection:**
 If neither `--features` nor `--file` is present → set `AUTO_DISCOVER=true`.
 Read `.claude/scrum-team-config.md` and extract the Feature Docs path (default: `docs/features/`).

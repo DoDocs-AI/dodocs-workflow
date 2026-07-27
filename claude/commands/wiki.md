@@ -15,6 +15,11 @@ Maintain a compiled knowledge layer at `docs/wiki/` — init the wiki, ingest an
 - `api`                  → reads `docs/api/`
 - `my-feature`           → backward-compat: falls back to `docs/features/my-feature/`
 
+OpenSpec paths are also supported (resolved against the project root, not `docs/`):
+- `specs/<domain>`            → reads `openspec/specs/<domain>/` (living spec)
+- `openspec/specs/<domain>`   → same
+- `openspec/changes/<slug>`   → reads an in-flight change (proposal + design + deltas)
+
 ---
 
 ## MANDATORY: Agent Execution Mode
@@ -90,16 +95,25 @@ If `INPUT_PATH` is empty, STOP:
 
 **Resolve source directory and entry slug:**
 
-1. If `docs/$INPUT_PATH/` exists as a directory:
+1. If `$INPUT_PATH` starts with `openspec/` and exists as a directory:
+   - `SOURCE_DIR = $INPUT_PATH`
+   - `ENTRY_SLUG` = `$INPUT_PATH` minus the `openspec/` prefix, with all `/` replaced by `-`
+     (e.g. `openspec/specs/billing` → `specs-billing`)
+
+2. Else if `$INPUT_PATH` starts with `specs/` and `openspec/$INPUT_PATH/` exists:
+   - `SOURCE_DIR = openspec/$INPUT_PATH`
+   - `ENTRY_SLUG` = `$INPUT_PATH` with all `/` replaced by `-`
+
+3. Else if `docs/$INPUT_PATH/` exists as a directory:
    - `SOURCE_DIR = docs/$INPUT_PATH`
    - `ENTRY_SLUG` = `$INPUT_PATH` with all `/` replaced by `-`
 
-2. Else if `$INPUT_PATH` contains no `/` and `docs/features/$INPUT_PATH/` exists (backward compat):
+4. Else if `$INPUT_PATH` contains no `/` and `docs/features/$INPUT_PATH/` exists (backward compat):
    - `SOURCE_DIR = docs/features/$INPUT_PATH`
    - `ENTRY_SLUG = $INPUT_PATH`
 
-3. Otherwise STOP:
-   > "Directory not found: `docs/$INPUT_PATH/`. Check the path and try again."
+5. Otherwise STOP:
+   > "Directory not found: `docs/$INPUT_PATH/` (or `openspec/$INPUT_PATH/`). Check the path and try again."
 
 Check that `docs/wiki/` exists (wiki must be initialized). If it does not exist, STOP:
 > "Wiki not initialized. Run `/wiki init` first."
@@ -146,6 +160,16 @@ DOC_DIRS=$(find docs/ -mindepth 1 -type d ! -path 'docs/wiki' ! -path 'docs/wiki
     echo "${d#docs/}"
   fi
 done | sort)
+
+# Include OpenSpec living spec domains (ingestable as specs/<domain>)
+if [ -d openspec/specs ]; then
+  SPEC_DIRS=$(find openspec/specs -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while read d; do
+    if ls "$d"/*.md >/dev/null 2>&1; then
+      echo "specs/$(basename "$d")"
+    fi
+  done | sort)
+  DOC_DIRS=$(printf '%s\n%s\n' "$DOC_DIRS" "$SPEC_DIRS" | grep -v '^$' | sort)
+fi
 
 # Build wiki slug list (exclude special files)
 WIKI=$(ls docs/wiki/*.md 2>/dev/null | xargs -I{} basename {} .md | grep -v '^README$' | grep -v '^COVERAGE$' | grep -v '^LINT-REPORT$' | grep -v '^_template$' | sort)

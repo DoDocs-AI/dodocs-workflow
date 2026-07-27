@@ -10,7 +10,7 @@
 <rect width="1420" height="2262" fill="url(#bg)"/>
 <text x="44" y="58" font-family="Archivo, 'Segoe UI', system-ui, sans-serif" font-size="34" font-weight="800" fill="#E4EDEE">SCRUM&#8202;TEAM WORKFLOW</text>
 <text x="44" y="88" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="12.5" letter-spacing="1.4" fill="#8FA9AF">/scrum-team &#183; responsibilities &#183; parallelism &#183; documents in / out &#183; feedback loops</text>
-<text x="44" y="110" font-family="'Public Sans', system-ui, sans-serif" font-size="12.5" fill="#5F7D85">Documents flow down the phases: FEATURE-BRIEF &#8594; UX-DESIGN + ARCHITECTURE &#8594; tasks &#8594; code &#8594; tests &#8594; PR.</text>
+<text x="44" y="110" font-family="'Public Sans', system-ui, sans-serif" font-size="12.5" fill="#5F7D85">Documents flow down the phases: OpenSpec change (proposal + delta specs) &#8594; UX-DESIGN + design.md &#8594; tasks.md &#8594; code &#8594; tests &#8594; PR.</text>
 <rect x="44" y="123" width="13" height="13" rx="3" fill="#E8992F"/>
 <text x="63" y="134" font-family="'Public Sans', system-ui, sans-serif" font-size="11.5" fill="#E4EDEE">opus</text>
 <rect x="112.2" y="123" width="13" height="13" rx="3" fill="#4FA294"/>
@@ -29,7 +29,7 @@
 <text x="118" y="234" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="11" fill="#8FA9AF">⏱ 15 min</text>
 <text x="118" y="256" font-family="'Public Sans', system-ui, sans-serif" font-size="11.5" fill="#5F7D85">Human provides the idea. PO derives the</text>
 <text x="118" y="271" font-family="'Public Sans', system-ui, sans-serif" font-size="11.5" fill="#5F7D85">brief while UX studies the existing UI.</text>
-<text x="118" y="296" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10" fill="#4FA294">↻ GATE: FEATURE-BRIEF.md complete (re-spawns on fail)</text>
+<text x="118" y="296" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10" fill="#4FA294">↻ GATE: openspec validate --strict (re-spawns on fail)</text>
 <text x="470" y="205" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10" letter-spacing="0.8" fill="#E8992F">∥ PARALLEL · 2 agents</text>
 <line x1="458" y1="212" x2="458" y2="302" stroke="#E8992F" stroke-width="2"/>
 <line x1="458" y1="212" x2="464" y2="212" stroke="#E8992F" stroke-width="2"/>
@@ -42,7 +42,7 @@
 <text x="485" y="245" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Owns requirements; writes the brief</text>
 <line x1="484" y1="253" x2="748" y2="253" stroke="#24505C" stroke-opacity="0.6"/>
 <text x="485" y="271" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">human requirements</tspan></text>
-<text x="485" y="288" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">FEATURE-BRIEF.md</tspan></text>
+<text x="485" y="288" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">openspec change</tspan></text>
 </g>
 <g>
 <rect x="778" y="212" width="290" height="90" rx="7" fill="#133039" stroke="#24505C"/>
@@ -61,7 +61,7 @@
 <text x="118" y="476" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="11" fill="#8FA9AF">⏱ 20 min</text>
 <text x="118" y="498" font-family="'Public Sans', system-ui, sans-serif" font-size="11.5" fill="#5F7D85">Skipped when SIZE=small. Human checkpoint</text>
 <text x="118" y="513" font-family="'Public Sans', system-ui, sans-serif" font-size="11.5" fill="#5F7D85">after mockups (unless --auto).</text>
-<text x="118" y="538" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10" fill="#4FA294">↻ GATE: ARCHITECTURE.md + UX-DESIGN.md + mockups (re-spawns on fail)</text>
+<text x="118" y="538" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10" fill="#4FA294">↻ GATE: design.md + UX-DESIGN.md + mockups (re-spawns on fail)</text>
 <text x="470" y="447" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10" letter-spacing="0.8" fill="#E8992F">∥ PARALLEL · 2 agents</text>
 <line x1="458" y1="454" x2="458" y2="544" stroke="#E8992F" stroke-width="2"/>
 <line x1="458" y1="454" x2="464" y2="454" stroke="#E8992F" stroke-width="2"/>
@@ -73,7 +73,7 @@
 <text x="751" y="472" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1" fill="#4FA294">SONNET</text>
 <text x="485" y="487" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Designs flows &amp; interactions</text>
 <line x1="484" y1="495" x2="748" y2="495" stroke="#24505C" stroke-opacity="0.6"/>
-<text x="485" y="513" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">FEATURE-BRIEF.md + research</tspan></text>
+<text x="485" y="513" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">proposal + deltas + research</tspan></text>
 <text x="485" y="530" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">UX-DESIGN.md</tspan></text>
 </g>
 <g>
@@ -83,8 +83,8 @@
 <text x="1059" y="472" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1" fill="#E8992F">OPUS</text>
 <text x="793" y="487" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Designs the technical solution</text>
 <line x1="792" y1="495" x2="1056" y2="495" stroke="#24505C" stroke-opacity="0.6"/>
-<text x="793" y="513" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">FEATURE-BRIEF.md + codebase</tspan></text>
-<text x="793" y="530" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">ARCHITECTURE.md</tspan></text>
+<text x="793" y="513" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">proposal + deltas + codebase</tspan></text>
+<text x="793" y="530" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">design.md</tspan></text>
 </g>
 <line x1="615.0" y1="546" x2="615.0" y2="568" stroke="#8FA9AF" stroke-width="1.5" marker-end="url(#sarrow)"/>
 <text x="470" y="583" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="10" letter-spacing="0.8" fill="#8FA9AF">↓ THEN</text>
@@ -95,7 +95,7 @@
 <text x="751" y="608" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1" fill="#4FA294">SONNET</text>
 <text x="485" y="623" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Builds framework-native screens</text>
 <line x1="484" y1="631" x2="748" y2="631" stroke="#24505C" stroke-opacity="0.6"/>
-<text x="485" y="649" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">FEATURE-BRIEF + UX-DESIGN</tspan></text>
+<text x="485" y="649" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">change + UX-DESIGN</tspan></text>
 <text x="485" y="666" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">mockups/*.tsx</tspan></text>
 </g>
 <line x1="615.0" y1="682" x2="615.0" y2="704" stroke="#8FA9AF" stroke-width="1.5" marker-end="url(#sarrow)"/>
@@ -107,7 +107,7 @@
 <text x="751" y="744" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1" fill="#4FA294">SONNET</text>
 <text x="485" y="759" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Checks mockups vs the brief</text>
 <line x1="484" y1="767" x2="748" y2="767" stroke="#24505C" stroke-opacity="0.6"/>
-<text x="485" y="785" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">mockups/ + FEATURE-BRIEF</tspan></text>
+<text x="485" y="785" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">mockups/ + delta specs</tspan></text>
 <text x="485" y="802" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">MOCKUP-VALIDATION.md</tspan></text>
 </g>
 <rect x="458" y="830" width="918" height="30" rx="6" fill="#1B2E24" stroke="#E8992F" stroke-width="1.2" stroke-dasharray="5 3"/>
@@ -128,7 +128,7 @@
 <text x="751" y="964" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1" fill="#4FA294">SONNET</text>
 <text x="485" y="979" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Breaks work into ordered tasks</text>
 <line x1="484" y1="987" x2="748" y2="987" stroke="#24505C" stroke-opacity="0.6"/>
-<text x="485" y="1005" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">ARCHITECTURE.md</tspan></text>
+<text x="485" y="1005" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">design.md</tspan></text>
 <text x="485" y="1022" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">US tasks (owners, blockedBy)</tspan></text>
 </g>
 <line x1="44" y1="1134" x2="1376" y2="1134" stroke="#24505C" stroke-width="0.75" stroke-opacity="0.5"/>
@@ -170,7 +170,7 @@
 <text x="1367" y="1206" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1" fill="#4FA294">SONNET</text>
 <text x="1101" y="1221" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Builds API · owns migrations</text>
 <line x1="1100" y1="1229" x2="1364" y2="1229" stroke="#24505C" stroke-opacity="0.6"/>
-<text x="1101" y="1247" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">tasks + ARCHITECTURE</tspan></text>
+<text x="1101" y="1247" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">tasks + design.md</tspan></text>
 <text x="1101" y="1264" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">BE code + migrations</tspan></text>
 </g>
 <g>
@@ -190,7 +190,7 @@
 <text x="1059" y="1312" text-anchor="end" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1" fill="#4FA294">SONNET</text>
 <text x="793" y="1327" font-family="'Public Sans', system-ui, sans-serif" font-size="9.4" font-style="italic" fill="#8FA9AF">Writes manual test cases</text>
 <line x1="792" y1="1335" x2="1056" y2="1335" stroke="#24505C" stroke-opacity="0.6"/>
-<text x="793" y="1353" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">FEATURE-BRIEF + tasks</tspan></text>
+<text x="793" y="1353" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#8FA9AF"><tspan fill="#5F7D85">◂ in</tspan><tspan dx="8">change + tasks.md</tspan></text>
 <text x="793" y="1370" font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace" font-size="8.6" fill="#4FA294"><tspan fill="#5F7D85">▸ out</tspan><tspan dx="6">test-cases/*.md</tspan></text>
 </g>
 <g>

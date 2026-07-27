@@ -93,6 +93,27 @@ for file in "$AGENTS_DIR"/*.md; do
 done
 echo ""
 
+# ── 4. FEATURE-BRIEF containment (post-OpenSpec cutover) ───────────
+# The scrum-team pipeline uses OpenSpec artifacts; FEATURE-BRIEF.md may only appear
+# in PLC/GTM files (deferred pipelines) and this whitelist of files that reference
+# it as legacy read-only history or migration input.
+echo "=== Checking FEATURE-BRIEF references are contained ==="
+BRIEF_WHITELIST="product-owner.md spec-bootstrapper.md wiki-maintainer.md ux-designer.md qa-engineer.md frontend-dev.md backend-dev.md ux-requirements-critic.md business-requirements-critic.md requirements-enricher.md dodocs-workflow.md change-request.md spec-bootstrap.md ship.md batch-features.md"
+for file in "$AGENTS_DIR"/*.md "$COMMANDS_DIR"/*.md; do
+    basename="$(basename "$file")"
+    case "$basename" in
+        plc-*|gtm-*) continue ;;
+    esac
+    if grep -q "FEATURE-BRIEF" "$file" 2>/dev/null; then
+        if echo " $BRIEF_WHITELIST " | grep -q " $basename "; then
+            pass "$basename: FEATURE-BRIEF reference is whitelisted (legacy/migration context)"
+        else
+            fail "$basename: references FEATURE-BRIEF but is not in the legacy whitelist — the scrum-team pipeline uses OpenSpec artifacts (openspec/changes/<slug>/)"
+        fi
+    fi
+done
+echo ""
+
 # ── Summary ─────────────────────────────────────────────────────────
 echo "Warnings: $WARNINGS"
 if [ "$ERRORS" -gt 0 ]; then

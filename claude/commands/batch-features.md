@@ -12,7 +12,7 @@ Process a list of features autonomously, one after another (or in parallel). Alw
 
 ## Arguments
 
-- *(no args)* — auto-discover all pending features from `docs/features/` (reads deps from each `FEATURE-BRIEF.md`)
+- *(no args)* — auto-discover all pending features from `docs/features/` (reads deps from each `openspec/changes/<slug>/proposal.md`)
 - `--features "a, b, c"` — comma-separated feature list (inline); supports dependency annotations (see below)
 - `--file <path>` — markdown file with one feature per line (lines starting with `#` are comments); supports dependency annotations (see below)
 - `--parallel` — run all features simultaneously with DAG-aware scheduling; default is sequential
@@ -52,7 +52,10 @@ Verify `.claude/scrum-team-config.md` exists. If not, STOP and tell the user to 
 
 **Auto-discover detection:**
 If neither `--features` nor `--file` is present → set `AUTO_DISCOVER=true`.
-Read `.claude/scrum-team-config.md` and extract the **Feature Docs** path (default: `docs/features/`); store as `FEATURE_DOCS_PATH`.
+Read `.claude/scrum-team-config.md` and extract the **Feature Docs** path (default: `docs/features/`); store as `FEATURE_DOCS_PATH`. Also extract the `## OpenSpec` section (CLI invocation).
+
+If `openspec/` does not exist in the project root, STOP:
+"This project is not initialized for the OpenSpec pipeline. Run `dodocs-workflow init` (new project) or `/spec-bootstrap` (project with existing features) first. To stay on the pre-OpenSpec workflow, pin v1.17.0: `curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install.sh | bash`"
 
 **Auto-discover STATUS filter:**
 When `AUTO_DISCOVER=true`, scan `FEATURE_DOCS_PATH` for feature folders and apply the following filter for each slug found:
@@ -64,9 +67,11 @@ When `AUTO_DISCOVER=true`, scan `FEATURE_DOCS_PATH` for feature folders and appl
   `Skipping <slug> — status is <status> (not approved for batch; run /prepare-feature <slug> first)`
 - STATUS file missing → fall back to existing PROGRESS.md Phase 6 check (backward compatibility with features that pre-date STATUS tracking)
 
-**Parse dependency annotations:**
+**Parse dependencies:**
 
-For each raw entry, check for a `[depends-on: ...]` bracket (case-insensitive, spaces optional):
+For each feature slug, read the `## Depends On` bullet list from `openspec/changes/<slug>/proposal.md`
+(one dependency slug per bullet). Explicit `[depends-on: ...]` brackets on a raw entry
+(case-insensitive, spaces optional) are also honored and take precedence:
 - Extract the dependency list by splitting on `,` and trimming whitespace
 - Strip the entire `[depends-on: ...]` portion from the display name
 - Derive a kebab-case slug for each feature name (lowercase, spaces → hyphens, strip special characters)
@@ -74,7 +79,7 @@ For each raw entry, check for a `[depends-on: ...]` bracket (case-insensitive, s
 
 **Validate dependencies:**
 
-For every dependency referenced in any `[depends-on: ...]` annotation, verify that the dependency slug is itself present in the feature list. If any referenced dependency is missing, STOP immediately with:
+For every referenced dependency, verify that the dependency slug is itself present in the feature list. If any referenced dependency is missing, STOP immediately with:
 ```
 Error: 'billing-dashboard' depends on 'user-auth' which is not in the feature list.
 ```
@@ -125,8 +130,8 @@ Features with no dependencies show no `[after: ...]` annotation. Features with d
 
 When `--parallel` is set (or auto-discover resolves multiple features), perform conflict detection before execution:
 
-1. **Collect file inventories**: For each feature in the batch, read `docs/features/<slug>/ARCHITECTURE.md` (if it exists). Extract the **File Inventory** section — the list of files that will be created or modified.
-   - If ARCHITECTURE.md doesn't exist yet (feature hasn't been through architect), skip that feature for conflict analysis.
+1. **Collect file inventories**: For each feature in the batch, read `openspec/changes/<slug>/design.md` (if it exists). Extract the **File Inventory** section — the list of files that will be created or modified.
+   - If `design.md` doesn't exist yet (feature hasn't been through architect), skip that feature for conflict analysis.
 
 2. **Build a shared-file map**: Create a mapping of `file_path → [feature-slugs]` for every file that appears in 2+ feature inventories.
 

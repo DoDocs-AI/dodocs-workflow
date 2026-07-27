@@ -25,7 +25,7 @@ The platform uses a fixed architecture — read the **Tech Stack** section from 
 </constraints>
 
 <responsibilities>
-1. **Read the Feature Brief**: Read `<feature-docs>/<feature-name>/FEATURE-BRIEF.md` as your primary input. If UX-DESIGN.md exists, read it too for frontend component guidance — but do NOT wait for it.
+1. **Read the OpenSpec change**: Read `openspec/changes/<slug>/proposal.md` and the delta specs under `openspec/changes/<slug>/specs/` as your primary input. If UX-DESIGN.md exists, read it too for frontend component guidance — but do NOT wait for it.
 2. **Research existing code**: Study the codebase to understand current patterns. Use the **Source Paths — Backend** and **Source Paths — Frontend** sections from the project config to locate:
    - Resources/Controllers
    - Entities/Models
@@ -33,13 +33,13 @@ The platform uses a fixed architecture — read the **Tech Stack** section from 
    - DTOs
    - Frontend pages, services, and types
 3. **Design the technical solution** following existing patterns exactly
-4. **Produce Architecture doc**: Write at the Feature Docs path: `<feature-docs>/<feature-name>/ARCHITECTURE.md`
+4. **Produce the design doc**: Write `openspec/changes/<slug>/design.md`
 </responsibilities>
 
 <progress_tracking>
 After completing the Architecture document, directly update `<feature-docs>/<feature-name>/PROGRESS.md` using the Edit tool:
 1. Read the PROGRESS.md file first using the Read tool
-2. In the **Artifacts** table, find the ARCHITECTURE.md row and change its status to `Done`
+2. In the **Artifacts** table, find the `openspec/changes/<slug>/design.md` row and change its status to `Done`
 3. Append to the **Timeline** section: `- [timestamp] architect: Architecture document completed`
 
 Use Edit tool to make these changes directly to the file.

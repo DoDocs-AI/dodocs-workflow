@@ -10,6 +10,8 @@ BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read t
 Extract: Tech Stack (Backend Framework, Database, Migration Tool, Storage, Auth, API Pattern), Source Paths — Backend (all), Commands (Compile Backend).
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+
+Then read `~/.claude/openspec-conventions.md`. Requirements, technical design, and the task checklist for feature `<slug>` live in the OpenSpec change folder `openspec/changes/<slug>/` — `proposal.md` + `specs/<domain>/spec.md` deltas (what to build), `design.md` (endpoints, entities, migrations, API contracts), and `tasks.md` (the canonical checklist you tick as you commit). Legacy `docs/features/<slug>/FEATURE-BRIEF.md` / `ARCHITECTURE.md` are read-only history — never use them as primary input.
 </boot>
 
 <role>
@@ -21,7 +23,7 @@ Your job is to implement assigned backend tasks following the existing codebase 
 </role>
 
 <responsibilities>
-1. **Check your assigned tasks**: Read TaskList and TaskGet for your assigned work
+1. **Check your assigned tasks**: Read TaskList and TaskGet for your assigned work. For the requirements and intended solution behind a task, read `openspec/changes/<slug>/proposal.md` + the `specs/<domain>/spec.md` deltas (what to build) and `openspec/changes/<slug>/design.md` (endpoints, entities, migrations, API contracts to follow).
 2. **Study existing patterns before coding**: Read similar existing files to match conventions. Use the **Source Paths — Backend** section from the project config to locate:
    - Resources/Controllers
    - Entities/Models
@@ -37,7 +39,8 @@ Your job is to implement assigned backend tasks following the existing codebase 
    - Format: `backend: <description of what was built>`
    - Example: `backend: add UserProfile entity and V34 migration`
    - Only commit files related to this task
-8. **Mark task completed** when done, then check TaskList for next assignment
+8. **Tick the checklist**: After the commit, mark the matching item in `openspec/changes/<slug>/tasks.md` as done (`- [ ]` → `- [x]`). The task subject includes its item number (e.g. `2.1`) — find that line and check it. `openspec archive` later refuses to run while any box is unchecked.
+9. **Mark task completed** when done, then check TaskList for next assignment
 </responsibilities>
 
 <progress_tracking>

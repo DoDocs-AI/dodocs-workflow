@@ -153,6 +153,31 @@ git pull origin main
 git rev-parse HEAD
 ```
 
+### Step 2b: Archive the OpenSpec change (post-merge, on main)
+
+If the project has an `openspec/` directory and `openspec/changes/<feature-slug>/` exists
+(the slug is the branch name with `feature/` stripped — for change-request branches this
+is the full `<area>-<change>` slug):
+
+```bash
+git checkout main && git pull
+# read the OpenSpec CLI line from .claude/scrum-team-config.md; default:
+npx -y @fission-ai/openspec@1.6.0 archive <feature-slug> --yes
+```
+
+- Before archiving, verify every checkbox in `openspec/changes/<feature-slug>/tasks.md`
+  is `[x]`; tick stragglers that correspond to shipped work (the CLI refuses to archive
+  otherwise).
+- If archive creates a new domain spec with a `TBD` Purpose, fill it in.
+- Update `docs/features/<feature-slug>/PROGRESS.md` Related Docs to the archive path
+  (`openspec/changes/archive/<DATE>-<feature-slug>/`) if that file exists.
+- Commit and push: `git add openspec docs/features && git commit -m "openspec: archive <feature-slug>" && git push`
+- If the archive fails, log a warning and continue the merge loop — do not block other
+  PRs; report unarchived changes in the final summary.
+
+Never archive a change whose PR has not merged — the living specs must only reflect
+merged code.
+
 ### Step 3: Re-check remaining PRs
 
 After each merge, main has advanced. Re-check the remaining unmerged PRs:
@@ -173,13 +198,13 @@ Display a summary after all PRs have been processed:
 ```
 Merge Summary
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ Merged:   #42 billing-dashboard  →  abc1234
-✅ Merged:   #38 dark-mode (auto-rebased)  →  def5678
+✅ Merged:   #42 billing-dashboard  →  abc1234  (change archived)
+✅ Merged:   #38 dark-mode (auto-rebased)  →  def5678  (change archived)
 ⏭️ Skipped:  #35 org-invitations (CI pending at merge time)
 ❌ Failed:   #40 payments (unresolvable merge conflict)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 main is now: def5678
-2 features shipped. 2 PRs still open.
+2 features shipped. 2 PRs still open. 0 changes left unarchived.
 
 To retry skipped/failed PRs, run /merge-features again after resolving the issues.
 ```

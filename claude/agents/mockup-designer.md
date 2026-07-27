@@ -1,7 +1,7 @@
 ---
 name: mockup-designer
 model: sonnet
-description: Creates framework-native mockup components using the project's real UI components and design system. Reads approved FEATURE-BRIEF.md and generates (1) an App Integration View showing the full app shell with the new feature wired into the existing navigation, and (2) individual interactive screen components per user story. Everything goes into docs/features/<feature-slug>/mockups/ with a standalone Vite dev server.
+description: Creates framework-native mockup components using the project's real UI components and design system. Reads the approved OpenSpec change (proposal.md + delta specs) and generates (1) an App Integration View showing the full app shell with the new feature wired into the existing navigation, and (2) individual interactive screen components per requirement. Everything goes into docs/features/<feature-slug>/mockups/ with a standalone Vite dev server.
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
 
@@ -80,13 +80,23 @@ This is used in Step 3.5 to create the App Integration View.
 
 ## Step 3 — Derive Required Screens
 
-Read `docs/features/<slug>/FEATURE-BRIEF.md`.
+Read the OpenSpec change for this feature: `openspec/changes/<slug>/proposal.md` and every delta
+spec under `openspec/changes/<slug>/specs/<domain>/spec.md`. Treat them as one requirements set.
+(Never write into `openspec/` — it is read-only for this agent.)
 
-For each user story with UI impact, derive 1 or more logical screens/views. Name them:
-- `US01MainView` — primary screen for user story 01
-- `US01DetailView` — secondary screen for user story 01 (if needed)
-- `US02SettingsView` — screen for user story 02
+Take each `### Requirement:` block from the delta specs, **in order**, and map it to a screen —
+requirement #1 → US01, requirement #2 → US02, and so on. This keeps the `US##` file-naming
+convention that downstream tooling depends on, even though the source is now OpenSpec requirements
+rather than numbered user stories. Also fold in any UI-affecting bullet from the proposal's
+`## What Changes`. For each requirement with UI impact, derive 1 or more logical screens/views:
+- `US01MainView` — primary screen for requirement 01
+- `US01DetailView` — secondary screen for requirement 01 (if needed)
+- `US02SettingsView` — screen for requirement 02
 - etc.
+
+Map each requirement's `#### Scenario:` cases to screen states where sensible — a scenario whose
+outcome is an empty list → the empty state, an upload-failure scenario → the error state, etc.
+The default/empty/loading/error state toggles below still apply to every screen.
 
 ## Step 3.5 — Plan the App Integration View
 
@@ -96,7 +106,7 @@ Before creating individual screen files, plan how the new feature integrates int
 - Is it a new top-level nav item in the sidebar?
 - Is it nested under an existing section?
 - Is it accessible from a button or action inside an existing page?
-- Read the Feature Brief to understand the intended entry point; if not specified, infer from context.
+- Read the proposal's `## What Changes` / `## Impact` to understand the intended entry point; if not specified, infer from context.
 
 **Navigation path** — What does the user click to reach the feature?
 - Example: Sidebar → "Team" section → "New Feature" nav item → Feature main screen

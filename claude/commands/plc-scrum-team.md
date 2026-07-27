@@ -2,6 +2,11 @@ Execute the PLC Build Pipeline — a full scrum team workflow optimized for MVP 
 
 The team follows a Scrum workflow and must work fully autonomously. Human only needs to provide the product slug.
 
+> **Note**: The PLC pipeline intentionally still uses the legacy artifact model
+> (`docs/plc/<slug>/build/FEATURE-BRIEF.md`, `ARCHITECTURE.md`) and does NOT use
+> OpenSpec. Migrating PLC to OpenSpec changes/specs is deferred — do not mix the
+> two models within a PLC run.
+
 ## MANDATORY: Agent Execution Mode
 
 **CRITICAL — READ THIS FIRST**: Every agent you spawn via the Task tool MUST use `mode: "bypassPermissions"` to ensure fully autonomous execution with no permission prompts. The ONLY exception is `plc-architect`, which uses `mode: "plan"` for architecture approval when SIZE=large and AUTO_MODE=false.

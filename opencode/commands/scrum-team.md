@@ -18,6 +18,14 @@ BEFORE doing anything else, read `.opencode/scrum-team-config.md` using the Read
 If the file does not exist, STOP immediately and tell the user:
 "No scrum-team config found for this project. Run `dodocs-workflow init` or copy the template from `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md` and fill in the values for this project."
 Extract: ALL sections — you need App Identity, Tech Stack, Ports & URLs, and all paths/commands.
+Also extract the **`## OpenSpec` section**: OpenSpec CLI invocation (`<openspec-cli>`, default `npx -y @fission-ai/openspec@1.6.0`) and Spec Domains.
+
+If `openspec/` does not exist in the project root, STOP:
+"This project is not initialized for the OpenSpec pipeline. Run `dodocs-workflow init` (new project), or bootstrap `openspec/specs/` using the Claude Code `/spec-bootstrap` command or manually (project with existing features), first. To stay on the pre-OpenSpec workflow, pin v1.17.0: `curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install-opencode.sh | bash`"
+
+Requirements, design, and tasks for this feature live in the OpenSpec change folder
+`openspec/changes/<slug>/` (see `~/.opencode/openspec-conventions.md`). Build-process
+artifacts (PROGRESS.md, mockups, test reports) live in `<feature-docs>/<slug>/`.
 </boot>
 
 ## Team Agents
@@ -48,31 +56,48 @@ Models are defined in each agent's `.md` file (opus for architect and security-a
 **First**: Create the initial `PROGRESS.md` at `<feature-docs>/<feature-name>/PROGRESS.md` using the template from the Progress Tracking section.
 
 Then spawn product-owner and ux-designer simultaneously (both with `mode: "bypassPermissions"`):
-- **product-owner** talks to the user, gathers requirements, produces **FEATURE-BRIEF.md**
+- **product-owner** talks to the user (or derives requirements autonomously if AUTO_MODE=true), produces the **OpenSpec change** at `openspec/changes/<slug>/` (proposal.md + delta specs) and self-validates it with the pinned CLI. If AUTO_MODE=true, append `AUTO_MODE=true` to the product-owner's prompt.
 - **ux-designer** starts studying existing UI patterns, pages, and components (does NOT produce the UX doc yet — just researches)
 
+**VALIDATE Phase 1 artifacts + update gates** before proceeding to Phase 2:
+- Run `<openspec-cli> validate <slug> --strict` — must exit 0.
+- Read `openspec/changes/<slug>/proposal.md` — must have a non-empty `## Why`, and at least one delta spec must exist under `openspec/changes/<slug>/specs/`.
+- If validation fails or sections are missing: re-spawn `product-owner` with `bypassPermissions` and append to its prompt: "The OpenSpec change is incomplete or fails validation. Fix it and re-run `<openspec-cli> validate <slug> --strict` until it passes: <validator output>". Wait for it to complete, then re-validate before proceeding.
+- On pass: update the Phase Gates table in PROGRESS.md — set "OpenSpec change validates (--strict)" to `PASS`.
+
 ### Phase 2: UX Design + Architecture (PARALLEL)
-Spawn ux-designer and architect simultaneously once the Feature Brief is ready:
-- **ux-designer** reads the Feature Brief and produces **UX-DESIGN.md** (combining research from Phase 1 with the brief) — spawned with `mode: "bypassPermissions"`
-- **architect** reads the Feature Brief, researches existing code patterns, designs the technical solution, produces **ARCHITECTURE.md** — spawned with `mode: "plan"` (lead must approve the architecture plan)
+Spawn ux-designer and architect simultaneously once the OpenSpec change is validated:
+- **ux-designer** reads the OpenSpec change (proposal.md + delta specs) and produces **UX-DESIGN.md** at `<feature-docs>/<slug>/UX-DESIGN.md` (combining research from Phase 1 with the change) — spawned with `mode: "bypassPermissions"`
+- **architect** reads the OpenSpec change, researches existing code patterns, designs the technical solution, produces **design.md** at `openspec/changes/<slug>/design.md` — spawned with `mode: "plan"` (lead must approve the architecture plan)
 
-Both agents work from the Feature Brief in parallel. The architect does NOT need to wait for UX Design.
+Both agents work from the OpenSpec change in parallel. The architect does NOT need to wait for UX Design.
 
-- **USER CHECKPOINT**: After both UX-DESIGN.md and ARCHITECTURE.md are complete, present both to the user and ask: "Do the UX flows and architecture look right? Any changes before we proceed to development?" Wait for user approval before continuing.
+**VALIDATE Phase 2 artifacts** before the user checkpoint:
+- Read `openspec/changes/<slug>/design.md` — must exist and contain at minimum one of: backend endpoints section OR frontend components section, AND a File Inventory section.
+- Read `<feature-docs>/<feature-name>/UX-DESIGN.md` — must exist and contain at least one user flow.
+- If design.md is missing or incomplete: re-spawn `architect` with the note: "openspec/changes/<slug>/design.md is missing or incomplete. Please regenerate it covering backend endpoints, database entities, frontend components, and File Inventory." Wait, re-validate.
+- If UX-DESIGN.md is missing: re-spawn `ux-designer` with `bypassPermissions`: "UX-DESIGN.md is missing. Please produce it from the OpenSpec change (proposal.md + delta specs) and your Phase 1 research." Wait for completion.
+
+- **USER CHECKPOINT**: After both UX-DESIGN.md and design.md are complete and validated, present both to the user and ask: "Do the UX flows and architecture look right? Any changes before we proceed to development?" Wait for user approval before continuing.
 
 ### Phase 3: Task Breakdown + Git Setup
 Spawn tech-lead and scrum-master with `mode: "bypassPermissions"`:
 - **tech-lead** creates a feature branch: `git checkout -b feature/<feature-name>`
-- **scrum-master** reads the Architecture doc and creates all tasks with these rules:
+- **scrum-master** reads `openspec/changes/<slug>/design.md` and the delta specs, writes the canonical checklist to `openspec/changes/<slug>/tasks.md` (grouped by requirement/user story, `- [ ] N.N` items — `openspec archive` later refuses to run until every box is checked), then creates all tasks with these rules:
   - **Migration ownership**: Only `backend-dev-1` creates database migrations. `backend-dev-2` tasks that need migrations are blocked by `backend-dev-1`'s migration tasks
   - **No file conflicts**: No two developers edit the same file
   - **Task dependencies**: Set `blockedBy` relationships where needed
   - Assigns tasks to all devs and QA
 
+**VALIDATE Phase 3 task breakdown** before proceeding to Phase 4:
+- Call TaskList and count tasks assigned to developers (frontend-dev-*, backend-dev-*). Must have at least 2 developer tasks AND all developer tasks must have a user story prefix (`[US01]`, `[US02]`, etc.) in their subject.
+- Read `openspec/changes/<slug>/tasks.md` — must exist and mirror the created tasks.
+- If fewer than 2 developer tasks exist OR tasks are missing user story prefixes OR tasks.md is missing: re-spawn `scrum-master` with `bypassPermissions` and append: "Task breakdown is incomplete. Re-read openspec/changes/<slug>/design.md, write tasks.md, and create ALL developer tasks. Every task subject must start with a user story prefix like [US01]. Ensure file conflict and migration ownership rules are applied." Wait for completion, re-validate.
+
 ### Phase 4: Build + Test (ALL PARALLEL)
 Spawn ALL these agents simultaneously, every one with `mode: "bypassPermissions"`:
-- **frontend-dev-1** + **frontend-dev-2**: work on assigned tasks, make atomic git commit per completed task
-- **backend-dev-1** + **backend-dev-2**: work on assigned tasks, make atomic git commit per completed task
+- **frontend-dev-1** + **frontend-dev-2**: work on assigned tasks, make atomic git commit per completed task and tick the matching checkbox in `openspec/changes/<slug>/tasks.md`
+- **backend-dev-1** + **backend-dev-2**: work on assigned tasks, make atomic git commit per completed task and tick the matching checkbox in `openspec/changes/<slug>/tasks.md`
 - **qa-engineer**: writes test case `.md` files organized by user story
 - **code-reviewer**: watches for completed developer tasks, reviews each one
 - **tech-lead**: runs compile gate (compile backend + frontend + lint), starts the app, monitors for build/runtime issues
@@ -81,7 +106,7 @@ Spawn ALL these agents simultaneously, every one with `mode: "bypassPermissions"
 
 ### Phase 4 Flow:
 ```
-Developers complete tasks -> atomic commits (unchanged)
+Developers complete tasks -> atomic commits (per task) + tick tasks.md checkbox
        |
        v
 Code-reviewer reviews each task individually (unchanged)
@@ -107,7 +132,9 @@ After all tasks are complete, reviewed, and tested:
 - **code-reviewer**: reviews the full feature diff (all changes from feature branch)
 
 ### Phase 6: Ship
+- Verify every checkbox in `openspec/changes/<slug>/tasks.md` is ticked (`- [x]`); tick any that correspond to completed+reviewed tasks the devs missed.
 - **tech-lead**: creates a PR from the feature branch to main
+- Do NOT run `openspec archive` here — archiving happens post-merge on main (the /ship command owns it). Archiving on the feature branch would fold the deltas into the living specs before the code lands.
 - Team lead reports completion to the user with a summary
 
 ## Parallel Execution Rules
@@ -162,13 +189,27 @@ Phase 1 — Requirements + UX Research
 | Phase 5: Integration Verification | Pending | — |
 | Phase 6: Ship | Pending | — |
 
+## Phase Gates
+
+| Gate | Required By | Status | Blocker |
+|------|------------|--------|---------|
+| OpenSpec change validates (--strict) | Phase 2 | Pending | — |
+| UX-DESIGN.md exists | Phase 3 | Pending | — |
+| design.md exists + File Inventory | Phase 3 | Pending | — |
+| tasks.md written by scrum-master | Phase 4 | Pending | — |
+| ≥2 developer tasks with US prefix | Phase 4 | Pending | — |
+| Compile gate passes (backend + frontend) | Phase 5 | Pending | — |
+| All manual tests pass | Phase 5 | Pending | — |
+| tasks.md checklist fully ticked | Phase 6 | Pending | — |
+
 ## Artifacts
 
 | Document | Status | Author |
 |----------|--------|--------|
-| FEATURE-BRIEF.md | Pending | product-owner |
+| openspec/changes/<slug>/ (proposal + deltas) | Pending | product-owner |
 | UX-DESIGN.md | Pending | ux-designer |
-| ARCHITECTURE.md | Pending | architect |
+| openspec/changes/<slug>/design.md | Pending | architect |
+| openspec/changes/<slug>/tasks.md | Pending | scrum-master |
 
 ## Development Tasks
 <!-- scrum-master populates this after Phase 4 -->
@@ -198,6 +239,9 @@ Phase 1 — Requirements + UX Research
 | Total Cost (USD) | $0.00 — update from statusline before merging |
 | Feature Branch | feature/<feature-name> |
 | Completed | <!-- tech-lead: fill with completion date --> |
+
+## Related Docs
+- OpenSpec change: `openspec/changes/<slug>/` (proposal, design, tasks, delta specs)
 ```
 
 ## Retest Mode

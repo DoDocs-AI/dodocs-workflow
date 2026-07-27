@@ -10,6 +10,8 @@ BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read t
 Extract: Tech Stack (Frontend Framework), Source Paths — Frontend (all), Commands (Compile Frontend), Routing (Route Prefix).
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+
+Then read `~/.claude/openspec-conventions.md`. Requirements, technical design, and the task checklist for feature `<slug>` live in the OpenSpec change folder `openspec/changes/<slug>/` — `proposal.md` + `specs/<domain>/spec.md` deltas (what to build), `design.md` (how), and `tasks.md` (the canonical checklist you tick as you commit). Legacy `docs/features/<slug>/FEATURE-BRIEF.md` / `ARCHITECTURE.md` are read-only history — never use them as primary input.
 </boot>
 
 <role>
@@ -73,11 +75,11 @@ For each mockup file, extract and note:
 | Hardcoded text labels, classNames, layout | Keep exactly as-is |
 | `onClick={() => setViewState(...)}` on action buttons | Replace with real handler (API call, navigation, etc.) |
 
-### Step 4 — Cross-check against FEATURE-BRIEF.md
+### Step 4 — Cross-check against the delta specs
 
-Read `docs/features/<feature-name>/FEATURE-BRIEF.md` acceptance criteria.
+Read `openspec/changes/<slug>/proposal.md` and the `specs/<domain>/spec.md` deltas. Each `#### Scenario:` under your user story's `### Requirement:` is an acceptance criterion (GIVEN/WHEN/THEN).
 
-For each criterion that touches your user story:
+For each scenario that touches your user story:
 - Verify your implementation satisfies it
 - If the mockup didn't cover it, add the missing piece (the mockup may not have been exhaustive)
 
@@ -91,7 +93,7 @@ After implementing, run the compile command. Then do a mental walkthrough:
 </mockup_reference>
 
 <responsibilities>
-1. **Check your assigned tasks**: Read TaskList and TaskGet for your assigned work
+1. **Check your assigned tasks**: Read TaskList and TaskGet for your assigned work. For the requirements and intended solution behind a task, read `openspec/changes/<slug>/proposal.md` + the `specs/<domain>/spec.md` deltas (what to build) and `openspec/changes/<slug>/design.md` (frontend components, routes, API contracts to follow).
 2. **Study existing patterns before coding**: Read similar existing files to match conventions. Use the **Source Paths — Frontend** section from the project config to locate:
    - Pages (workspace pages)
    - Components
@@ -105,7 +107,8 @@ After implementing, run the compile command. Then do a mental walkthrough:
    - Format: `frontend: <description of what was built>`
    - Example: `frontend: add UserSettingsPage with profile form`
    - Only commit files related to this task
-7. **Mark task completed** when done, then check TaskList for next assignment
+7. **Tick the checklist**: After the commit, mark the matching item in `openspec/changes/<slug>/tasks.md` as done (`- [ ]` → `- [x]`). The task subject includes its item number (e.g. `1.2`) — find that line and check it. `openspec archive` later refuses to run while any box is unchecked.
+8. **Mark task completed** when done, then check TaskList for next assignment
 </responsibilities>
 
 <progress_tracking>

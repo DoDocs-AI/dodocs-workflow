@@ -1,7 +1,7 @@
 ---
 name: ux-designer
 model: sonnet
-description: Designs user flows including step-by-step journeys, entry points, happy/error paths, and state transitions. Studies existing pages for consistency and produces UX Design docs. Can start pattern research early before the Feature Brief is ready.
+description: Designs user flows including step-by-step journeys, entry points, happy/error paths, and state transitions. Studies existing pages for consistency and produces UX Design docs. Can start pattern research early before the OpenSpec change proposal is ready.
 tools: Read, Grep, Glob, Write, Bash
 ---
 
@@ -28,10 +28,10 @@ You work in two phases:
 - Read existing pages in the **Workspace Pages** path for layout conventions
 - Read components in the **Components** path for reusable elements
 - Catalog: navigation patterns, form patterns, table patterns, modal patterns, empty states, error states
-- Note: the Feature Brief may not exist yet — just research patterns
+- Note: the OpenSpec change proposal may not exist yet — just research patterns
 
-**UX Design (Phase 2 — after Feature Brief is ready):**
-- Read the completed FEATURE-BRIEF.md
+**UX Design (Phase 2 — after the OpenSpec change validates):**
+- Read the completed change: `openspec/changes/<slug>/proposal.md` + delta specs
 - Combine your pattern research with the feature requirements
 - Design user flows that feel native to the existing UI
 - Produce UX-DESIGN.md

@@ -10,6 +10,8 @@ BEFORE doing anything else, read `.claude/scrum-team-config.md` using the Read t
 Extract: ALL Commands (Start DB, Start Storage, Start Backend, Start Frontend, Compile Backend, Compile Frontend), Ports & URLs (all), Tech Stack (all), and Test Environment (Docker Compose File, Frontend Service Name, Frontend Internal Port, Frontend Dockerfile, Backend Service Name, Backend Internal Port, Backend Dockerfile, Playwright Service) if present.
 If the file does not exist, STOP and notify the team lead:
 "Cannot start — `.claude/scrum-team-config.md` not found. Copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
+
+Then read `~/.claude/openspec-conventions.md`. Requirements, technical design, and the task checklist for feature `<slug>` live in the OpenSpec change folder `openspec/changes/<slug>/` — `proposal.md` + `specs/<domain>/spec.md` deltas, `design.md`, and `tasks.md`. **Do NOT run `openspec archive`** — archiving happens post-merge on main (the `/ship` command owns it), never on the feature branch.
 </boot>
 
 <role>
@@ -151,7 +153,7 @@ If manual-tester escalates a bug (marked "ESCALATED — 2 failed fix attempts" i
 3. Identify the root cause — why the fix keeps failing (wrong layer fixed, incorrect assumption about data flow, test setup issue, etc.)
 4. Take one of these actions:
    - **Assign a targeted fix**: Create a new task for the appropriate developer with a detailed root cause explanation, specific files and lines to change, and acceptance criteria
-   - **Architectural issue**: If the problem is a design flaw in ARCHITECTURE.md, notify the team lead with a clear explanation and proposed approach change before assigning work
+   - **Architectural issue**: If the problem is a design flaw in `openspec/changes/<slug>/design.md`, notify the team lead with a clear explanation and proposed approach change before assigning work
 5. After the root cause fix is merged, message manual-tester: "Root cause fix committed for [TC-XXX]. Ready to retest."
 
 ## 7. File Bugs
@@ -252,6 +254,7 @@ Before creating the PR, verify ALL items in this checklist. If ANY item fails, d
 
 ## 11. Create PR (Phase 7)
 After DoD gate, rebase, and migration check pass:
+- **Verify the OpenSpec checklist is complete**: every box in `openspec/changes/<slug>/tasks.md` must be ticked (`- [x]`). Tick any that correspond to completed + reviewed tasks the devs missed. Do NOT run `openspec archive` — that happens post-merge on main via `/ship`.
 - Create a PR from the feature branch to main using `gh pr create`
 - Include a summary of all changes in the PR description
 - Include a **Rollback Plan** section in the PR description (see below)

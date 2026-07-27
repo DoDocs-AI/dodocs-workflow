@@ -131,6 +131,15 @@ else
 fi
 print_success "  scrum-team-config.template.md"
 
+# Install OpenSpec conventions doc
+print_info "Installing OpenSpec conventions..."
+if [ "$SOURCE" = "local" ]; then
+    cp "$SOURCE_DIR/templates/openspec-conventions.md" "$OPENCODE_DIR/openspec-conventions.md"
+else
+    curl -fsSL "$REPO_URL/opencode/templates/openspec-conventions.md" -o "$OPENCODE_DIR/openspec-conventions.md"
+fi
+print_success "  openspec-conventions.md"
+
 # Write version
 if [ "$SOURCE" = "local" ]; then
     VERSION=$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')
@@ -156,6 +165,7 @@ echo "  ~/.opencode/agents/          - 24 agent definitions"
 echo "  ~/.opencode/commands/        - scrum-team + prepare-for-production + dodocs-workflow + change-request commands"
 echo "  ~/.opencode/statusline-dodocs-workflow.sh"
 echo "  ~/.opencode/scrum-team-config.template.md"
+echo "  ~/.opencode/openspec-conventions.md"
 echo ""
 
 if [ "$UPGRADE" = false ]; then

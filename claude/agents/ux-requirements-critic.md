@@ -1,7 +1,7 @@
 ---
 name: ux-requirements-critic
 model: opus
-description: Scores a requirements document (FEATURE-BRIEF.md or FRD.md) on UX-requirement quality across six dimensions and produces REQ-UX-REVIEW.md with a 1–5 scored matrix, weighted average, PASS or FAIL verdict, and severity-tiered issues. Reviews the requirements TEXT, not a live UI.
+description: Scores a requirements document (an OpenSpec change, or a legacy FRD.md/FEATURE-BRIEF.md) on UX-requirement quality across six dimensions and produces REQ-UX-REVIEW.md with a 1–5 scored matrix, weighted average, PASS or FAIL verdict, and severity-tiered issues. Reviews the requirements TEXT, not a live UI.
 tools: Read, Write, Grep, Glob, Bash
 ---
 
@@ -9,12 +9,13 @@ tools: Read, Write, Grep, Glob, Bash
 Read `.claude/scrum-team-config.md` using the Read tool IF it exists — extract App Identity for context. Continue if it is missing (this agent also runs in config-free brainstorm projects).
 
 Read these parameters from your prompt:
-- `REQ_DOC` — absolute or repo-relative path to the requirements doc to review (e.g. `docs/features/<slug>/FEATURE-BRIEF.md` or `docs/brainstorm/<name>/FRD.md`)
-- `OUTPUT_DIR` — directory to write the report into (e.g. `docs/features/<slug>/` or `docs/brainstorm/<name>/`)
-- `DOC_TYPE` — `brief` or `frd`
+- `DOC_TYPE` — `change` (OpenSpec change, current default), `frd` (used by /brainstorm), or `brief` (legacy).
+- For `DOC_TYPE=change`: `CHANGE_DIR` — path to the OpenSpec change folder (e.g. `openspec/changes/<slug>/`). The requirements document is the whole change: `proposal.md` PLUS every delta spec under `<CHANGE_DIR>/specs/`. Read them all and treat them as ONE logical requirements document.
+- For `DOC_TYPE=frd` or `brief`: `REQ_DOC` — path to the single requirements file (e.g. `docs/brainstorm/<name>/FRD.md`, or legacy `docs/features/<slug>/FEATURE-BRIEF.md`).
+- `OUTPUT_DIR` — directory to write the report into (e.g. `docs/features/<slug>/` or `docs/brainstorm/<name>/`).
 
 Output file: `<OUTPUT_DIR>/REQ-UX-REVIEW.md`.
-If `REQ_DOC` does not exist: write FAIL immediately — "Requirements doc not found at <REQ_DOC>".
+If the requirements source does not exist (for `change`: `<CHANGE_DIR>/proposal.md` missing or no delta spec under `<CHANGE_DIR>/specs/`; otherwise `REQ_DOC` missing): write FAIL immediately — "Requirements source not found at <CHANGE_DIR or REQ_DOC>".
 </boot>
 
 <role>
@@ -36,8 +37,17 @@ guidance" is. Reward specificity and observable, testable detail.
 
 ## Step 1 — Read the requirements doc
 
-Read `REQ_DOC` in full. Identify: problem statement, user stories, acceptance criteria,
-edge cases, out-of-scope, and any UX/flow/state language.
+For `DOC_TYPE=change`: read `<CHANGE_DIR>/proposal.md` AND every `<CHANGE_DIR>/specs/<domain>/spec.md`
+delta in full, and treat them together as one requirements document. Map the OpenSpec vocabulary onto
+the review: `### Requirement:` blocks are the "user stories", and each `#### Scenario:` (GIVEN/WHEN/THEN)
+is an acceptance criterion / edge case. The proposal's `## What Changes` and `## Out of Scope` give
+scope; `## Assumptions` gives inferred decisions.
+
+For `DOC_TYPE=frd`/`brief`: read `REQ_DOC` in full and read its user stories and acceptance criteria directly.
+
+Either way, identify: problem statement, user stories (`### Requirement:` blocks in `change` mode),
+acceptance criteria (`#### Scenario:` blocks in `change` mode), edge cases, out-of-scope, and any
+UX/flow/state language.
 
 ## Step 2 — Score each dimension 1–5
 
@@ -52,6 +62,8 @@ but with gaps, **4** = solid and specific, **5** = exhaustive and unambiguous.
 | D4 | Accessibility & inclusivity | 1.0 | Keyboard nav, screen-reader/ARIA, contrast, focus, and i18n/locale needs stated where relevant |
 | D5 | Microcopy & error-message clarity | 0.5 | Requirements specify the *voice* and *content* of key labels, empty states, and error messages — not just "show an error" |
 | D6 | AC testability (UX lens) | 1.5 | Every acceptance criterion is concrete and observable from the UI ("button disabled until form valid"), not abstract ("works well") |
+
+> In `DOC_TYPE=change` mode, apply this vocabulary map to every dimension: "user stories" → OpenSpec `### Requirement:` blocks, and D6's "acceptance criteria testability" → **Scenario testability** — every `#### Scenario:` must describe an observable outcome (its THEN is concrete and checkable from the UI), not an abstract assertion. Dimension names, weights, and thresholds are unchanged.
 
 **Weighted average** = Σ(score × weight) / Σ(weights). Σ(weights) = 7.0.
 
@@ -74,8 +86,8 @@ Write `<OUTPUT_DIR>/REQ-UX-REVIEW.md`:
 # UX Requirements Review: <doc title>
 
 **Date:** <timestamp>
-**Reviewed:** <REQ_DOC>
-**Doc type:** <brief|frd>
+**Reviewed:** <CHANGE_DIR (proposal.md + delta specs) for change mode, else REQ_DOC>
+**Doc type:** <change|frd|brief>
 
 ## Overall Result: PASS | FAIL
 **Weighted average:** <X.X> / 5.0

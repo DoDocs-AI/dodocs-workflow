@@ -1,8 +1,8 @@
 # dodocs-workflow Features
 
-> v1.12.0 | Autonomous Scrum Team + Product Lifecycle Framework for Claude Code & OpenCode
+> v2.0.0 | Autonomous Scrum Team + Product Lifecycle Framework for Claude Code & OpenCode — spec-driven with OpenSpec
 
-dodocs-workflow turns a one-line feature description into a production-ready pull request. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation. The `/ship` command wraps each feature with post-build hygiene — doc sync, test maintenance, regression analysis, and multi-perspective validation — ensuring every feature leaves the project in a clean state. The `/fix-and-ship` command applies the same hygiene to bug fixes, preventing docs and tests from going stale when shared components change. The `/web-design` command generates creative, award-caliber Next.js websites with iterative visual validation — a designer agent creates the site while a validator agent screenshots and scores it until quality threshold is met. The Product Lifecycle (PLC) framework extends this with 20+ agents across 6 phases taking any product from concept to profitable business. The Project Supervisor provides automated health monitoring and auto-fix for stalled projects.
+dodocs-workflow turns a one-line feature description into a production-ready pull request. Requirements are spec-driven via OpenSpec (`@fission-ai/openspec`, pinned): every feature is an `openspec/changes/<slug>/` change proposal with validated delta specs, and shipping archives the deltas into living per-capability specs at `openspec/specs/` — a canonical, always-current description of system behavior. It orchestrates up to 13 specialized AI agents that follow a real scrum process — requirements, UX design, architecture, implementation, code review, manual testing, E2E automation, and PR creation. The `/ship` command wraps each feature with post-build hygiene — doc sync, test maintenance, regression analysis, and multi-perspective validation — ensuring every feature leaves the project in a clean state. The `/fix-and-ship` command applies the same hygiene to bug fixes, preventing docs and tests from going stale when shared components change. The `/web-design` command generates creative, award-caliber Next.js websites with iterative visual validation — a designer agent creates the site while a validator agent screenshots and scores it until quality threshold is met. The Product Lifecycle (PLC) framework extends this with 20+ agents across 6 phases taking any product from concept to profitable business. The Project Supervisor provides automated health monitoring and auto-fix for stalled projects.
 
 ---
 
@@ -50,7 +50,7 @@ dodocs-workflow turns a one-line feature description into a production-ready pul
 The flagship workflow. A single command spawns a 13-agent development team that builds, reviews, tests, and ships an entire feature.
 
 **What it does**:
-- Product Owner interviews you about the feature and writes a Feature Brief
+- Product Owner interviews you about the feature and writes an OpenSpec change (proposal.md + delta specs, `openspec validate --strict` enforced)
 - UX Designer researches existing UI patterns and produces user flow designs
 - Architect designs the technical solution (endpoints, entities, components, API contracts)
 - Scrum Master breaks the architecture into tasks with dependencies
@@ -166,10 +166,10 @@ Processes multiple features autonomously, one after another or in parallel.
 Makes targeted changes to an existing feature area — updating that feature's docs, code, and tests **in place** rather than rebuilding from scratch or spawning a new feature.
 
 **What it does**:
-- Reads the existing feature docs (FEATURE-BRIEF.md, ARCHITECTURE.md, UX-DESIGN.md)
+- Resolves the area against living specs (`openspec/specs/`), archived changes, or legacy feature docs
 - Captures your change description through interactive questioning
 - **Product decision gate**: `product-owner` first classifies the request as a **change** to this feature or a genuinely **new feature**, presents the verdict + reasoning, and asks you to confirm. If it's really a new feature, you're handed off to `/scrum-team` (the existing feature is left untouched).
-- **Updates in place**: edits the existing FEATURE-BRIEF.md / ARCHITECTURE.md / UX-DESIGN.md directly and appends a dated entry to a CHANGELOG.md in the same folder (audit trail) — no sibling folder, no fresh delta brief
+- **Delta docs, in-place code**: captures the request as a new OpenSpec change (`openspec/changes/<area>-<change>/`) with MODIFIED/ADDED/REMOVED delta specs against the living specs; the code and tests are modified in place. Archiving after merge is the audit trail (no per-feature CHANGELOG.md)
 - Spawns the full team with per-phase overrides that modify the current feature's code and tests in place
 
 **Use case**: "Add a filter dropdown to the existing invoices page" — product confirms it's a change, the existing invoices docs are updated in place, and the team modifies the existing code and tests.
@@ -220,13 +220,13 @@ AI-driven feature idea stress-testing — research the market, challenge the ide
 Daytime preparation pipeline: interactive requirements gathering, framework-native mockups, and validation — without building anything.
 
 **What it does**:
-- Product Owner gathers requirements and writes FEATURE-BRIEF.md (Phase D1)
+- Product Owner gathers requirements and writes the OpenSpec change: proposal.md + delta specs (Phase D1, `--strict` validate gate at D1.2)
 - **Requirements quality loop (Phase D1.5)** — UX + business critics score the brief, an enricher auto-resolves gaps (up to 3×), then you approve at a gate before any mockup work
 - Mockup Designer creates framework-native UI components using your real design system (D2)
-- Mockup Validator cross-checks mockups against the Feature Brief (D3)
+- Mockup Validator cross-checks mockups against the change's Requirements and Scenarios (D3)
 - You approve the outputs (D4)
 
-**Output**: FEATURE-BRIEF.md, REQ-UX-REVIEW.md, REQ-BUSINESS-REVIEW.md, REQUIREMENTS-VALIDATION.md, mockup components in `docs/features/<feature>/mockups/`, MOCKUP-VALIDATION.md
+**Output**: `openspec/changes/<feature>/` (proposal.md + delta specs), REQ-UX-REVIEW.md, REQ-BUSINESS-REVIEW.md, REQUIREMENTS-VALIDATION.md, mockup components in `docs/features/<feature>/mockups/`, MOCKUP-VALIDATION.md
 
 **Use case**: Prepare features during the day (interactive), then batch-run `/scrum-team` overnight in `--auto` mode.
 
@@ -458,7 +458,7 @@ Creative website design generator — spawns a designer agent to create an award
 
 | Agent | Model | Role |
 |-------|-------|------|
-| Product Owner | Opus | Requirements gathering, Feature Brief |
+| Product Owner | Opus | Requirements gathering, OpenSpec change proposal + delta specs |
 | UX Designer | Sonnet | UI pattern research, user flow design |
 | Architect | Opus | Technical solution design |
 | Scrum Master | Opus | Task breakdown, dependency mapping, assignment |
@@ -584,7 +584,7 @@ The full `/scrum-team` workflow runs through 7 phases:
 
 ```
 Phase 1: Requirements + UX Research          [parallel]
-  Product Owner writes FEATURE-BRIEF.md
+  Product Owner writes the OpenSpec change (proposal + delta specs)
   UX Designer researches existing UI patterns
 
 Phase 2: UX Design + Mockups                 [parallel]
@@ -642,7 +642,7 @@ Phase 6: Ship
 
 **Safety nets**: Security-auditor auto-triggered when feature diffs touch auth/security/migration/route files. Cross-feature conflict detection in batch mode prevents parallel features from editing shared files. Phase Gates table in PROGRESS.md acts as a control mechanism — phases cannot advance when gates show blockers.
 
-**Communication**: Agents coordinate via shared task lists, direct messages, shared files on disk (Feature Brief, Architecture, test cases), and a real-time PROGRESS.md dashboard.
+**Communication**: Agents coordinate via shared task lists, direct messages, shared files on disk (the OpenSpec change folder — proposal, design, tasks, delta specs — plus test cases), and a real-time PROGRESS.md dashboard.
 
 **Docker isolation**: `/container-team` runs the entire team in a Docker container with the project directory mounted, letting you use Claude Code for other work while the team builds.
 
@@ -689,8 +689,8 @@ cd dodocs-workflow && bash install-opencode.sh
 **Check version**: `/dodocs-workflow version`
 
 **What gets installed** (to `~/.claude/` or `~/.opencode/`):
-- 88 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
-- 25 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
+- 89 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
+- 27 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
 - Docker runtime files in `docker/`
 - Config template
 - Status line script with auto-update notifications

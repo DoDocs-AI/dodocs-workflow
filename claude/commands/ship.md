@@ -39,7 +39,11 @@ You are the **orchestrator** for the `/ship` lifecycle. Follow these phases exac
 Read `.claude/scrum-team-config.md` using the Read tool. If the file does not exist, STOP:
 "No scrum-team config found. Run `dodocs-workflow init` or copy the template."
 Extract: ALL sections.
-Also extract the **Feature Docs** path (default: `docs/features/`); store as `FEATURE_DOCS_PATH`.
+Also extract the **Feature Docs** path (default: `docs/features/`); store as `FEATURE_DOCS_PATH`,
+and the `## OpenSpec` section: CLI invocation (`<openspec-cli>`, default `npx -y @fission-ai/openspec@1.6.0`).
+
+If `openspec/` does not exist in the project root, STOP:
+"This project is not initialized for the OpenSpec pipeline. Run `dodocs-workflow init` (new project) or `/spec-bootstrap` (project with existing features) first. To stay on the pre-OpenSpec workflow, pin v1.17.0: `curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install.sh | bash`"
 
 **Step 3 — Queue discovery:**
 
@@ -55,6 +59,12 @@ If `AUTO_DISCOVER=true`:
 If `--features` provided:
 - Parse comma-separated list, trim whitespace
 - Derive kebab-case slug for each
+
+**Cross-check against OpenSpec** (advisory, both discovery modes):
+Run `<openspec-cli> list --json`. For each queued slug, an active change
+`openspec/changes/<slug>/` should exist; warn (do not block) on mismatch:
+`⚠ <slug> is approved but has no OpenSpec change — was it prepared pre-OpenSpec?`
+Also warn about active changes with no queued feature (stale or in-flight work).
 
 **Step 4 — Generate run ID:**
 ```bash
@@ -103,13 +113,16 @@ mkdir -p docs/ship/$RUN_ID
 **Goal:** Determine safe execution order.
 
 **Parse dependencies:**
-- For each feature in the queue, read `docs/features/<slug>/FEATURE-BRIEF.md`
-- Look for `[depends-on: ...]` annotations
+- For each feature in the queue, read `openspec/changes/<slug>/proposal.md` and parse the
+  `## Depends On` bullet list (fall back to `[depends-on: ...]` annotations in a legacy
+  `docs/features/<slug>/FEATURE-BRIEF.md` if the change folder does not exist)
 - Build adjacency list: `{ feature → [dependencies] }`
 
 **Cross-feature conflict analysis** (if `--parallel`):
-- For each feature, read `docs/features/<slug>/ARCHITECTURE.md` (if exists)
-- Extract file inventories
+- For each feature, read `openspec/changes/<slug>/design.md` (if exists) and extract its
+  `## File Inventory`. Also treat two features touching the SAME spec domain
+  (overlapping `specs/<domain>/` folders in their changes) as a conflict — parallel
+  archives into one domain would collide.
 - Build shared-file map: `file_path → [feature-slugs]`
 - If conflicts found, add synthetic dependencies
 
@@ -388,11 +401,11 @@ Runs ONCE after all features complete their per-feature loops.
 
 ## Per-Feature Results
 
-| Feature | PR | Docs Synced | Tests Updated | Regressions | Validation | Status |
-|---------|-----|------------|---------------|-------------|------------|--------|
-| user-auth | #42 | 3 files | 2 tests | 0 new | PASS | DONE |
-| billing | #43 | 1 file | 5 tests | 1 (fixed) | PASS | DONE |
-| dark-mode | — | — | — | — | — | FAILED |
+| Feature | PR | Docs Synced | Tests Updated | Regressions | Validation | Archived | Status |
+|---------|-----|------------|---------------|-------------|------------|----------|--------|
+| user-auth | #42 | 3 files | 2 tests | 0 new | PASS | yes | DONE |
+| billing | #43 | 1 file | 5 tests | 1 (fixed) | PASS | yes | DONE |
+| dark-mode | — | — | — | — | — | — | FAILED |
 
 ## Project Health: Before vs After
 - E2E pass rate: <baseline>% → <final>%
@@ -426,6 +439,30 @@ Spawn Task:
     Only merge PRs for features that passed in SHIP-REPORT.md.
   """
 ```
+
+**Archive OpenSpec changes** (only for features whose PR is MERGED to main — i.e. after
+the `--merge` step above, or for PRs the user merged manually before this run):
+
+For each merged feature, on `main` (pull first: `git checkout main && git pull`):
+1. Verify every checkbox in `openspec/changes/<slug>/tasks.md` is `[x]` — tick any
+   stragglers that correspond to shipped work.
+2. Run `<openspec-cli> archive <slug> --yes`
+   - This folds the delta specs into `openspec/specs/<domain>/spec.md` and moves the
+     change to `openspec/changes/archive/<DATE>-<slug>/`.
+   - If a newly created domain spec contains `Purpose\n\nTBD`, fill in the Purpose.
+3. Update `docs/features/<slug>/PROGRESS.md` Related Docs to point at the archive path.
+4. Commit on main: `git add openspec docs/features/<slug>/PROGRESS.md && git commit -m "openspec: archive <slug>" && git push`
+   (one commit per feature keeps the audit trail clean).
+
+If `--merge` was NOT passed and PRs are still open, do NOT archive. Print instead:
+```
+PRs are open but not merged. After merging, archive each change on main:
+  <openspec-cli> archive <slug> --yes && git add openspec && git commit -m "openspec: archive <slug>" && git push
+Or re-run /ship --merge to do it automatically.
+```
+
+**Never archive on a feature branch** — archiving folds requirements into the living
+specs, which must only reflect merged code.
 
 Print final summary:
 ```

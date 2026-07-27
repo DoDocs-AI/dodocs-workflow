@@ -32,10 +32,10 @@ When `FEATURES` is absent (or `AUTO_DISCOVER=true`), run **Phase 0** to build th
 3. For each slug:
    a. Check `<feature-docs>/<slug>/PROGRESS.md`.
       If the Phase 6 (Ship) row shows `Done` in the Status column → mark as `already_done`, skip from batch.
-   b. Read `<feature-docs>/<slug>/FEATURE-BRIEF.md` if it exists:
-      - Extract `displayName` from the first `#` heading (strip a leading `"Feature Brief:"` prefix and trim).
+   b. `displayName` = slug converted to Title Case (hyphens → spaces, capitalise each word).
+   c. Read `openspec/changes/<slug>/proposal.md` if it exists:
       - Parse the `## Depends On` section → list of dep slugs (one slug per line, strip leading `- ` bullet and trim).
-   c. If `FEATURE-BRIEF.md` is absent: `displayName` = slug converted to Title Case (hyphens → spaces, capitalise each word); `deps = []`.
+      - If `proposal.md` is absent or has no `## Depends On` section: `deps = []`.
 
 4. Validate: for every dep slug referenced, confirm it exists in the discovered slug list.
    If a dep references an unknown slug, log a warning and treat that dep as absent.
@@ -156,6 +156,20 @@ If no PR found → mark as needing re-run.
 Read `docs/features/<slug>/PROGRESS.md`.
 A feature **passes** if the Phase 6 (Ship) row contains `Done` in the Status column.
 If the file is missing or Phase 6 is not `Done` → mark as needing re-run.
+
+### OpenSpec artifact check
+
+Confirm the OpenSpec change folder is complete and valid:
+
+```bash
+test -f openspec/changes/<slug>/proposal.md \
+  && test -f openspec/changes/<slug>/design.md \
+  && test -f openspec/changes/<slug>/tasks.md \
+  && ls openspec/changes/<slug>/specs/*/spec.md >/dev/null 2>&1
+npx -y @fission-ai/openspec@1.6.0 validate <slug> --strict
+```
+
+A feature **passes** if `proposal.md`, `design.md`, `tasks.md`, and at least one delta spec exist AND `openspec validate <slug> --strict` exits 0. If the change already shipped, it will have been archived to `openspec/changes/archive/*-<slug>/` — treat that as a pass too. Otherwise → mark as needing re-run.
 
 ### Re-run logic
 

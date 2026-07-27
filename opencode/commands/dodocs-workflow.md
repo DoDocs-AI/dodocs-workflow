@@ -1,12 +1,39 @@
-Manage the dodocs-workflow installation. Supports: `init`, `version`, `upgrade`.
+Manage the dodocs-workflow installation. Supports: `init`, `version`, `upgrade`, `doctor`.
 
 ## Commands
 
 ### `init` (or no arguments)
 Initialize the scrum-team workflow for the current project:
 1. Copy `~/.opencode/scrum-team-config.template.md` to `.opencode/scrum-team-config.md`
-2. Tell the user to fill in the project-specific values
-3. Show which sections need to be configured
+2. Run the `doctor` checks (below). If Node.js >= 20 is missing, warn but continue —
+   OpenSpec setup can be finished later by re-running `init`.
+3. Scaffold OpenSpec (skip if `openspec/` already exists):
+   ```bash
+   npx -y @fission-ai/openspec@1.6.0 init --tools none
+   ```
+   This is non-interactive and writes only `openspec/config.yaml`. Then fill the
+   `context:` block in `openspec/config.yaml` with the project's tech stack from the
+   scrum-team config (once the user has filled it in).
+4. Smoke-check: `npx -y @fission-ai/openspec@1.6.0 validate --all` (an empty project
+   passes trivially).
+5. If the project has existing feature docs (`docs/features/*/FEATURE-BRIEF.md`) but no
+   `openspec/specs/`, suggest bootstrapping `openspec/specs/` using the Claude Code
+   `/spec-bootstrap` command or manually deriving the living specs from those docs.
+6. If `.opencode/commands/opsx/` exists (user installed OpenSpec's own slash commands),
+   leave it alone and note: the dodocs pipeline drives the `openspec` CLI directly;
+   `/opsx:*` commands are optional extras and should be kept on the same pinned version.
+7. Tell the user to fill in the project-specific values
+8. Show which sections need to be configured
+
+### `doctor`
+Verify the OpenSpec toolchain for this project:
+1. `node --version` — must be >= 20. If missing/old, print install instructions
+   (e.g. `brew install node` on macOS) and STOP.
+2. `npx -y @fission-ai/openspec@1.6.0 --version` — must succeed and print `1.6.0`.
+3. If `openspec/` exists: `npx -y @fission-ai/openspec@1.6.0 validate --all --strict`
+   and report the result.
+4. Report the pinned CLI line from `.opencode/scrum-team-config.md` (`## OpenSpec` section);
+   warn if the section is missing (older config — copy it from the current template).
 
 ### `version`
 Show the installed version by reading `~/.opencode/.dodocs-workflow-version`

@@ -1,9 +1,9 @@
-Make targeted changes to an existing feature area. Points at a feature that already has docs (FEATURE-BRIEF.md, ARCHITECTURE.md, UX-DESIGN.md). Product first decides whether the request is a CHANGE to that feature or a genuinely NEW feature. When it is a change, the existing feature's docs, code, and tests are updated IN PLACE — no new feature brief, no sibling folder.
+Make targeted changes to an existing feature area. Product first assesses the scope of the request, then the change is captured as an OpenSpec change — `openspec/changes/<change-slug>/` with MODIFIED/ADDED/REMOVED delta specs against the living specs in `openspec/specs/` — validated by the pinned CLI, and implemented by the scrum-team modifying the existing code and tests in place.
 
 ## Usage
 
 ```
-/change-request <area-slug>
+/change-request <area-slug-or-domain>
 ```
 
 Example: `/change-request billing-dashboard`
@@ -18,14 +18,16 @@ Spawn all agents automatically as their phase begins — do NOT ask the user for
 
 ---
 
-## Core Principle — Change In Place
+## Core Principle — Delta Docs, In-Place Code
 
-A change request modifies the **existing** feature. Do NOT create a new `<area-slug>-<change>` folder and do NOT write a fresh delta FEATURE-BRIEF. Instead:
-- **Edit** `docs/features/<AREA_SLUG>/FEATURE-BRIEF.md`, `ARCHITECTURE.md`, and `UX-DESIGN.md` in place.
-- **Append** a dated entry to `docs/features/<AREA_SLUG>/CHANGELOG.md` (the audit trail).
-- **Modify** the current feature's code and tests in place — never scaffold a parallel implementation.
-
-A new folder/brief is only ever created if product decides the request is actually a NEW feature, in which case the user is handed off to `/scrum-team`.
+Requirements changes are captured as **deltas**, never by editing history:
+- The living specs (`openspec/specs/<domain>/spec.md`) describe current behavior and are
+  only updated by `openspec archive` after the change ships.
+- Each change request gets its own change folder `openspec/changes/<CR_SLUG>/` with a
+  proposal and `## MODIFIED / ADDED / REMOVED Requirements` delta specs. The archived
+  change folder is the permanent audit trail (no separate CHANGELOG.md).
+- The **code and tests** for the feature are modified IN PLACE — never scaffold a
+  parallel implementation.
 
 ---
 
@@ -37,46 +39,52 @@ A new folder/brief is only ever created if product decides the request is actual
 Read `.claude/scrum-team-config.md` using the Read tool.
 If the file does not exist, STOP immediately and tell the user:
 "No scrum-team config found for this project. Run `dodocs-workflow init` or copy the template from `~/.claude/scrum-team-config.template.md` to `.claude/scrum-team-config.md` and fill in the values for this project."
-Extract: Feature Docs path (default: `docs/features/`).
+Extract: Feature Docs path (default: `docs/features/`) and the `## OpenSpec` section
+(`<openspec-cli>` invocation, default `npx -y @fission-ai/openspec@1.6.0`; Spec Domains).
+
+If `openspec/` does not exist in the project root, STOP:
+"This project is not initialized for the OpenSpec pipeline. Run `dodocs-workflow init` (new project) or `/spec-bootstrap` (project with existing features) first. To stay on the pre-OpenSpec workflow, pin v1.17.0: `curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.17.0/install.sh | bash`"
 
 **Step 2 — Parse arguments:**
 Parse `$ARGUMENTS` as `AREA_SLUG` verbatim — do NOT re-slug or transform it.
 If `$ARGUMENTS` is empty → print usage:
 ```
-Usage: /change-request <area-slug>
+Usage: /change-request <area-slug-or-domain>
 Example: /change-request billing-dashboard
 
-Run /prepare-feature <area-slug> first if the feature docs don't exist yet.
+The argument can be a shipped feature slug (openspec/changes/archive/*-<slug>/),
+a spec domain (openspec/specs/<domain>/), or a legacy feature (docs/features/<slug>/).
 ```
 Then STOP.
 
 ---
 
-### Phase 1 — Validate Area
+### Phase 1 — Resolve Area
 
-Check that `docs/features/<AREA_SLUG>/` directory exists.
-Check that `docs/features/<AREA_SLUG>/FEATURE-BRIEF.md` exists.
+Resolve `AREA_SLUG` against, in order:
+1. A spec domain: `openspec/specs/<AREA_SLUG>/spec.md` exists
+2. A shipped change: a folder matching `openspec/changes/archive/*-<AREA_SLUG>/` exists
+3. An in-flight change: `openspec/changes/<AREA_SLUG>/` exists → STOP:
+   "`<AREA_SLUG>` is still in flight (openspec/changes/<AREA_SLUG>/). Amend that change directly (edit its proposal/delta specs and re-run `<openspec-cli> validate <AREA_SLUG> --strict`) instead of opening a change request on top of it."
+4. A legacy feature: `docs/features/<AREA_SLUG>/FEATURE-BRIEF.md` exists (pre-OpenSpec history)
 
-**If directory missing:**
-List all subdirectories under `docs/features/` and print:
+Record which of these matched as `AREA_KIND` (domain | shipped | legacy) and derive
+`AFFECTED_DOMAINS` candidates:
+- domain → that domain
+- shipped → domains listed in the archived change's `specs/` subfolders
+- legacy → empty (product-owner will propose domains in Phase 4)
+
+**If nothing matched:**
+List spec domains (`<openspec-cli> list --specs`), archived change names, and
+`docs/features/` subdirectories, then print:
 ```
-Area '<AREA_SLUG>' not found under docs/features/.
+Area '<AREA_SLUG>' not found.
 
-Available areas:
-  - <area-1>
-  - <area-2>
-  ...
+Spec domains:      <list>
+Shipped changes:   <list>
+Legacy features:   <list>
 
-Run /change-request <one-of-the-above> to target an existing area.
-```
-Then STOP.
-
-**If FEATURE-BRIEF.md missing:**
-Print:
-```
-Area '<AREA_SLUG>' exists but has no FEATURE-BRIEF.md.
-Run /prepare-feature <AREA_SLUG> first to create the feature documentation,
-then come back to /change-request <AREA_SLUG>.
+Run /change-request <one-of-the-above>, or /prepare-feature <name> for a brand-new feature.
 ```
 Then STOP.
 
@@ -84,23 +92,20 @@ Then STOP.
 
 ### Phase 2 — Read Context
 
-Read all files that exist in `docs/features/<AREA_SLUG>/`:
-- `FEATURE-BRIEF.md`
-- `ARCHITECTURE.md` (if present)
-- `UX-DESIGN.md` (if present)
-- `PROGRESS.md` (if present)
-- `CHANGELOG.md` (if present)
-- `STATUS` (if present)
+Read, as applicable to `AREA_KIND`:
+- The living specs for each candidate domain: `openspec/specs/<domain>/spec.md`
+- The archived change: `openspec/changes/archive/*-<AREA_SLUG>/proposal.md` (+ design.md if present)
+- Legacy docs (read-only): `docs/features/<AREA_SLUG>/FEATURE-BRIEF.md`, `UX-DESIGN.md`
+- Build artifacts if present: `docs/features/<AREA_SLUG>/STATUS`, `PROGRESS.md`
 
 Print a context summary box:
 ```
 +-----------------------------------------------------------------+
-|  Area: <AREA_SLUG>
-|  Status: <value from STATUS file, or "unknown">
-|  Docs present: FEATURE-BRIEF [Y]  ARCHITECTURE [Y/N]  UX-DESIGN [Y/N]
+|  Area: <AREA_SLUG>   (kind: domain | shipped change | legacy)
+|  Affected domains (candidate): <list or "to be determined">
 |
-|  Problem Statement (excerpt):
-|  <first paragraph of the Problem Statement from FEATURE-BRIEF.md>
+|  Current behavior (excerpt from living specs / legacy brief):
+|  <2-3 line excerpt>
 +-----------------------------------------------------------------+
 ```
 
@@ -124,93 +129,98 @@ Options:
 
 If "Refine" → ask again for the new description, loop back to confirm. Repeat until "Proceed".
 
-**Derive `CHANGE_SLUG`** (used later for the branch name and for a new-feature suggestion):
+**Derive `CHANGE_SLUG`:**
 - Take 2–4 meaningful words from `USER_CHANGE_DESCRIPTION`
 - Strip stop words: a, an, the, for, to, of, in, on, with, and, or, by, from, that, this, is, are, be, it
 - Lowercase, spaces → hyphens, strip non-alphanumeric characters
 - Examples: "add CSV export for invoices" → `add-csv-export`; "allow changing email address" → `change-email-address`
 
+Set `CR_SLUG = <AREA_SLUG>-<CHANGE_SLUG>` — this is the OpenSpec change name AND the branch slug.
+
 ---
 
-### Phase 4 — Product Decision Gate (Change vs New Feature)
+### Phase 4 — Product Scope Gate
 
-**This is the "product checks first" step.** Before touching any docs, product decides whether this request is a change to the existing feature or is really a new feature.
+**This is the "product checks first" step.** Before writing anything, product assesses
+which spec domains the request touches and how heavy the change is.
 
-Spawn `product-owner` agent with `mode: "bypassPermissions"` in CLASSIFICATION MODE:
+Spawn `product-owner` agent with `mode: "bypassPermissions"` in SCOPE-ASSESSMENT MODE:
 
 ```
 Spawn Task:
   subagent_type = "product-owner"
   mode          = "bypassPermissions"
   prompt        = """
-    Read ~/.claude/agents/product-owner.md and execute it.
+    Read ~/.claude/agents/product-owner.md and execute its boot + research phases.
 
-    You are operating in CLASSIFICATION MODE. Do NOT write or edit any files.
+    You are operating in SCOPE-ASSESSMENT MODE. Do NOT write or edit any files.
     Do NOT ask the user any questions. Return your verdict as text only.
 
-    AREA SLUG (existing feature): <AREA_SLUG>
+    AREA: <AREA_SLUG> (kind: <AREA_KIND>)
     CHANGE DESCRIPTION: <USER_CHANGE_DESCRIPTION>
 
-    STEP 1 — Read the existing documents:
-      - docs/features/<AREA_SLUG>/FEATURE-BRIEF.md
-      - docs/features/<AREA_SLUG>/ARCHITECTURE.md  (if it exists)
-      - docs/features/<AREA_SLUG>/UX-DESIGN.md     (if it exists)
+    STEP 1 — Read current behavior:
+      - openspec/specs/<domain>/spec.md for each candidate domain (<AFFECTED_DOMAINS>)
+      - the archived change or legacy docs for the area (see AREA kind)
+      - openspec/changes/ — check for in-flight changes touching the same domains
 
-    STEP 2 — Classify the request:
-      - CHANGE = it modifies or extends the existing feature's user stories,
-        screens, endpoints, or data model, and fits inside this feature's
-        current problem statement.
-      - NEW_FEATURE = it introduces a distinct user journey, an independent
-        data model, or a separate module only loosely related to this area.
+    STEP 2 — Assess:
+      - AFFECTED_DOMAINS: which spec domains the deltas will touch (existing ones
+        preferred; propose a new domain only for genuinely new capability)
+      - SCOPE:
+        * TARGETED = modifies/extends existing requirements; no new user journey;
+          few new screens → capture the change here and go straight to scrum-team.
+        * FEATURE_SIZED = introduces a distinct user journey or substantial new UI
+          → better served by the full /prepare-feature path (interactive
+          requirements + mockups + human approval).
+      - CONFLICTS: any in-flight change touching the same domains.
 
     STEP 3 — Return EXACTLY this format as your final message (no files):
-      VERDICT: CHANGE            (or)   VERDICT: NEW_FEATURE
+      AFFECTED_DOMAINS: <comma-separated>
+      SCOPE: TARGETED            (or)   SCOPE: FEATURE_SIZED
       REASONING: <1-2 sentences>
-      SUGGESTED_NAME: <only if NEW_FEATURE — a short human feature name>
+      CONFLICTS: <in-flight change names, or "none">
   """
 ```
 
-Wait for the task to complete. Parse `VERDICT`, `REASONING`, and (if present) `SUGGESTED_NAME` from the agent's returned text.
+Wait for the task to complete. Parse `AFFECTED_DOMAINS`, `SCOPE`, `REASONING`, `CONFLICTS`.
+
+If `CONFLICTS` is not "none", warn the user in the next question's description text.
 
 **Present the verdict to the user** with `AskUserQuestion`:
 
-**If VERDICT = CHANGE:**
-"Product's assessment: this is a **change** to `<AREA_SLUG>`.
+**If SCOPE = TARGETED:**
+"Product's assessment: a **targeted change** to domains: <AFFECTED_DOMAINS>.
 Reason: <REASONING>
 
 How would you like to proceed?"
 Options:
-1. "Proceed as a change to `<AREA_SLUG>`" (default)
-2. "Actually make this a new feature"
+1. "Proceed — capture the change and implement" (default)
+2. "Route through /prepare-feature instead (mockups + human gates)"
 
-- If option 1 → continue to Phase 5.
-- If option 2 → treat as NEW_FEATURE handoff (see below).
-
-**If VERDICT = NEW_FEATURE:**
-"Product's assessment: this looks like a **new feature**, not a change to `<AREA_SLUG>`.
+**If SCOPE = FEATURE_SIZED:**
+"Product's assessment: this is **feature-sized** — a distinct journey or substantial new UI.
 Reason: <REASONING>
 
 How would you like to proceed?"
 Options:
-1. "Create as a new feature via `/scrum-team`" (default)
-2. "No — treat it as a change to `<AREA_SLUG>` anyway"
+1. "Run the full preparation path" (default) → print and STOP (do not auto-run):
+   ```
+   This is better prepared as a full feature. Run:
 
-- If option 1 → **NEW_FEATURE handoff**: print and STOP (do not auto-run):
-  ```
-  This is better built as a new feature. Run:
+     /prepare-feature <CR_SLUG>
 
-    /scrum-team "<SUGGESTED_NAME, or a name derived from the change>"
-
-  That will stand up a fresh feature with its own docs at
-  docs/features/<suggested-slug>/, leaving <AREA_SLUG> untouched.
-  ```
-- If option 2 → continue to Phase 5 (proceed as a change).
+   and describe the change there — it will produce the OpenSpec change with
+   mockups and human approval gates. <AREA_SLUG>'s current specs stay untouched
+   until that change ships.
+   ```
+2. "Capture it here anyway as a targeted change" → continue to Phase 5.
 
 ---
 
-### Phase 5 — Update Product Docs In Place
+### Phase 5 — Write the OpenSpec Change
 
-Spawn `product-owner` agent with `mode: "bypassPermissions"` in CHANGE-UPDATE MODE:
+Spawn `product-owner` agent with `mode: "bypassPermissions"` in CHANGE-PROPOSAL MODE:
 
 ```
 Spawn Task:
@@ -219,87 +229,86 @@ Spawn Task:
   prompt        = """
     Read ~/.claude/agents/product-owner.md and execute it.
 
-    You are operating in CHANGE-UPDATE MODE for an existing feature area.
-    You UPDATE the existing docs in place. Do NOT create a new folder and do
-    NOT write a separate delta brief.
+    You are operating in CHANGE-PROPOSAL MODE for a change request against an
+    existing area. Create a NEW OpenSpec change — do NOT edit the living specs
+    in openspec/specs/ and do NOT edit any archived change.
 
-    AREA SLUG: <AREA_SLUG>
+    CHANGE NAME: <CR_SLUG>
+    AREA: <AREA_SLUG>
+    AFFECTED DOMAINS: <AFFECTED_DOMAINS>
     CHANGE DESCRIPTION: <USER_CHANGE_DESCRIPTION>
 
-    STEP 1 — Read the existing documents:
-      - docs/features/<AREA_SLUG>/FEATURE-BRIEF.md
-      - docs/features/<AREA_SLUG>/ARCHITECTURE.md  (if it exists)
-      - docs/features/<AREA_SLUG>/UX-DESIGN.md     (if it exists)
-      - docs/features/<AREA_SLUG>/CHANGELOG.md      (if it exists)
+    STEP 1 — Read the living specs for the affected domains and the area context
+    (archived change / legacy docs).
 
     STEP 2 — Ask ONLY incremental clarifying questions about the change
-    (2-4 max). Do NOT re-gather requirements already covered by the existing
-    FEATURE-BRIEF.md.
+    (2-4 max, via AskUserQuestion). Do NOT re-gather requirements already
+    covered by the living specs.
 
-    STEP 3 — EDIT docs/features/<AREA_SLUG>/FEATURE-BRIEF.md IN PLACE.
-      Use the Edit tool for targeted changes — do NOT rewrite the whole file.
-      Fold the change into the existing sections:
-        - Problem Statement: extend only if the change alters the problem
-        - User Stories: add new stories, modify affected ones, keep the rest
-        - Acceptance Criteria: add/modify only the criteria this change touches
-        - Edge Cases: add any new edge cases the change introduces
-      Everything not touched by the change must remain intact.
+    STEP 3 — Write openspec/changes/<CR_SLUG>/:
+      - proposal.md per the conventions doc. In `## Why`, name the area and what
+        prompted the change. In `## Impact`, list the affected domains and note
+        this modifies existing behavior.
+      - specs/<domain>/spec.md delta files:
+        * `## MODIFIED Requirements` for requirements that change — the name must
+          EXACTLY match the living spec, restate the full requirement + ALL its
+          scenarios (with your edits applied)
+        * `## ADDED Requirements` for new behavior
+        * `## REMOVED Requirements` (with **Reason**:) for retired behavior
+      - Do NOT write design.md or tasks.md (architect/scrum-master own those).
 
-    STEP 4 — APPEND a dated entry to docs/features/<AREA_SLUG>/CHANGELOG.md
-    (create the file with a `# Changelog` heading if it does not exist).
-    Prepend the new entry directly under the heading, format:
-
-      ## <YYYY-MM-DD> — <short change title>
-      **Change:** <USER_CHANGE_DESCRIPTION>
-      **What changed:** <bulleted summary of the brief/story/criteria edits>
-      **Impact on existing functionality:** <regressions / migration / UX notes>
-
-    Use the current date. If you cannot determine it, run `date +%F` via Bash.
+    STEP 4 — Validate: `<openspec-cli> validate <CR_SLUG> --strict` must pass.
+    Fix and re-run until it does (max 3 attempts, then report the output).
   """
 ```
 
 Wait for the task to complete.
 
 **Validate:**
-- `docs/features/<AREA_SLUG>/FEATURE-BRIEF.md` — still contains a Problem Statement and at least one User Story.
-- `docs/features/<AREA_SLUG>/CHANGELOG.md` — exists and contains a new dated entry referencing this change.
+- `<openspec-cli> validate <CR_SLUG> --strict` exits 0.
+- `openspec/changes/<CR_SLUG>/proposal.md` has a non-empty `## Why`.
+- At least one delta spec exists under `openspec/changes/<CR_SLUG>/specs/`, and for a
+  TARGETED change at least one `## MODIFIED Requirements` or `## REMOVED Requirements`
+  section references the existing behavior (a change request that only ADDs and touches
+  nothing existing is suspicious — warn if so).
 
 If validation fails: re-spawn `product-owner` with `bypassPermissions`, appending:
-"The in-place FEATURE-BRIEF.md edit or the CHANGELOG.md entry is missing or incomplete. Apply the edits and append the changelog entry as specified."
+"The OpenSpec change <CR_SLUG> is missing sections or fails validation: <validator output>. Fix it and re-validate."
 Wait and re-validate. Retry up to 2 times total.
 
 ---
 
 ### Phase 6 — Present and Confirm
 
-Print a short summary of what changed in `FEATURE-BRIEF.md` and print the new `CHANGELOG.md` entry in full.
+Print the proposal.md `## Why` and `## What Changes` sections, plus a per-domain summary
+of the deltas (counts of MODIFIED / ADDED / REMOVED requirements with their names).
 
 Then use `AskUserQuestion`:
-"The feature docs for `<AREA_SLUG>` have been updated in place (summary above). How would you like to proceed?"
+"The change is captured at `openspec/changes/<CR_SLUG>/` (validated). How would you like to proceed?"
 Options:
 1. "Launch scrum-team — implement the change now"
-2. "Save for later — I'll run `/change-request <AREA_SLUG>` again or `/scrum-team <AREA_SLUG>` manually"
+2. "Save for later — I'll run `/scrum-team <CR_SLUG>` when ready"
 3. "Something is wrong — revise"
 
 **If "Save for later":**
 Print:
 ```
-Change saved. Updated in place:
-  docs/features/<AREA_SLUG>/FEATURE-BRIEF.md
-  docs/features/<AREA_SLUG>/CHANGELOG.md  (new entry)
+Change captured and validated:
+  openspec/changes/<CR_SLUG>/proposal.md
+  openspec/changes/<CR_SLUG>/specs/<domain>/spec.md
 
 When ready to implement, run:
-  /scrum-team <AREA_SLUG>
+  /scrum-team <CR_SLUG>
 
-The scrum-team will read the updated docs and modify the existing
-code and tests for this feature.
+The scrum-team will read the change and modify the existing code and tests
+in place. After the PR merges, /ship archives the change into the living specs.
 ```
 Then STOP.
 
 **If "Revise":**
 Use `AskUserQuestion` to ask: "What should be revised?"
 Re-spawn `product-owner` with `bypassPermissions`, appending the revision feedback:
-"The user reviewed the updated docs and requested revisions: <revision feedback>. Update FEATURE-BRIEF.md in place and adjust the latest CHANGELOG.md entry accordingly."
+"The user reviewed the change and requested revisions: <revision feedback>. Update openspec/changes/<CR_SLUG>/ accordingly and re-validate with `<openspec-cli> validate <CR_SLUG> --strict`."
 Wait for completion. Then loop back to Phase 6.
 
 **If "Launch":**
@@ -307,9 +316,10 @@ Proceed to Phase 7.
 
 ---
 
-### Phase 7 — Scrum-Team Launch (In Place)
+### Phase 7 — Scrum-Team Launch
 
-Spawn a `general-purpose` agent with `mode: "bypassPermissions"` to run the scrum-team workflow against the **existing** feature folder:
+Spawn a `general-purpose` agent with `mode: "bypassPermissions"` to run the scrum-team
+workflow on the change:
 
 ```
 Spawn Task:
@@ -318,50 +328,46 @@ Spawn Task:
   prompt        = """
     Read ~/.claude/commands/scrum-team.md and execute it fully.
 
-    $ARGUMENTS = <AREA_SLUG>
+    $ARGUMENTS = <CR_SLUG>
 
-    This is a CHANGE to an existing feature. The docs already live at
-    docs/features/<AREA_SLUG>/ and the FEATURE-BRIEF.md has ALREADY been
-    updated to describe the change. Update everything IN PLACE — do not
-    create any new feature folder.
-
-    BRANCH OVERRIDE:
-      - Use branch feature/<AREA_SLUG>-<CHANGE_SLUG> instead of
-        feature/<AREA_SLUG>, so this change gets its own scoped PR.
+    This is a CHANGE REQUEST against existing area '<AREA_SLUG>'. The OpenSpec
+    change already exists at openspec/changes/<CR_SLUG>/ and is PRE-APPROVED.
 
     PHASE 1 OVERRIDE (product-owner):
-      - docs/features/<AREA_SLUG>/FEATURE-BRIEF.md is ALREADY UPDATED and
-        PRE-APPROVED. Do NOT regenerate, re-ask, or overwrite it.
-      - Also read docs/features/<AREA_SLUG>/CHANGELOG.md (latest entry) to
-        understand exactly what is changing.
+      - openspec/changes/<CR_SLUG>/ (proposal.md + delta specs) is ALREADY
+        WRITTEN and validated. Do NOT regenerate, re-ask, or overwrite it.
+        Treat the Phase 1 validate gate as the only Phase 1 step.
 
-    PHASE 2 OVERRIDE (architect):
-      - EDIT docs/features/<AREA_SLUG>/ARCHITECTURE.md IN PLACE to reflect the
-        change (targeted edits with the Edit tool — not a delta file, not a
-        full rewrite). Leave unaffected sections intact.
-
-    PHASE 2 OVERRIDE (ux-designer):
-      - EDIT docs/features/<AREA_SLUG>/UX-DESIGN.md IN PLACE for the flows and
-        states that change or are new. Leave unaffected flows intact.
-      - Skip mockup regeneration unless the change adds or removes screens.
+    PHASE 2 OVERRIDE (architect + ux-designer):
+      - The change modifies existing behavior. architect writes
+        openspec/changes/<CR_SLUG>/design.md focused on the delta — which
+        existing files change (File Inventory: mostly Modified Files).
+      - ux-designer: if docs/features/<AREA_SLUG>/UX-DESIGN.md exists, EDIT it
+        in place for the affected flows and save the updated copy as the change's
+        UX reference; skip mockup regeneration unless the change adds or removes
+        screens.
 
     PHASE 4 OVERRIDE (developers + QA):
       - Modify the existing feature's CODE and TESTS in place to implement the
-        change. Do NOT scaffold a parallel implementation.
-      - Update this feature's existing test cases to match the new behavior.
+        deltas. Do NOT scaffold a parallel implementation.
+      - Update the area's existing test cases to match MODIFIED requirements;
+        add test cases for ADDED requirements; remove/retire tests only for
+        REMOVED requirements.
 
-    PHASES 3, 5-6: Run normally per the scrum-team workflow.
+    PHASES 3, 5-6: Run normally per the scrum-team workflow (scrum-master writes
+    tasks.md; tech-lead creates the PR; NO archiving — /ship archives post-merge).
   """
 ```
 
 After spawning, report to the user:
 ```
-Scrum-team launched for change to '<AREA_SLUG>'.
+Scrum-team launched for change '<CR_SLUG>' (area: <AREA_SLUG>).
 
-Docs, code, and tests for this feature are being updated IN PLACE.
-Changelog entry: docs/features/<AREA_SLUG>/CHANGELOG.md
+Requirements deltas: openspec/changes/<CR_SLUG>/specs/
+Code and tests are modified IN PLACE on branch: feature/<CR_SLUG>
 
-Feature branch: feature/<AREA_SLUG>-<CHANGE_SLUG>
+After the PR merges, run /ship to archive the change — that folds the deltas
+into openspec/specs/ and moves the change to the archive audit trail.
 ```
 
 ---

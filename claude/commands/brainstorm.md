@@ -109,10 +109,19 @@ AskUserQuestion:
    How would you like to proceed?"
   Options:
     - "Approve — the FRD is ready"
+    - "Approve + prepare — create an OpenSpec change from this FRD via /prepare-feature"
     - "Edit assumptions" — I'll edit the FRD, then we're done
     - "Re-run the quality loop"
 ```
-- **Approve:** print the FRD path and a one-line summary of the score lift. Done.
+- **Approve:** print the FRD path and a one-line summary of the score lift. Suggest the
+  next step: `/prepare-feature <feature-name>` (its product-owner will seed the OpenSpec
+  change from the FRD). Done.
+- **Approve + prepare:** run `/prepare-feature <feature-name>` (read
+  `~/.claude/commands/prepare-feature.md` and execute it), appending to the
+  product-owner's Phase D1 prompt:
+  `FRD_PATH=docs/brainstorm/<feature-name>/FRD.md — a validated FRD exists; seed the proposal and delta specs from it and only ask questions the FRD leaves open.`
+  Requires `.claude/scrum-team-config.md` and `openspec/` — if either is missing, print
+  what to set up first (`dodocs-workflow init`) and stop gracefully.
 - **Edit assumptions:** print the FRD path, wait for "continue", then finish.
 - **Re-run the quality loop:** restart Step 2 from the score round (resets the iteration counter).
 

@@ -2,6 +2,22 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [v2.0.1] - 2026-09-09
+
+chore: MIT LICENSE + scrum team pipeline diagram
+
+The repository now carries the MIT license text it has always declared in the
+README, so the terms are actually granted and GitHub can detect the license.
+
+- LICENSE: standard MIT text, Copyright (c) 2026 DoDocs-AI
+- README: License section links the file
+- docs/scrum-team-pipeline.html: a single-page scheme of the /scrum-team
+  workflow — artifact-chain flow diagram, the six phase bands with their
+  agents and gates, the Phase 4 story loop, size matrix, the ten Definition
+  of Done checks, and retest mode
+
+No agent, command, or install behavior changes.
+
 ## [v2.0.0] - 2026-07-27
 
 feat!: spec-driven requirements — the pipeline is now built on OpenSpec (BREAKING)

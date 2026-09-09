@@ -15,6 +15,7 @@ That single command launches the full team. You answer a few product questions, 
 ## Table of Contents
 
 - [How It Works](#how-it-works)
+- [Documentation](#documentation)
 - [Installation](#installation)
 - [OpenCode Installation](#opencode-installation)
 - [Automatic Update Notifications](#automatic-update-notifications)
@@ -81,6 +82,19 @@ The key insight is **feature-level testing** in Phase 5: manual testing starts a
 
 ---
 
+## Documentation
+
+| Guide | For |
+|-------|-----|
+| [Ship your first feature](docs/tutorial-first-feature.md) | Install, configure, and run the pipeline once, start to finish |
+| [How to do the common jobs](docs/howto-common-tasks.md) | Recipes: build, prepare and batch, change, fix, retest, merge, audit, adopt |
+| [Command reference](docs/reference-commands.md) | All 27 commands with arguments, outputs and prerequisites |
+| [Why the pipeline is shaped this way](docs/explanation-pipeline-design.md) | The gates, the ownership rules, and what each costs |
+| [The scrum team pipeline, drawn](docs/scrum-team-pipeline.html) | Artifact chain, phases, agents and gates as one diagram |
+| [Feature catalog](docs/FEATURES.md) | Every workflow and the full agent roster |
+
+---
+
 ## Installation
 
 ### Prerequisites
@@ -102,7 +116,7 @@ bash install.sh
 Installs the latest stable release (not HEAD):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v2.0.1/install.sh | bash
 ```
 
 ### What Gets Installed
@@ -111,8 +125,8 @@ The installer copies files to `~/.claude/` (Claude Code's global config director
 
 | Destination | Files | Description |
 |-------------|-------|-------------|
-| `~/.claude/agents/` | 21 `.md` files | Agent role definitions (11 scrum + 10 production audit) |
-| `~/.claude/commands/` | `scrum-team.md`, `prepare-for-production.md`, `container-team.md`, `dodocs-workflow.md`, `dw-upgrade.md`, `merge-features.md` | Slash commands |
+| `~/.claude/agents/` | 89 `.md` files | Agent role definitions (13 scrum, 10 production audit, 34 PLC, 16 GTM, plus specialists) |
+| `~/.claude/commands/` | 27 `.md` files | Slash commands — see the [command reference](docs/reference-commands.md) |
 | `~/.claude/docker/` | `agent-env.Dockerfile`, `agent-entrypoint.sh` | Container team Docker runtime files |
 | `~/.claude/` | `scrum-team-config.template.md` | Config template for new projects |
 | `~/.claude/` | `.dodocs-workflow-version` | Installed version tracker |
@@ -136,7 +150,7 @@ bash install-opencode.sh
 Installs the latest stable release (not HEAD):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v1.2.0/install-opencode.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DoDocs-AI/dodocs-workflow/refs/tags/v2.0.1/install-opencode.sh | bash
 ```
 
 ### What Gets Installed
@@ -145,8 +159,8 @@ The OpenCode installer copies files to `~/.opencode/` (OpenCode's global config 
 
 | Destination | Files | Description |
 |-------------|-------|-------------|
-| `~/.opencode/agents/` | 21 `.md` files | Agent role definitions (11 scrum + 10 production audit) |
-| `~/.opencode/commands/` | `scrum-team.md`, `prepare-for-production.md` | Slash commands |
+| `~/.opencode/agents/` | 25 `.md` files | Agent role definitions (scrum + production audit) |
+| `~/.opencode/commands/` | `scrum-team.md`, `prepare-for-production.md`, `change-request.md`, `dodocs-workflow.md`, `dw-upgrade.md` | Slash commands |
 | `~/.opencode/` | `scrum-team-config.template.md` | Config template for new projects |
 | `~/.opencode/` | `.dodocs-workflow-version` | Installed version tracker |
 
@@ -415,10 +429,11 @@ Examples:
 
 You'll be asked to:
 1. Answer product questions from the Product Owner
-2. Approve UX flows (Phase 2 checkpoint)
-3. Approve the architecture plan (Phase 3 checkpoint)
+2. Approve UX flows, architecture and mockups together at the single Phase 2 checkpoint
 
 After that, the team works autonomously through build, review, test, and PR creation.
+Add `--auto` to skip the checkpoint entirely, or `--size small|medium|large` to fix
+the team size instead of letting it be guessed from the feature name.
 
 ### Retest an Existing Feature
 
@@ -626,110 +641,133 @@ again if needed.
 
 ## Workflow Phases
 
-### Phase 1: Requirements + Early UX Research
+Six phases, each closed by a gate. A failed gate re-spawns the agent that wrote the
+artifact rather than stopping the run. Timeouts are advisory: under `--auto` they log
+a warning and continue.
+
+### Phase 1: Requirements + Early UX Research (15 min)
 
 **Agents**: product-owner, ux-designer (parallel)
 
-The product owner talks to you about the feature — what problem it solves, who uses it, acceptance criteria, edge cases. Meanwhile, the UX designer starts reading your existing pages and components to understand current UI patterns.
+The product owner talks to you about the feature — the problem, the users, acceptance
+criteria, edge cases — and writes the requirement as an OpenSpec change. Meanwhile the
+UX designer reads your existing pages and components to learn the current patterns.
 
-**Output**: `docs/features/<feature>/FEATURE-BRIEF.md`
+**Output**: `openspec/changes/<slug>/proposal.md` + delta specs under `specs/`
 
-### Phase 2: UX Design + User Validation
+**Gate**: `openspec validate <slug> --strict` exits 0 and `## Why` is non-empty.
 
-**Agents**: ux-designer
+### Phase 2: UX Design + Architecture (20 min)
 
-The UX designer combines their pattern research with the Feature Brief to produce complete user flows — entry points, happy paths, error paths, state transitions.
+**Agents**: ux-designer, architect (parallel), then mockup-designer, mockup-validator
 
-**Human checkpoint**: You review and approve the UX flows before architecture begins.
+Both work from the validated change at the same time; the architect does not wait for
+UX. Afterwards the mockup pipeline builds real screens from your own components and
+checks them against the requirement.
 
-**Output**: `docs/features/<feature>/UX-DESIGN.md`
+**Skipped entirely when `--size small`.**
 
-### Phase 3: Architecture
+**Human checkpoint**: UX flows, architecture and interactive mockups are presented
+together, with the mockup preview running on port 3100. This is the only place the
+workflow waits for you. `--auto` skips it.
 
-**Agents**: architect (plan approval mode)
+**Output**: `openspec/changes/<slug>/design.md`, `docs/features/<slug>/UX-DESIGN.md`,
+`docs/features/<slug>/mockups/`, `MOCKUP-VALIDATION.md`
 
-The architect reads the Brief and UX Design, studies your existing codebase patterns, and designs the technical solution — endpoints, entities, services, DTOs, components, routes, API contracts.
+### Phase 3: Task Breakdown (10 min)
 
-**Human checkpoint**: You approve the architecture plan.
+**Agents**: scrum-master
 
-**Output**: `docs/features/<feature>/ARCHITECTURE.md`
+Reads `design.md` and the delta specs, writes the canonical checklist, then creates
+the live tasks from it under three rules: only `backend-dev-1` writes migrations, no
+two developers edit the same file, and dependencies are declared with `blockedBy`.
 
-### Phase 4: Task Breakdown + Git Setup
+**Output**: `openspec/changes/<slug>/tasks.md`
 
-**Agents**: scrum-master, tech-lead
+**Gate**: at least 2 developer tasks, every subject carrying a user story prefix.
 
-The tech-lead creates a feature branch. The scrum-master reads the Architecture doc and creates all tasks with proper assignment, dependencies, and migration ownership rules.
+### Phase 4: Build + Test (120 min)
 
-### Phase 5: Build + Test
+**Agents**: up to 8 in parallel — frontend-dev x2, backend-dev x2, qa-engineer,
+code-reviewer, tech-lead, manual-tester, qa-automation
 
-**Agents**: ALL 13 agents in parallel
+Developers commit per task and tick the matching box in `tasks.md`. The reviewer reads
+each task individually. The tech-lead runs the compile gate and starts the app. Testing
+runs per story rather than at the end: the manual tester starts US01 as soon as US01's
+tasks are reviewed and its test cases exist, while US02 is still being written.
 
-This is where the magic happens. All agents work simultaneously, updating `PROGRESS.md` as they go:
-
-- **Developers** implement their assigned tasks and make atomic commits
-- **Code reviewer** watches for completed tasks and reviews each one
-- **QA engineer** writes test cases organized by user story
-- **Tech lead** runs compile gate, starts the app, monitors for issues
-- **Manual tester** waits for all dev tasks to be code-reviewed and test cases to be ready, then tests the full feature story by story
-- **QA automation** writes E2E tests per user story after manual-tester passes all scenarios for that story
-
-The flow:
 ```
-Developers complete tasks -> atomic commits
+developer finishes a task -> atomic commit
        |
        v
-Code-reviewer reviews each task individually
+code-reviewer reviews that task alone
+       |
+       v  (per story — no waiting on other stories)
+all US01 tasks reviewed + US01 test cases ready
        |
        v
-QA-engineer writes test cases organized by user story (parallel with devs)
+manual-tester tests US01 now
        |
-       v
-ALL tasks reviewed + test cases ready
-       |
-       v
-Manual-tester tests the full feature story by story
-       |
-       +-- pass -> qa-automation writes E2E for that user story
-       +-- fail -> bug task -> developer fixes -> code-reviewer reviews -> manual-tester retests
+       +-- pass -> qa-automation writes the E2E spec for US01
+       +-- fail -> bug -> developer fixes -> review -> retest
+                   (same case fails twice -> escalate to tech-lead)
 ```
 
-### Phase 6: Integration Verification
+**Gate**: backend compiles, frontend compiles, lint clean, app reachable.
 
-**Agents**: tech-lead, qa-automation, manual-tester, code-reviewer
+### Phase 5: Integration Verification (30 min)
 
-After all user stories pass testing:
-- Tech lead does a full app restart and regression check
-- QA automation runs the complete E2E test suite
-- Manual tester does a final smoke test of the end-to-end flow
-- Code reviewer does a full-diff review of all changes
+**Agents**: tech-lead, qa-automation, manual-tester, code-reviewer,
+quality-metrics-collector, and security-auditor when the diff warrants it
 
-### Phase 7: Ship
+Full restart and regression sweep, the complete E2E suite, an end-to-end smoke test,
+a review of the entire branch diff, and quantitative quality metrics. The security
+auditor is spawned only when the diff touches auth, sessions, tokens, CORS, roles,
+migrations, routes, middleware or secrets.
+
+**Gate**: any Critical security finding stops the run. Every gate in `PROGRESS.md`
+must read PASS.
+
+### Phase 6: Ship (10 min)
 
 **Agents**: tech-lead
 
-The tech lead creates a PR from the feature branch to main with a comprehensive description of all changes.
+Verifies every box in `tasks.md` is ticked, walks the ten Definition of Done checks,
+and opens the PR with a rollback plan in the description.
+
+`openspec archive` deliberately does **not** run here. Archiving folds the deltas into
+the living specs, which happens post-merge on main via `/ship`.
 
 ---
 
 ## Team Roles
 
-The scrum team uses 11 agent definitions that are instantiated into 13 running agents (frontend-dev and backend-dev are each used twice). An additional 10 agents are used by `/prepare-for-production`.
+The scrum team is 13 running agents at `--size large` (frontend-dev and backend-dev are
+each instantiated twice), 11 at medium, 9 at small. Phase 2 adds the two mockup agents,
+Phase 5 adds quality metrics and conditional security review. A further 10 agents belong
+to `/prepare-for-production`.
 
 | Agent | Model | Phase | Role |
 |-------|-------|-------|------|
-| [product-owner](claude/docs/agents/product-owner.md) | opus | 1 | Gathers requirements, produces Feature Brief |
-| [ux-designer](claude/docs/agents/ux-designer.md) | opus | 1-2 | Researches UI patterns, designs user flows |
-| [architect](claude/docs/agents/architect.md) | opus | 3 | Designs technical solution, produces Architecture doc |
-| [scrum-master](claude/docs/agents/scrum-master.md) | opus | 4 | Breaks architecture into tasks, assigns to team |
-| [code-reviewer](claude/docs/agents/code-reviewer.md) | opus | 5-6 | Reviews all code for quality, security, correctness |
-| [tech-lead](claude/docs/agents/tech-lead.md) | sonnet | 4-7 | Git, compile gate, app startup, bug filing, PR creation |
-| [frontend-dev](claude/docs/agents/frontend-dev.md) | sonnet | 5 | Implements frontend tasks (2 instances) |
-| [backend-dev](claude/docs/agents/backend-dev.md) | sonnet | 5 | Implements backend tasks (2 instances) |
-| [qa-engineer](claude/docs/agents/qa-engineer.md) | sonnet | 5 | Writes manual test case documents |
-| [manual-tester](claude/docs/agents/manual-tester.md) | sonnet | 5-6 | Tests features in browser via Playwright |
-| [qa-automation](claude/docs/agents/qa-automation.md) | sonnet | 5-6 | Writes Playwright E2E tests |
+| [product-owner](claude/docs/agents/product-owner.md) | opus | 1 | Gathers requirements, writes the OpenSpec change |
+| [ux-designer](claude/docs/agents/ux-designer.md) | sonnet | 1-2 | Researches UI patterns, designs user flows |
+| [architect](claude/docs/agents/architect.md) | opus | 2 | Designs the technical solution, writes `design.md` |
+| mockup-designer | sonnet | 2 | Builds framework-native screens from your components |
+| mockup-validator | sonnet | 2 | Checks the mockups against the requirement |
+| [scrum-master](claude/docs/agents/scrum-master.md) | sonnet | 3 | Writes `tasks.md`, assigns work, enforces migration ownership |
+| [frontend-dev](claude/docs/agents/frontend-dev.md) | sonnet | 4 | Implements frontend tasks (2 instances) |
+| [backend-dev](claude/docs/agents/backend-dev.md) | sonnet | 4 | Implements backend tasks (2 instances) |
+| [qa-engineer](claude/docs/agents/qa-engineer.md) | sonnet | 4 | Writes manual test cases per user story |
+| [code-reviewer](claude/docs/agents/code-reviewer.md) | sonnet | 4-5 | Reviews each task, then the full branch diff |
+| [tech-lead](claude/docs/agents/tech-lead.md) | sonnet | 4-6 | Compile gate, app startup, bug filing, DoD, PR |
+| [manual-tester](claude/docs/agents/manual-tester.md) | haiku | 4-5 | Tests in a real browser, files bugs with screenshots |
+| [qa-automation](claude/docs/agents/qa-automation.md) | sonnet | 4-5 | Writes Playwright E2E tests per story |
+| quality-metrics-collector | sonnet | 5 | Lines changed, test ratio, AC coverage, complexity |
+| [security-auditor](claude/docs/agents/security-auditor.md) | opus | 5 | Conditional: spawned when the diff touches security surface |
 
-**Model strategy**: Planning and review roles use **opus** (higher reasoning capability). Execution roles use **sonnet** (faster, more cost-effective for code generation).
+**Model strategy**: planning and security review use **opus**, execution and review use
+**sonnet**, and browser testing uses **haiku**. Each agent's model lives in its own
+`.md` frontmatter, which is the authority when this table disagrees.
 
 See the `claude/docs/agents/` directory for detailed documentation of each agent.
 

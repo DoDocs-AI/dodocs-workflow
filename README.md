@@ -1098,4 +1098,4 @@ When modifying agent definitions, keep in mind:
 
 ## License
 
-MIT
+[MIT](LICENSE) &copy; 2026 DoDocs-AI

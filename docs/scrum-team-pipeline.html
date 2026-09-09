@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scrum Team Pipeline</title>
+<meta name="description" content="How /scrum-team runs: six phases, thirteen agents, and the gates between them.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ground:   #EDF1F1;
+  --panel:    #FFFFFF;
+  --panel-2:  #F4F7F7;
+  --hair:     #CBD8DA;
+  --rail:     #1D454F;
+  --text:     #0E252E;
+  --text-dim: #4A6A73;
+  --text-mute:#7B959B;
+  --signal:   #B96E12;
+  --verdigris:#2E7A6D;
+  --violet:   #6355A0;
+  --alert:    #B04A38;
+
+  --display: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --body:    'Public Sans', ui-sans-serif, system-ui, sans-serif;
+  --mono:    'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --pad:  clamp(1.15rem, 4vw, 3.5rem);
+  --maxw: 1180px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0E252E; --panel: #133039; --panel-2: #173B46; --hair: #24505C;
+    --rail: #C8D8DA; --text: #E4EDEE; --text-dim: #8FA9AF; --text-mute: #5F7D85;
+    --signal: #E8992F; --verdigris: #4FA294; --violet: #9084C4; --alert: #DC7A66;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0E252E; --panel: #133039; --panel-2: #173B46; --hair: #24505C;
+  --rail: #C8D8DA; --text: #E4EDEE; --text-dim: #8FA9AF; --text-mute: #5F7D85;
+  --signal: #E8992F; --verdigris: #4FA294; --violet: #9084C4; --alert: #DC7A66;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--pad) 5rem; }
+
+/* ── masthead ─────────────────────────────────────────── */
+.masthead { padding: clamp(2.5rem, 6vw, 4.5rem) 0 2rem; }
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--text-mute); margin: 0 0 1rem;
+}
+h1 {
+  font-family: var(--display); font-weight: 800; font-stretch: 112%;
+  font-size: clamp(2.4rem, 7vw, 4.2rem); line-height: .96; letter-spacing: -.02em;
+  margin: 0 0 1rem; text-wrap: balance;
+}
+.standfirst {
+  max-width: 62ch; font-size: clamp(1rem, 2vw, 1.12rem);
+  color: var(--text-dim); margin: 0 0 2rem;
+}
+.stats { display: flex; flex-wrap: wrap; gap: 0; border-top: 1px solid var(--hair); }
+.stat {
+  flex: 1 1 130px; padding: .85rem 1rem .85rem 0; border-bottom: 1px solid var(--hair);
+}
+.stat__n {
+  font-family: var(--display); font-weight: 700; font-size: 1.7rem; line-height: 1;
+  font-variant-numeric: tabular-nums; display: block;
+}
+.stat__l {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--text-mute); margin-top: .35rem; display: block;
+}
+
+/* ── legend ───────────────────────────────────────────── */
+.legend {
+  display: flex; flex-wrap: wrap; gap: .5rem 1.6rem;
+  padding: 1rem 0 2.5rem; font-family: var(--mono); font-size: 11.5px;
+  color: var(--text-dim);
+}
+.legend span { display: inline-flex; align-items: center; gap: .45rem; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot--opus   { background: var(--signal); }
+.dot--sonnet { background: var(--verdigris); }
+.dot--haiku  { background: var(--violet); }
+
+/* ── section headings ─────────────────────────────────── */
+h2 {
+  font-family: var(--display); font-weight: 700; font-stretch: 108%;
+  font-size: clamp(1.35rem, 3vw, 1.8rem); letter-spacing: -.01em;
+  margin: 3.5rem 0 1.25rem; text-wrap: balance;
+}
+.sub { max-width: 66ch; color: var(--text-dim); margin: -.6rem 0 1.5rem; }
+
+/* ── boot strip ───────────────────────────────────────── */
+.boot {
+  border: 1px solid var(--hair); background: var(--panel);
+  padding: 1.1rem 1.25rem; display: grid; gap: .9rem;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.boot__step { display: grid; gap: .3rem; }
+.boot__k {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--signal);
+}
+.boot__v { font-size: 13.5px; color: var(--text-dim); }
+.boot__v code { font-family: var(--mono); font-size: 12px; color: var(--text); }
+
+/* ── phase bands ──────────────────────────────────────── */
+.band {
+  display: grid; grid-template-columns: 250px 1fr; gap: 0 2.5rem;
+  border-top: 1px solid var(--hair); padding: 1.75rem 0 1.75rem;
+}
+.band:last-of-type { border-bottom: 1px solid var(--hair); }
+.band__rail { position: relative; }
+.band__num {
+  font-family: var(--display); font-weight: 800; font-stretch: 118%;
+  font-size: 2.6rem; line-height: 1; color: var(--rail); opacity: .32;
+  font-variant-numeric: tabular-nums;
+}
+.band__name {
+  font-family: var(--display); font-weight: 700; font-size: 1.15rem;
+  line-height: 1.15; margin: .35rem 0 .5rem; text-wrap: balance;
+}
+.band__meta {
+  font-family: var(--mono); font-size: 11px; color: var(--text-mute);
+  letter-spacing: .06em; display: grid; gap: .25rem;
+}
+.band__note { font-size: 13px; color: var(--text-dim); margin-top: .75rem; max-width: 34ch; }
+
+.lane { display: grid; gap: .6rem; }
+.lane + .lane { margin-top: .85rem; }
+.lane__tag {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--text-mute);
+}
+.row {
+  display: grid; gap: .6rem;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+}
+
+/* ── agent card ───────────────────────────────────────── */
+.agent {
+  border: 1px solid var(--hair); background: var(--panel);
+  padding: .7rem .8rem .75rem; border-radius: 3px; display: grid; gap: .35rem;
+  align-content: start;
+}
+.agent__head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.agent__name {
+  font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: -.01em;
+}
+.agent__model {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: .3rem; flex: none;
+}
+.m-opus   { color: var(--signal); }
+.m-sonnet { color: var(--verdigris); }
+.m-haiku  { color: var(--violet); }
+.agent__role { font-size: 12.5px; color: var(--text-dim); line-height: 1.4; }
+.agent__io {
+  font-family: var(--mono); font-size: 11px; color: var(--text-mute);
+  border-top: 1px dashed var(--hair); padding-top: .4rem; margin-top: .1rem;
+  overflow-wrap: anywhere;
+}
+.agent__io b { color: var(--text); font-weight: 500; }
+.agent--ghost { background: var(--panel-2); border-style: dashed; }
+
+/* ── gate bar ─────────────────────────────────────────── */
+.gate {
+  margin-top: .85rem; padding: .55rem .8rem; border: 1px solid var(--signal);
+  background: color-mix(in srgb, var(--signal) 9%, transparent);
+  font-family: var(--mono); font-size: 11.5px; color: var(--text);
+  display: flex; gap: .55rem; align-items: baseline; border-radius: 3px;
+}
+.gate b { color: var(--signal); font-weight: 600; letter-spacing: .1em; text-transform: uppercase; font-size: 10px; flex: none; }
+.gate--human { border-color: var(--rail); background: color-mix(in srgb, var(--rail) 8%, transparent); }
+.gate--human b { color: var(--rail); }
+.gate--stop { border-color: var(--alert); background: color-mix(in srgb, var(--alert) 10%, transparent); }
+.gate--stop b { color: var(--alert); }
+
+/* ── loop diagram ─────────────────────────────────────── */
+.loop {
+  font-family: var(--mono); font-size: 12px; line-height: 1.75;
+  border: 1px solid var(--hair); background: var(--panel);
+  padding: 1.1rem 1.25rem; overflow-x: auto; white-space: pre; color: var(--text-dim);
+  border-radius: 3px;
+}
+.loop b { color: var(--text); font-weight: 600; }
+.loop i { color: var(--signal); font-style: normal; }
+.loop u { color: var(--alert); text-decoration: none; }
+
+/* ── tables ───────────────────────────────────────────── */
+.tablewrap { overflow-x: auto; border: 1px solid var(--hair); border-radius: 3px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 480px; }
+th, td { text-align: left; padding: .5rem .8rem; border-bottom: 1px solid var(--hair); }
+thead th {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text-mute); font-weight: 500; background: var(--panel-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: center; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.agentcell { font-family: var(--mono); font-size: 12.5px; }
+.yes { color: var(--verdigris); font-weight: 600; }
+.no  { color: var(--text-mute); }
+
+/* ── dod grid ─────────────────────────────────────────── */
+.dod { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.dod__item {
+  display: grid; grid-template-columns: 1.6rem 1fr; gap: .5rem; align-items: baseline;
+  border-bottom: 1px solid var(--hair); padding: .5rem .2rem;
+}
+.dod__n {
+  font-family: var(--mono); font-size: 11px; color: var(--signal);
+  font-variant-numeric: tabular-nums;
+}
+.dod__t { font-size: 13px; color: var(--text-dim); }
+.dod__t b { color: var(--text); font-weight: 600; }
+
+/* ── retest ───────────────────────────────────────────── */
+.retest {
+  border: 1px solid var(--hair); border-left: 3px solid var(--violet);
+  background: var(--panel); padding: 1.1rem 1.25rem; border-radius: 3px;
+}
+.retest h3 {
+  font-family: var(--display); font-size: 1.05rem; margin: 0 0 .4rem; font-weight: 700;
+}
+.retest p { margin: 0 0 .9rem; color: var(--text-dim); font-size: 13.5px; max-width: 64ch; }
+.pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pill {
+  font-family: var(--mono); font-size: 11.5px; padding: .25rem .55rem;
+  border: 1px solid var(--hair); border-radius: 2px; background: var(--panel-2);
+}
+
+/* ── footer ───────────────────────────────────────────── */
+.colophon {
+  margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--hair);
+  font-size: 12.5px; color: var(--text-mute); max-width: 70ch;
+}
+.colophon code { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+
+/* ── flow diagram ─────────────────────────────────────── */
+.figscroll { overflow-x: auto; border: 1px solid var(--hair); background: var(--panel); border-radius: 3px; }
+figure.dgfig { margin: 0; }
+.dg { display: block; width: 100%; min-width: 1010px; height: auto; padding: 1.25rem 1rem .5rem; }
+.dg-node { fill: var(--panel-2); stroke: var(--hair); stroke-width: 1; }
+.dg-node--out { fill: color-mix(in srgb, var(--verdigris) 12%, var(--panel-2)); stroke: var(--verdigris); }
+.dg-title { fill: var(--text); font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.dg-sub { fill: var(--text-mute); font-family: var(--mono); font-size: 9.5px; }
+.dg-edge { stroke: var(--text-dim); stroke-width: 1.2; fill: none; }
+.dg-who { fill: var(--text-dim); font-family: var(--mono); font-size: 9.5px; }
+.dg-arrow { fill: var(--text-dim); }
+.dg-gate { fill: var(--signal); }
+.dg-gatetext { fill: var(--signal); font-family: var(--mono); font-size: 9.5px; }
+.dg-loop { stroke: var(--alert); stroke-width: 1.1; fill: none; stroke-dasharray: 4 3; }
+.dg-looptext { fill: var(--alert); font-family: var(--mono); font-size: 9.5px; }
+.dg-arrow-loop { fill: var(--alert); }
+figcaption.dgcap {
+  font-size: 12.5px; color: var(--text-dim); padding: .1rem 1.25rem 1rem;
+  max-width: 78ch;
+}
+
+@media (max-width: 860px) {
+  .band { grid-template-columns: 1fr; gap: 1rem; }
+  .band__rail { display: grid; grid-template-columns: auto 1fr; gap: 0 1rem; align-items: baseline; }
+  .band__num { grid-row: span 3; font-size: 2rem; }
+  .band__note { max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">dodocs-workflow v2.0.0 · /scrum-team</p>
+  <h1>Scrum Team Pipeline</h1>
+  <p class="standfirst">
+    One human sentence goes in. A reviewed, tested pull request comes out. Between them sit six
+    phases, thirteen agents and eleven gates — the lead only coordinates and never writes code.
+  </p>
+  <div class="stats">
+    <div class="stat"><span class="stat__n">6</span><span class="stat__l">phases</span></div>
+    <div class="stat"><span class="stat__n">13</span><span class="stat__l">agents at full size</span></div>
+    <div class="stat"><span class="stat__n">11</span><span class="stat__l">phase gates</span></div>
+    <div class="stat"><span class="stat__n">205m</span><span class="stat__l">timeout budget</span></div>
+    <div class="stat"><span class="stat__n">1</span><span class="stat__l">human checkpoint</span></div>
+  </div>
+</header>
+
+<div class="legend">
+  <span><i class="dot dot--opus"></i> opus</span>
+  <span><i class="dot dot--sonnet"></i> sonnet</span>
+  <span><i class="dot dot--haiku"></i> haiku</span>
+  <span>∥ runs in parallel</span>
+  <span>↓ waits for the step above</span>
+  <span>↻ re-spawns until it passes</span>
+  <span>◂ in ▸ out</span>
+</div>
+
+<h2>The artifact chain</h2>
+<p class="sub">
+  The phases below run agents; this is what actually moves between them. Every box is a file on
+  disk, every arrow is the agent that writes it, and every orange bar is a gate that has to pass
+  before the next box exists.
+</p>
+<div class="figscroll">
+<figure class="dgfig">
+<svg class="dg" viewBox="0 84 1180 352" role="img"
+     aria-label="Flow from a human ask through the OpenSpec change, design.md and UX-DESIGN.md in parallel, tasks.md, commits, and finally a pull request, with orange gates between each step and a bug retest loop under the commits stage.">
+  <defs>
+    <marker id="dgar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9 z" class="dg-arrow"/>
+    </marker>
+    <marker id="dgarL" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9 z" class="dg-arrow-loop"/>
+    </marker>
+  </defs>
+
+  <!-- nodes -->
+  <rect class="dg-node" x="100" y="232" width="138" height="56" rx="3"/>
+  <text class="dg-title" x="169" y="256" text-anchor="middle">openspec change</text>
+  <text class="dg-sub"   x="169" y="273" text-anchor="middle">proposal + delta specs</text>
+
+  <rect class="dg-node" x="346" y="92" width="126" height="56" rx="3"/>
+  <text class="dg-title" x="409" y="116" text-anchor="middle">design.md</text>
+  <text class="dg-sub"   x="409" y="133" text-anchor="middle">+ file inventory</text>
+
+  <rect class="dg-node" x="346" y="372" width="126" height="56" rx="3"/>
+  <text class="dg-title" x="409" y="396" text-anchor="middle">UX-DESIGN.md</text>
+  <text class="dg-sub"   x="409" y="413" text-anchor="middle">+ mockups/*.tsx</text>
+
+  <rect class="dg-node" x="580" y="232" width="118" height="56" rx="3"/>
+  <text class="dg-title" x="639" y="256" text-anchor="middle">tasks.md</text>
+  <text class="dg-sub"   x="639" y="273" text-anchor="middle">+ live tasks</text>
+
+  <rect class="dg-node" x="806" y="232" width="118" height="56" rx="3"/>
+  <text class="dg-title" x="865" y="256" text-anchor="middle">commits</text>
+  <text class="dg-sub"   x="865" y="273" text-anchor="middle">feature/&lt;slug&gt;</text>
+
+  <rect class="dg-node dg-node--out" x="1032" y="232" width="116" height="56" rx="3"/>
+  <text class="dg-title" x="1090" y="256" text-anchor="middle">pull request</text>
+  <text class="dg-sub"   x="1090" y="273" text-anchor="middle">&#8594; main</text>
+
+  <rect class="dg-node" x="806" y="368" width="118" height="56" rx="3"/>
+  <text class="dg-title" x="865" y="392" text-anchor="middle">manual-tester</text>
+  <text class="dg-sub"   x="865" y="409" text-anchor="middle">+ code-reviewer</text>
+
+  <!-- ask into the change -->
+  <line class="dg-edge" x1="4" y1="260" x2="94" y2="260" marker-end="url(#dgar)"/>
+  <text class="dg-who" x="50" y="246" text-anchor="middle">human ask</text>
+  <text class="dg-who" x="50" y="278" text-anchor="middle">product-owner</text>
+
+  <!-- change to the split -->
+  <line class="dg-edge" x1="238" y1="260" x2="284" y2="260"/>
+  <rect class="dg-gate" x="285.5" y="251" width="5" height="18"/>
+  <text class="dg-gatetext" x="280" y="316" text-anchor="end">openspec validate --strict</text>
+  <path class="dg-loop" d="M288 250 C 288 202, 169 202, 169 234" marker-end="url(#dgarL)"/>
+  <text class="dg-looptext" x="228" y="196" text-anchor="middle">re-spawn on failure</text>
+
+  <line class="dg-edge" x1="292" y1="260" x2="342" y2="127" marker-end="url(#dgar)"/>
+  <text class="dg-who" x="330" y="175">architect</text>
+  <line class="dg-edge" x1="292" y1="260" x2="342" y2="393" marker-end="url(#dgar)"/>
+  <text class="dg-who" x="330" y="345">ux-designer</text>
+  <text class="dg-who" x="330" y="357">+ mockup pipeline</text>
+
+  <!-- merge into tasks -->
+  <line class="dg-edge" x1="472" y1="127" x2="522" y2="258"/>
+  <line class="dg-edge" x1="472" y1="393" x2="522" y2="262"/>
+  <line class="dg-edge" x1="522" y1="260" x2="576" y2="260" marker-end="url(#dgar)"/>
+  <rect class="dg-gate" x="537.5" y="251" width="5" height="18"/>
+  <text class="dg-who" x="540" y="224" text-anchor="middle">scrum-master</text>
+  <text class="dg-gatetext" x="540" y="302" text-anchor="middle">artifacts complete</text>
+  <text class="dg-gatetext" x="540" y="313" text-anchor="middle">+ human &#10003; (--auto skips)</text>
+
+  <!-- tasks to commits -->
+  <line class="dg-edge" x1="698" y1="260" x2="802" y2="260" marker-end="url(#dgar)"/>
+  <rect class="dg-gate" x="747.5" y="251" width="5" height="18"/>
+  <text class="dg-who" x="750" y="235" text-anchor="middle">frontend-dev &#215;2</text>
+  <text class="dg-who" x="750" y="246" text-anchor="middle">backend-dev &#215;2</text>
+  <text class="dg-gatetext" x="750" y="302" text-anchor="middle">&#8805;2 tasks, US-prefixed</text>
+
+  <!-- commits to PR -->
+  <line class="dg-edge" x1="924" y1="260" x2="1028" y2="260" marker-end="url(#dgar)"/>
+  <rect class="dg-gate" x="973.5" y="251" width="5" height="18"/>
+  <text class="dg-who" x="976" y="246" text-anchor="middle">tech-lead</text>
+  <text class="dg-gatetext" x="976" y="302" text-anchor="middle">DoD &#215;10 &#183; security clear</text>
+
+  <!-- the retest loop -->
+  <line class="dg-edge" x1="845" y1="288" x2="845" y2="364" marker-end="url(#dgar)"/>
+  <rect class="dg-gate" x="836" y="323" width="18" height="5"/>
+  <text class="dg-gatetext" x="830" y="329" text-anchor="end">compile gate</text>
+  <path class="dg-loop" d="M886 368 L886 292" marker-end="url(#dgarL)"/>
+  <text class="dg-looptext" x="894" y="322">bug &#9656; fix</text>
+  <text class="dg-looptext" x="894" y="334">&#9656; review &#9656; retest</text>
+</svg>
+<figcaption class="dgcap">
+  Two things the phase list hides. First, the split: architecture and UX come off the same
+  validated change and never wait for each other. Second, the dashed returns &mdash; a failed gate
+  re-spawns the agent that wrote the artifact, and a failed test sends the story back to commits
+  without stopping any other story.
+</figcaption>
+</figure>
+</div>
+
+<h2>Boot — before Phase 1</h2>
+<p class="sub">
+  Everything here happens on <code>main</code>, before a single line of the feature exists.
+  If <code>openspec/</code> is missing the command stops and tells you to run
+  <code>/spec-bootstrap</code>.
+</p>
+<div class="boot">
+  <div class="boot__step">
+    <span class="boot__k">Parse flags</span>
+    <span class="boot__v"><code>--auto</code>, <code>--size s/m/l</code>, <code>--retest</code>, <code>--skip-regression</code>. No size flag → guessed from the feature name.</span>
+  </div>
+  <div class="boot__step">
+    <span class="boot__k">Read config</span>
+    <span class="boot__v"><code>.claude/scrum-team-config.md</code> — paths, ports, compile and lint commands. Missing → stop.</span>
+  </div>
+  <div class="boot__step">
+    <span class="boot__k">Regression baseline</span>
+    <span class="boot__v">Run the existing E2E suite on main and record what already fails, so old failures never block the new PR.</span>
+  </div>
+  <div class="boot__step">
+    <span class="boot__k">Branch</span>
+    <span class="boot__v"><code>git checkout -b feature/&lt;slug&gt;</code>, then create <code>PROGRESS.md</code> — the shared dashboard every agent writes to.</span>
+  </div>
+</div>
+
+<h2>The six phases</h2>
+
+<section class="band">
+  <div class="band__rail">
+    <div class="band__num">01</div>
+    <h3 class="band__name">Requirements + early UX research</h3>
+    <div class="band__meta"><span>⏱ 15 min</span><span>∥ 2 agents</span></div>
+    <p class="band__note">Skipped when <code>/prepare-feature</code> already left an approved change — then only UX research runs.</p>
+  </div>
+  <div class="band__lanes">
+    <div class="lane">
+      <span class="lane__tag">∥ parallel</span>
+      <div class="row">
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">product-owner</span><span class="agent__model m-opus"><i class="dot dot--opus"></i>opus</span></div>
+          <p class="agent__role">Interviews you — or derives requirements alone under <code>--auto</code> — and self-validates the result.</p>
+          <p class="agent__io">◂ <b>human requirements</b><br>▸ <b>openspec/changes/&lt;slug&gt;/</b> proposal.md + delta specs</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">ux-designer</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Reads the existing UI first. Produces no document yet — this is pattern reconnaissance.</p>
+          <p class="agent__io">◂ <b>existing pages + components</b><br>▸ <b>pattern research</b> held in context</p>
+        </article>
+      </div>
+    </div>
+    <div class="gate"><b>gate</b><span>↻ <code>openspec validate &lt;slug&gt; --strict</code> must exit 0 and <code>## Why</code> must be non-empty — otherwise product-owner is re-spawned with the validator output.</span></div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band__rail">
+    <div class="band__num">02</div>
+    <h3 class="band__name">UX design + architecture</h3>
+    <div class="band__meta"><span>⏱ 20 min</span><span>∥ 2, then ↓ 2</span></div>
+    <p class="band__note">Whole phase is skipped at <code>--size small</code>. The architect runs in plan mode only for a manual large feature.</p>
+  </div>
+  <div class="band__lanes">
+    <div class="lane">
+      <span class="lane__tag">∥ parallel — the architect does not wait for UX</span>
+      <div class="row">
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">ux-designer</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Turns Phase 1 research plus the change into flows, states, keyboard and responsive behaviour.</p>
+          <p class="agent__io">◂ <b>proposal + deltas + research</b><br>▸ <b>UX-DESIGN.md</b></p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">architect</span><span class="agent__model m-opus"><i class="dot dot--opus"></i>opus</span></div>
+          <p class="agent__role">Reads real code patterns before designing. Endpoints, entities, components, file inventory.</p>
+          <p class="agent__io">◂ <b>proposal + deltas + codebase</b><br>▸ <b>design.md</b></p>
+        </article>
+      </div>
+    </div>
+    <div class="lane">
+      <span class="lane__tag">↓ then, sequentially — skipped if daytime-prep mockups exist</span>
+      <div class="row">
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">mockup-designer</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Builds screens from the project's own components — not sketches, real framework code.</p>
+          <p class="agent__io">◂ <b>change + UX-DESIGN.md</b><br>▸ <b>mockups/*.tsx</b> + Vite server on :3100</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">mockup-validator</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Cross-checks every screen against the change. One retry on failure, then the workflow moves on.</p>
+          <p class="agent__io">◂ <b>mockups + proposal</b><br>▸ <b>MOCKUP-VALIDATION.md</b></p>
+        </article>
+      </div>
+    </div>
+    <div class="gate"><b>gate</b><span>↻ design.md needs endpoints or components <em>and</em> a File Inventory; UX-DESIGN.md needs at least one flow. Missing → the author is re-spawned.</span></div>
+    <div class="gate gate--human"><b>human</b><span>● The one stop for a person: open <code>localhost:3100</code>, review flows, architecture and screens, approve. <code>--auto</code> skips it.</span></div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band__rail">
+    <div class="band__num">03</div>
+    <h3 class="band__name">Task breakdown</h3>
+    <div class="band__meta"><span>⏱ 10 min</span><span>↓ 1 agent</span></div>
+    <p class="band__note">The only phase that is deliberately single-threaded — one writer prevents two devs owning one file.</p>
+  </div>
+  <div class="band__lanes">
+    <div class="lane">
+      <div class="row">
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">scrum-master</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Writes the canonical checklist, then creates the live tasks from it under three hard rules: only backend-dev-1 owns migrations, no two devs touch the same file, and dependencies are declared with <code>blockedBy</code>.</p>
+          <p class="agent__io">◂ <b>design.md + delta specs</b><br>▸ <b>tasks.md</b> + one task per unit of work, prefixed <code>[US01]</code></p>
+        </article>
+      </div>
+    </div>
+    <div class="gate"><b>gate</b><span>↻ At least 2 developer tasks, every subject carrying a user-story prefix, and tasks.md mirroring them. Short → scrum-master runs again.</span></div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band__rail">
+    <div class="band__num">04</div>
+    <h3 class="band__name">Build + test</h3>
+    <div class="band__meta"><span>⏱ 120 min</span><span>∥ up to 8 agents</span></div>
+    <p class="band__note">The long phase. Everything below runs at once, and testing starts per story rather than at the end.</p>
+  </div>
+  <div class="band__lanes">
+    <div class="lane">
+      <span class="lane__tag">∥ all parallel</span>
+      <div class="row">
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">frontend-dev-1 · 2</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">One atomic commit per task, then tick the matching box in tasks.md. Dev 2 only at medium and large.</p>
+          <p class="agent__io">▸ <b>commits</b> · pages, components, services</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">backend-dev-1 · 2</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Dev 1 owns every migration; dev 2 never writes one and is blocked until dev 1's migration lands.</p>
+          <p class="agent__io">▸ <b>commits</b> · endpoints, entities, migrations</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">qa-engineer</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Writes test cases per user story ahead of the code, so testing is never the bottleneck.</p>
+          <p class="agent__io">▸ <b>test-case .md files</b> + AC traceability matrix</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">code-reviewer</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Watches for finished tasks and reviews each one individually — patterns, security, edge cases.</p>
+          <p class="agent__io">▸ <b>approval or change request</b> per task</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">tech-lead</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Runs the compile gate, starts the app, watches it for runtime breakage and files bugs as tasks.</p>
+          <p class="agent__io">▸ <b>"app ready"</b> signal · bug tasks</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">manual-tester</span><span class="agent__model m-haiku"><i class="dot dot--haiku"></i>haiku</span></div>
+          <p class="agent__role">Drives a real browser. Starts a story the moment that story is reviewed and its cases exist.</p>
+          <p class="agent__io">▸ <b>pass/fail per scenario</b> · bugs with screenshots</p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">qa-automation</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Follows the tester one story behind, writing Playwright specs only for what already passed by hand.</p>
+          <p class="agent__io">▸ <b>E2E specs</b> per story</p>
+        </article>
+      </div>
+    </div>
+    <div class="gate"><b>compile</b><span>Backend builds · frontend builds · lint clean · app reachable. Only then does tech-lead release testing.</span></div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band__rail">
+    <div class="band__num">05</div>
+    <h3 class="band__name">Integration verification</h3>
+    <div class="band__meta"><span>⏱ 30 min</span><span>∥ 4–6 agents</span></div>
+    <p class="band__note">The feature is done story by story; this asks whether it holds together as one thing.</p>
+  </div>
+  <div class="band__lanes">
+    <div class="lane">
+      <span class="lane__tag">∥ parallel</span>
+      <div class="row">
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">tech-lead</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Full restart from cold, then a regression sweep against the boot baseline.</p>
+          <p class="agent__io">▸ <b>regression verdict</b></p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">qa-automation</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Runs the whole E2E suite. Failures present in the baseline do not count against the PR.</p>
+          <p class="agent__io">▸ <b>suite result vs baseline</b></p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">manual-tester</span><span class="agent__model m-haiku"><i class="dot dot--haiku"></i>haiku</span></div>
+          <p class="agent__role">One end-to-end pass through the complete feature flow, not story fragments.</p>
+          <p class="agent__io">▸ <b>smoke test result</b></p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">code-reviewer</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Reviews the entire branch diff at once — what per-task review can't see.</p>
+          <p class="agent__io">◂ <b>git diff origin/main...HEAD</b></p>
+        </article>
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">quality-metrics-collector</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Lines changed, test-to-code ratio, AC coverage, file complexity, against pass/warn/fail thresholds.</p>
+          <p class="agent__io">▸ <b>QUALITY-METRICS.md</b></p>
+        </article>
+        <article class="agent agent--ghost">
+          <div class="agent__head"><span class="agent__name">security-auditor</span><span class="agent__model m-opus"><i class="dot dot--opus"></i>opus</span></div>
+          <p class="agent__role">Conditional — spawned only when the diff touches auth, sessions, tokens, CORS, roles, migrations, routes, middleware or secrets.</p>
+          <p class="agent__io">▸ <b>findings by severity</b></p>
+        </article>
+      </div>
+    </div>
+    <div class="gate gate--stop"><b>stop</b><span>⛔ Any Critical security finding halts Phase 6. Fix tasks are created and the auditor runs again. Every gate in PROGRESS.md must read PASS before shipping.</span></div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band__rail">
+    <div class="band__num">06</div>
+    <h3 class="band__name">Ship</h3>
+    <div class="band__meta"><span>⏱ 10 min</span><span>↓ 1 agent</span></div>
+    <p class="band__note"><code>openspec archive</code> deliberately does <em>not</em> run here — it happens post-merge on main, via <code>/ship</code>.</p>
+  </div>
+  <div class="band__lanes">
+    <div class="lane">
+      <div class="row">
+        <article class="agent">
+          <div class="agent__head"><span class="agent__name">tech-lead</span><span class="agent__model m-sonnet"><i class="dot dot--sonnet"></i>sonnet</span></div>
+          <p class="agent__role">Ticks every remaining box in tasks.md, walks the ten Definition-of-Done checks, and opens the PR with a rollback plan in the description.</p>
+          <p class="agent__io">▸ <b>pull request</b> → main · PR URL written back into PROGRESS.md</p>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<h2>The loop inside Phase 4</h2>
+<p class="sub">
+  Stories do not queue behind each other. US01 can be in retest while US02 is still being written —
+  which is why a bug never stalls the whole feature, and why a stubborn one has an escape hatch.
+</p>
+<div class="loop">developer finishes a task ──▸ atomic commit
+        │
+        ▾
+<b>code-reviewer</b> reviews that task alone
+        │
+        ▾  <i>per story — no waiting on other stories</i>
+all US01 tasks reviewed  +  US01 test cases ready
+        │
+        ▾
+<b>manual-tester</b> tests US01 now
+        │
+        ├── pass ──▸ <b>qa-automation</b> writes the E2E spec for US01
+        │
+        └── fail ──▸ bug task ──▸ developer fixes ──▸ review ──▸ retest ─┐
+                       ▴                                                 │
+                       └─────────────────────────────────────────────────┘
+                          <u>same case fails twice ──▸ escalate to tech-lead</u>
+
+meanwhile: US02 is still being built ──▸ reviewed ──▸ tested ──▸ …</div>
+
+<h2>Team size</h2>
+<p class="sub">
+  Size comes from the <code>--size</code> flag, or is guessed from the feature name: words like
+  <em>button</em> or <em>layout</em> read as small, <em>API</em> or <em>schema</em> as medium,
+  anything else as large.
+</p>
+<div class="tablewrap">
+<table>
+  <thead>
+    <tr>
+      <th>Agent</th>
+      <th class="num">small · 9</th>
+      <th class="num">medium · 11</th>
+      <th class="num">large · 13</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="agentcell">product-owner</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">ux-designer</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">architect</td><td class="num no">—</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">scrum-master</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">frontend-dev-1</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">frontend-dev-2</td><td class="num no">—</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">backend-dev-1</td><td class="num no">—</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">backend-dev-2</td><td class="num no">—</td><td class="num no">—</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">code-reviewer</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">qa-engineer</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">qa-automation</td><td class="num no">—</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">manual-tester</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+    <tr><td class="agentcell">tech-lead</td><td class="num yes">•</td><td class="num yes">•</td><td class="num yes">•</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="sub" style="margin-top:1rem">
+  Small also skips Phase 2 outright — no architect, no mockups; the scrum-master breaks down the
+  OpenSpec change directly. Medium keeps the architect but drops plan mode.
+</p>
+
+<h2>Definition of Done</h2>
+<p class="sub">Ten checks the tech-lead walks before <code>gh pr create</code>. One failure, no PR.</p>
+<div class="dod">
+  <div class="dod__item"><span class="dod__n">01</span><span class="dod__t"><b>Tasks closed</b> — zero open dev tasks, all reviewer-approved</span></div>
+  <div class="dod__item"><span class="dod__n">02</span><span class="dod__t"><b>Compile clean</b> — backend and frontend, zero errors</span></div>
+  <div class="dod__item"><span class="dod__n">03</span><span class="dod__t"><b>Lint clean</b> — using the command from project config</span></div>
+  <div class="dod__item"><span class="dod__n">04</span><span class="dod__t"><b>Manual tests pass</b> — every story green in PROGRESS.md</span></div>
+  <div class="dod__item"><span class="dod__n">05</span><span class="dod__t"><b>E2E pass</b> — the suite qa-automation produced runs green</span></div>
+  <div class="dod__item"><span class="dod__n">06</span><span class="dod__t"><b>No P0 bugs</b> — zero open Critical bug tasks</span></div>
+  <div class="dod__item"><span class="dod__n">07</span><span class="dod__t"><b>AC traceability</b> — every acceptance criterion marked Full</span></div>
+  <div class="dod__item"><span class="dod__n">08</span><span class="dod__t"><b>PROGRESS.md current</b> — no stale Pending rows</span></div>
+  <div class="dod__item"><span class="dod__n">09</span><span class="dod__t"><b>No scope creep</b> — diff stat holds no unexpected files</span></div>
+  <div class="dod__item"><span class="dod__n">10</span><span class="dod__t"><b>Integration verified</b> — all of Phase 5 came back green</span></div>
+</div>
+
+<h2>Retest mode</h2>
+<div class="retest">
+  <h3><code>/scrum-team --retest &lt;feature&gt;</code></h3>
+  <p>
+    A separate, much shorter shape for a feature that already exists. Phases 1–3 are skipped
+    entirely, no branch is created, and five agents spawn at once against the test cases already
+    on disk: <strong>R1</strong> tech-lead brings the app up and runs the compile gate,
+    <strong>R2</strong> the tester works every scenario while both devs stand by,
+    <strong>R3</strong> bug → fix → review → retest until nothing fails.
+  </p>
+  <div class="pills">
+    <span class="pill">tech-lead</span>
+    <span class="pill">code-reviewer</span>
+    <span class="pill">manual-tester</span>
+    <span class="pill">frontend-dev-1</span>
+    <span class="pill">backend-dev-1</span>
+  </div>
+</div>
+
+<p class="colophon">
+  Drawn from <code>claude/commands/scrum-team.md</code> and the agent definitions in
+  <code>claude/agents/</code> at v2.0.0. Model assignments come from each agent's own frontmatter,
+  which differs from the summary line in the command doc — that line claims opus for the architect
+  and security-auditor and sonnet for everyone else, while <code>product-owner.md</code> declares
+  opus and <code>manual-tester.md</code> declares haiku. Timeouts are the phase limits the lead
+  tracks; under <code>--auto</code> they log a warning rather than stopping the run.
+</p>
+
+</div>
+</body>
+</html>

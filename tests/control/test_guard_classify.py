@@ -861,6 +861,92 @@ class ReviewFindingsTests(GuardClassifyBase):
         self.assertIsNone(self.bash("git push origin feature/x", cwd=str(repo), project=str(repo)))
 
 
+class ReviewRound2Tests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_n1_placeholder_is_data_for_ordinary_programs(self):
+        self.check_rows([
+            ("ls | xargs -I{} cp {} /tmp/", None),
+            ("echo a | xargs -I{} echo {}", None),
+            ("echo a | xargs -I{} wc -l {}", None),
+            ("ls *.txt | xargs -I{} grep foo {}", None),
+            ("echo a | xargs -I % echo %", None),
+            ("find . -name '*.py' | xargs -I{} wc -l {}", None),
+            ("echo push | xargs -I{} git {} origin main", "control"),
+            ("echo a | xargs -I{} {} --version", "control"),
+            ("echo a | xargs -I{} sh -c 'echo {}'", "control"),
+            ("echo a | xargs -I{} python3 -c 'print({})'", "control"),
+            ("ls | xargs -I{} rm -rf /Users/me/{}", "destroy"),
+            ("echo x | xargs -I{} git push origin {}", "control"),
+            ("echo a | xargs -I{} git add {}", None),
+        ])
+
+    def test_n2_run_time_prefixes_with_protected_suffixes(self):
+        self.check_rows([
+            ("echo x >> $PWD/.git/config", "control"),
+            ("echo x >> $(pwd)/.git/config", "control"),
+            ("echo x >> $(git rev-parse --git-dir)/config", "control"),
+            ("echo x >> $GIT_DIR/config", "control"),
+            ("echo x >> $D/.git/config", "control"),
+            ("echo x > $D/.git/hooks/pre-commit", "control"),
+            ("echo x > $D/.git/info/attributes", "control"),
+            ("echo x > \"$X/.claude/settings.local.json\"", "control"),
+            ("echo x > $CFG/agterm/hooks.conf", "control"),
+            ("echo x > $H/.dodocs-workflow/registry.json", "control"),
+            ("cp x $H/.dodocs-workflow/bin/dw", "control"),
+            ("echo x > \"$OUT/result.txt\"", None),
+            ("echo x > $D/settings.json", None),
+            ("echo x > $D/config", None),
+            ("cat .git/HEAD", None),
+        ])
+
+    def test_s1_unlexable_command_strings_fail_closed(self):
+        self.check_rows([
+            ("nohup sh -c 'echo \"x'", "control"),
+            ("bash -c 'git push origin \"main'", "control"),
+            ("nohup git commit -m \"it's done\"", None),
+            ("git commit -m \"don't break\"", None),
+            ("echo \"it's fine\"", None),
+            ("timeout 5 echo \"it's fine\"", None),
+            ("nohup echo \"it's $(id)\"", None),
+        ])
+
+    def test_s2_code_loading_options(self):
+        self.check_rows([
+            ("perl -M\"$MOD\" -e 'print 1'", "control"),
+            ("node -r \"$HOOK\" scripts/x.js", "control"),
+            ("node --require=$HOOK scripts/x.js", "control"),
+            ("node --import \"$(cat m)\" x.mjs", "control"),
+            ("node --loader $L x.mjs", "control"),
+            ("node --experimental-loader=$L x.mjs", "control"),
+            ("ruby -r\"$LIB\" x.rb", "control"),
+            ("python3 -m \"$MOD\"", "control"),
+            ("node -r ~/.dodocs-workflow/x.js app.js", "control"),
+            ("node --require ts-node/register scripts/x.ts", None),
+            ("python3 -m pytest -q", None),
+            ("perl -MJSON -e 'print 1'", None),
+            ("node -r dotenv/config app.js \"$PORT\"", None),
+            ("ruby -rjson x.rb \"$F\"", None),
+        ])
+
+    def test_s3_protected_paths_are_case_insensitive(self):
+        repo = self.make_repo()
+        run = lambda c: self.category(self.bash(c, cwd=str(repo), project=str(repo)))
+        self.assertEqual(run("echo x >> .GIT/config"), "control")
+        self.assertEqual(run("echo x >> .Git/Hooks/pre-push"), "control")
+        self.assertEqual(run("echo x > ~/.CLAUDE/settings.json"), "control")
+        self.assertEqual(run("echo x > ~/.Dodocs-Workflow/registry.json"), "control")
+        self.assertEqual(run("echo x > $D/.GIT/CONFIG"), "control")
+        result = self.guard.classify("Write", {"file_path": str(repo / ".GIT" / "config")},
+                                     str(repo), str(repo), self.rules)
+        self.assertEqual(self.category(result), "control")
+        self.assertIsNone(run("cat .git/HEAD"))
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

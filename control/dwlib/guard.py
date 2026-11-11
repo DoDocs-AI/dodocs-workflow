@@ -141,7 +141,12 @@ def settings_path() -> Path:
 # Inside any .git directory (worktree and submodule git dirs included): the config, hooks and
 # attributes files.
 _GIT_INTERNAL_RE = re.compile(
-    r"/\.git/(?:(?:worktrees|modules)/.+/)?(?:config|config\.worktree|info/attributes|hooks(?:/.*)?)$")
+    r"/\.git/(?:(?:worktrees|modules)/.+/)?(?:config|config\.worktree|info/attributes|hooks(?:/.*)?)$",
+    re.I)
+# A run-time part of a word: a variable, a substitution placeholder, or stdin text.
+_RUN_TIME_PART_RE = re.compile(
+    r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]|__dwsub(\d+)__|__dwsub_input__|`[^`]*`")
+_GIT_DIR_SUFFIX_RE = re.compile(r"^/(config|config\.worktree|hooks/.+|info/attributes)$", re.I)
 
 
 class _Protected:
@@ -149,16 +154,24 @@ class _Protected:
 
     def __init__(self, run_id: Optional[str]):
         home = _home()
-        self.dirs = sorted({os.path.realpath(str(paths.home())),
-                            os.path.realpath(os.path.join(home, ".dodocs-workflow"))})
-        self.files = {os.path.realpath(os.path.join(home, ".claude", "settings.json")),
-                      os.path.realpath(str(settings_path())),
-                      os.path.realpath(os.path.join(home, ".config", "agterm", "hooks.conf"))}
-        self.home = os.path.realpath(home)
-        self.note = os.path.realpath(str(paths.result_note_path(run_id))) if run_id else None
+        # Compared in lower case: the file system may ignore case (macOS does by default).
+        self.dirs = sorted({os.path.realpath(str(paths.home())).lower(),
+                            os.path.realpath(os.path.join(home, ".dodocs-workflow")).lower()})
+        self.files = {os.path.realpath(os.path.join(home, ".claude", "settings.json")).lower(),
+                      os.path.realpath(str(settings_path())).lower(),
+                      os.path.realpath(os.path.join(home, ".config", "agterm", "hooks.conf")).lower()}
+        self.home = os.path.realpath(home).lower()
+        self.note = os.path.realpath(str(paths.result_note_path(run_id))).lower() if run_id else None
         self.markers = [".dodocs-workflow", "agterm/hooks.conf"] + self.dirs + sorted(self.files)
+        names = {os.path.basename(d) for d in self.dirs} | {".dodocs-workflow"}
+        self.suffix_res = [
+            re.compile(r"(^|/)\.claude/settings(\.local)?\.json$", re.I),
+            re.compile(r"(^|/)agterm/hooks\.conf$", re.I),
+        ] + [re.compile(r"(^|/)%s/(registry\.json|guard-rules\.default\.json|runs/[^/]+\.json|"
+                        r"bin/dw|lib/dwlib/.*)$" % re.escape(n), re.I) for n in sorted(names)]
 
     def hit(self, path: str) -> bool:
+        path = path.lower()
         if path == self.note:
             return False
         if any(_inside(path, d) for d in self.dirs) or path in self.files:
@@ -171,6 +184,30 @@ class _Protected:
         if path not in ("/", self.home) and not _inside(self.home, path):
             return any(_inside(t, path) for t in list(self.files) + self.dirs)
         return False
+
+    def suffix_hit(self, text: str, bodies: list) -> bool:
+        """For a path whose prefix is only known at run time: does its static suffix name a
+        protected file? ($PWD/.git/config, $X/.claude/settings.json, $(git ...)/config)"""
+        last = None
+        for last in _RUN_TIME_PART_RE.finditer(text):
+            pass
+        if last is None:
+            return False
+        suffix = text[last.end():]
+        if not suffix:
+            return False
+
+        def body(m):
+            if m.group(1) is not None and int(m.group(1)) < len(bodies):
+                return "$(" + bodies[int(m.group(1))] + ")"
+            return m.group(0)
+
+        prefix = _RUN_TIME_PART_RE.sub(body, text[:last.end()])
+        if _GIT_INTERNAL_RE.search("/" + suffix.lstrip("/")):
+            return True
+        if any(rx.search(suffix) for rx in self.suffix_res):
+            return True
+        return bool(_GIT_DIR_SUFFIX_RE.match(suffix)) and "git" in prefix.lower()
 
     def pattern_hit(self, text: str, cwd: Optional[str]) -> bool:
         """For a path with glob characters, braces or run-time parts: may it name a protected path?"""
@@ -190,7 +227,8 @@ class _Protected:
                 return False
             prefix = os.path.join(cwd, prefix)
         head, base = os.path.split(prefix)
-        rdir = os.path.realpath(head or "/")
+        rdir = os.path.realpath(head or "/").lower()
+        base = base.lower()
         rprefix = rdir.rstrip("/") + "/" + base
         targets = self.dirs + sorted(self.files)
         if any(_inside(rdir, d) for d in self.dirs):
@@ -198,7 +236,7 @@ class _Protected:
         if base and any(t.startswith(rprefix) for t in targets):
             return True
         def undecided() -> bool:  # fail closed next to the control point's own files
-            claude = os.path.realpath(os.path.join(home, ".claude"))
+            claude = os.path.realpath(os.path.join(home, ".claude")).lower()
             if _inside(rdir, claude):
                 return True
             for d in self.dirs:
@@ -219,11 +257,11 @@ class _Protected:
         return any(self.hit(os.path.realpath(f)) for f in found)
 
     def text_hit(self, text: str) -> bool:
-        clean = text.replace("\\", "")
+        clean = text.replace("\\", "").lower()
         return any(m in clean for m in self.markers) or \
             bool(re.search(r"\.claude/settings(\.local)?\.json", clean))
 
-    def token_hit(self, token: str, cwd: Optional[str]) -> bool:
+    def token_hit(self, token: str, cwd: Optional[str], bodies: Optional[list] = None) -> bool:
         candidates = [token]
         if "=" in token:
             candidates.append(token.split("=", 1)[1])
@@ -234,14 +272,16 @@ class _Protected:
             if any(ch in plain for ch in "*?[{") or _expand(cand) is None:
                 if cand not in ("[", "[[", "{", "}") and self.pattern_hit(cand, cwd):
                     return True
+                if _expand(cand) is None and self.suffix_hit(cand, bodies or []):
+                    return True
                 continue
             resolved = _resolve(cand, cwd)
             if resolved is not None:
-                if resolved == self.note:
+                if resolved.lower() == self.note:
                     return False
                 if self.hit(resolved):
                     return True
-        text = token.replace("\\", "")
+        text = token.replace("\\", "").lower()
         if any(m in text for m in self.markers) or \
                 re.search(r"\.claude/settings(\.local)?\.json", text):
             return True
@@ -275,14 +315,28 @@ class _Ctx:
         return other
 
 
+_APOSTROPHE_TEXT_RE = re.compile(r"[A-Za-z]'[A-Za-z]")
+_SHELL_SYNTAX_RE = re.compile(r"[$`;|&<>()\\\n{}]")
+
+
+def _prose_with_apostrophe(text: str, exc: Exception) -> bool:
+    """A string that fails to lex only because it is prose with an apostrophe ("it's done"),
+    with no other shell syntax: not a command anything would run."""
+    return str(exc) == "unterminated quote" and text.count("'") % 2 == 1 and \
+        bool(_APOSTROPHE_TEXT_RE.search(text)) and \
+        not _SHELL_SYNTAX_RE.search(text.replace("__dwsub", "")) and '"' not in text
+
+
 def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
-    """Classify command strings in full, unreadable results included. A string the shell
-    itself could not parse (unbalanced quotes) is not a command anything would run."""
+    """Classify command strings in full, unreadable results included. A string that cannot be
+    lexed is unreadable, unless it is plain prose with an apostrophe."""
     out: list = []
     for text in texts:
         try:
             _Lexer(text).run()
-        except _Unreadable:
+        except _Unreadable as exc:
+            if not _prose_with_apostrophe(re.sub(r"__dwsub\w*?__", "", text), exc):
+                out.append(_unreadable_match())
             continue
         out += _shell_matches(text, ctx.fork(), depth + 1)
     return out
@@ -295,7 +349,41 @@ _CODE_LETTERS = {"python": "c", "pypy": "c", "perl": "eE", "ruby": "e", "node": 
 _CODE_LONG = ("--eval", "--print", "--command")
 
 
-def _code_args(args: list, letters: str) -> list:
+# Option letters (and long options) whose value names code to load before the script runs.
+_LOADER_LETTERS = {"perl": "Mm", "ruby": "r", "node": "r", "nodejs": "r", "bun": "r", "deno": ""}
+_LOADER_LONG = ("--require", "--import", "--loader", "--experimental-loader")
+
+
+def _loader_args(args: list, family: str) -> list:
+    """Values of the options that load code (perl -MMod, ruby -rlib, node -r/--require/...)."""
+    letters = _LOADER_LETTERS.get(family, "")
+    found: list = []
+    i = 0
+    while i < len(args):
+        t = args[i]
+        if t == "--":
+            break
+        if t.startswith("--") and family in ("node", "nodejs", "bun", "deno"):
+            head, eq, val = t.partition("=")
+            if head in _LOADER_LONG:
+                if eq:
+                    found.append(val)
+                elif i + 1 < len(args):
+                    found.append(args[i + 1])
+                    i += 1
+        elif t.startswith("-") and not t.startswith("--") and len(t) > 1 and t[1] in letters:
+            if t[2:]:
+                found.append(t[2:])
+            elif i + 1 < len(args):
+                found.append(args[i + 1])
+                i += 1
+        elif not t.startswith("-"):
+            break  # the script: what follows is its own arguments
+        i += 1
+    return found
+
+
+def _code_args(args: list, letters: str, stop: str = "") -> list:
     """Values of the options that take code (-c CODE, -cCODE, -pe CODE, --eval=CODE)."""
     codes: list = []
     i = 0
@@ -312,7 +400,13 @@ def _code_args(args: list, letters: str) -> list:
                     codes.append(args[i + 1])
                     i += 1
         elif t.startswith("-") and len(t) > 1:
-            k = next((k for k, ch in enumerate(t[1:], 1) if ch in letters), None)
+            k = None
+            for j, ch in enumerate(t[1:], 1):
+                if ch in stop:
+                    break  # an option whose attached value follows (perl -Mfeature)
+                if ch in letters:
+                    k = j
+                    break
             if k is not None:
                 if t[k + 1:]:
                     codes.append(t[k + 1:])
@@ -336,6 +430,20 @@ def _placeholders(name: str, tokens: list) -> set:
         elif t.startswith(("--replace=", "-i")) and "=" in t:
             found.add(t.split("=", 1)[1])
     return {p for p in found if p}
+
+
+def _input_is_unreadable_for(suffix: list, marks: list, ctx: _Ctx) -> bool:
+    """Whether stdin text substituted into this command matters: in the program position, or
+    anywhere in a sensitive program, a shell, an interpreter or a wrapper (where it may be
+    code or decide the classification). For other programs it is plain data."""
+    words = _strip_prefix(list(suffix))
+    if not words:
+        return False
+    if any(mark in words[0] for mark in marks):
+        return True
+    name = os.path.basename(words[0])
+    return name in sensitive_programs(ctx.rules) or name in SHELLS or name in WRAPPERS or \
+        bool(_INTERPRETER_RE.match(name)) or name in _RUNNERS
 
 
 def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int = 1) -> list:
@@ -365,19 +473,30 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
                 (t.startswith("-C") and len(t) > 2) for t in tokens):
         sub.cwd = None  # moved somewhere this guard does not follow
     incomplete = name in ("xargs", "parallel")
-    if incomplete:  # text from standard input replaces these words: unreadable
+    replaced = tokens
+    marks: list = []
+    if incomplete:  # text from standard input replaces these words
         marks = sorted(_placeholders(name, tokens), key=len, reverse=True)
         replaced = []
         for t in tokens:
             for mark in marks:
                 t = t.replace(mark, "__dwsub_input__")
             replaced.append(t)
-        tokens = replaced
     inner_seg = seg
+    first_operand = None
     for k in range(start, len(tokens)):
         if tokens[k].startswith("-") or re.search(r"\s", tokens[k]):
             continue  # an option or a command string (read below) is not a program name
-        out += _analyze(tokens[k:], [], inner_seg, sub.fork(), depth + 1, incomplete)
+        declared = marks and tokens[k - 1] in ("-I", "--replace")
+        if marks and any(mark in tokens[k] for mark in marks):
+            if declared or (first_operand is not None and first_operand < k):
+                continue  # the replace string itself, or a later argument: data
+        if first_operand is None and not declared:
+            first_operand = k
+        suffix = tokens[k:]
+        if marks and _input_is_unreadable_for(suffix, marks, sub):
+            suffix = replaced[k:]  # stdin text in a deciding or code position: run-time
+        out += _analyze(suffix, [], inner_seg, sub.fork(), depth + 1, incomplete)
     for token in tokens[start:]:
         out += _string_matches(_command_strings(token), sub, depth)
     return out
@@ -391,6 +510,7 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
     except _Unreadable:
         return [_unreadable_match()]
     matches: list = []
+    ctx.sub_bodies = lexed.subs  # lets path checks see what a substitution runs
     start = ctx.fork()
     for seg in lexed.segments:
         matches += _segment_matches(seg, ctx, depth)
@@ -460,7 +580,13 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                     tokens = rest[k + 1:]
                     continue
             family = re.sub(r"[0-9.]+$", "", name)
-            codes = _code_args(rest, _CODE_LETTERS.get(family, "ce"))
+            codes = _code_args(rest, _CODE_LETTERS.get(family, "ce"),
+                               stop=_LOADER_LETTERS.get(family, ""))
+            for loader in _loader_args(rest, family):
+                if _expand(loader) is None or "__dwsub" in loader:
+                    matches.append(_unreadable_match())  # code loaded from a run-time name
+                else:
+                    matches += _inline_matches(loader, ctx, depth)
             operands = [a for a in rest if not a.startswith("-")]
             for code in codes:
                 if _run_time_text(code) or "__dwsub" in code:
@@ -691,11 +817,11 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx) -
     for i, token in enumerate(original):
         if i == skip:
             continue
-        if ctx.protected.token_hit(token, ctx.cwd):
+        if ctx.protected.token_hit(token, ctx.cwd, getattr(ctx, "sub_bodies", None)):
             out.append(_state_match(" ".join(original)))
             return out
     for target in redirects:
-        if ctx.protected.token_hit(target, ctx.cwd):
+        if ctx.protected.token_hit(target, ctx.cwd, getattr(ctx, "sub_bodies", None)):
             out.append(_state_match(" ".join(original)))
             return out
     return out

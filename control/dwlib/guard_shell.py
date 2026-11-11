@@ -92,7 +92,7 @@ class _Unreadable(Exception):
 
 
 def _new_segment(pipe_in: bool) -> dict:
-    return {"words": [], "redirects": [], "heredocs": [], "pipe_in": pipe_in,
+    return {"words": [], "redirects": [], "reads": [], "heredocs": [], "pipe_in": pipe_in,
             "pipe_out": False, "keep": False}
 
 
@@ -206,6 +206,8 @@ class _Lexer:
             return
         else:
             self.seg["redirects"].append(word)
+            if op == "<":  # the only operator that cannot write its target
+                self.seg["reads"].append(word)
 
     def read_word(self) -> str:
         s = self.s

@@ -34,6 +34,7 @@ from urllib.parse import urlsplit
 from . import agterm, events, paths, runs, store
 from .guard_shell import (  # noqa: F401
     ANALYSIS_BUDGET,
+    _ASSIGNMENT_RE,
     MAX_DEPTH,
     MAX_WRAPPER_TOKENS,
     SHELLS,
@@ -68,6 +69,7 @@ from .guard_shell import (  # noqa: F401
 from .guard_git import (  # noqa: F401
     _GIT_ENV_RE,
     _check_git_merge_default_branch,
+    _git_parts,
     _check_git_push_default_branch,
     _check_git_push_tags,
     _git_control_matches,
@@ -167,10 +169,15 @@ _PROTECTED_NAMES = {".git": None, ".dodocs-workflow": (),
 # A run-time part of a word: a variable, a substitution placeholder, or stdin text.
 _RUN_TIME_PART_RE = re.compile(
     r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]|__dwsub(\d+)__|__dwsub_input__|`[^`]*`")
+# A git dir by reference: these variables, or `git rev-parse` asked for the git dir.
+_GIT_DIR_VAR_RE = re.compile(r"^\$\{?(GIT_DIR|GIT_COMMON_DIR)(?![A-Za-z0-9_])")
+_GIT_DIR_SUB_RE = re.compile(r"\bgit\b.*\brev-parse\b.*--(git-dir|git-common-dir|absolute-git-dir|"
+                             r"git-path)(?![\w-])", re.S)
+_GIT_PATH_SUB_RE = re.compile(r"--git-path[ =]+['\"]?([\w./-]+)")
 _DW_HOME_VAR_RE = re.compile(r"\$\{DW_HOME(?![A-Za-z0-9_])[^}]*\}|\$DW_HOME(?![A-Za-z0-9_])")
 _GLOB_PART_RE = re.compile(r"\[[^\]/]*\]|[*?]")
 # In a path skeleton a run-time part is one of these characters; _GIT_ANY is a run-time
-# part whose text mentions git (a git dir by reference: $GIT_DIR, $(git rev-parse ...)).
+# part that stands for a git dir ($GIT_DIR, $(git rev-parse --git-dir), see _GIT_DIR_*_RE).
 _ANY, _GIT_ANY = "\x01", "\x02"  # not NUL: os.path.normpath stops at one
 _RUN_TIME_MARKS_RE = re.compile("[\x01\x02]+")
 MAX_WILDCARDS = 6  # in a path matched part by part against a real path
@@ -288,10 +295,13 @@ class _Protected:
             text = text.replace(mark, "__dwsub_input__")
 
         def marker(m):
-            body = m.group(0)
-            if m.group(1) is not None and int(m.group(1)) < len(bodies):
-                body = bodies[int(m.group(1))]
-            return _GIT_ANY if "git" in body.lower() else _ANY
+            if m.group(1) is None:
+                return _GIT_ANY if _GIT_DIR_VAR_RE.match(m.group(0)) else _ANY
+            body = bodies[int(m.group(1))] if int(m.group(1)) < len(bodies) else ""
+            if not _GIT_DIR_SUB_RE.search(body):
+                return _ANY
+            below = _GIT_PATH_SUB_RE.search(body)  # --git-path hooks: the git dir, then hooks
+            return _GIT_ANY + ("/" + below.group(1) if below else "")
 
         text = _RUN_TIME_PART_RE.sub(marker, text)
         try:
@@ -325,6 +335,30 @@ class _Protected:
             if _GIT_ANY in seg and self._git_dir_child(tail):
                 return True
         return False
+
+    def names(self, skel: str) -> bool:
+        """The by-name check of one skeleton, whatever the working directory is. It looks at
+        the segments as written and as normalised. ".." is not resolved across a wildcard
+        segment (nobody knows what it cancels): such a path is held when any segment may be
+        a protected directory."""
+        segs = [s for s in skel.split("/") if s and s != "."]
+        wild_before, undecided = False, False
+        for seg in segs:
+            undecided = undecided or (seg == ".." and wild_before)
+            wild_before = wild_before or _wild(seg)
+        if undecided:
+            return any(_GIT_ANY in seg or any(_could_be(seg, name) for name in _PROTECTED_NAMES)
+                       for seg in segs)
+        normal = [s for s in posixpath.normpath(skel).split("/") if s and s != "."]
+        return self._named(segs) or (normal != segs and self._named(normal))
+
+    def text_names(self, text: str) -> bool:
+        """Whether a word of literal text (in a substitution, or sent to xargs) spells a
+        protected path by name."""
+        word = text.strip("'\"")
+        if not word or len(word) > 4096 or "\0" in word:
+            return False
+        return any(skel and self.names(skel) for skel in self._skeletons(word, [], ()))
 
     @staticmethod
     def _file_in(files, tail: list) -> bool:
@@ -421,6 +455,8 @@ class _Protected:
         candidates = [token]
         if "=" in token:
             candidates.append(token.split("=", 1)[1])
+        if re.match(r"-[A-Za-z][^=]", token):
+            candidates.append(token[2:])  # a value attached to a short option (-O.git/config)
         for cand in candidates:
             if not cand or len(cand) > 4096 or "\n" in cand or "\0" in cand or \
                     cand in ("[", "[[", "{", "}"):
@@ -428,18 +464,24 @@ class _Protected:
             for skel in self._skeletons(cand, bodies or [], marks):
                 if not skel:
                     continue
-                if not _wild(skel):
-                    if not os.path.isabs(skel) and cwd is None:
-                        continue
+                if not _wild(skel) and (os.path.isabs(skel) or cwd is not None):
                     resolved = os.path.realpath(os.path.join(cwd or "/", skel))
                     if resolved.lower() == self.note:
                         return False
                     if self.hit(resolved):
                         return True
-                    continue
-                skel = posixpath.normpath(skel)
-                if self._named([s for s in skel.split("/") if s]) or self._real_hit(skel, cwd):
+                if self.names(skel):
                     return True
+                if _wild(skel) and self._real_hit(posixpath.normpath(skel), cwd):
+                    return True
+            # A substitution inside the word: the literal text of what it runs may spell the path.
+            for m in _RUN_TIME_PART_RE.finditer(cand):
+                if m.group(1) is not None and int(m.group(1)) < len(bodies or []):
+                    words = bodies[int(m.group(1))].split()
+                    if words[:1] and words[0] in _CONTENT_READERS:
+                        continue  # it prints what is in the file, not the file's name
+                    if any(self.text_names(w) for w in words):
+                        return True
         return self.text_hit(token)
 
 
@@ -465,6 +507,7 @@ class _Ctx:
         self.git_cache: dict = {}
         self.sub_bodies: list = []  # what the substitutions of the command being read run
         self.marks: tuple = ()  # replace strings of the xargs, parallel or find running this
+        self.stdin_words: list = []  # arguments of the command piped into the one being read
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
 
     def fork(self) -> "_Ctx":
@@ -588,14 +631,17 @@ def _runs_a_command(tokens: list) -> bool:
 
 # Variables that make an interpreter, a shell or the dynamic linker load a file.
 _LOADER_ENV_RE = re.compile(r"^(NODE_OPTIONS|PERL5OPT|RUBYOPT|PYTHONSTARTUP|BASH_ENV|ENV|LD_PRELOAD|"
-                            r"DYLD_INSERT_LIBRARIES)\+?=(.+)$", re.S)
+                            r"DYLD_INSERT_LIBRARIES|LESSOPEN|LESSCLOSE)\+?=(.+)$", re.S)
+# ENV and BASH_ENV are read by a shell only: a shell as a program word somewhere on the line.
+_SHELL_WORD_RE = re.compile(r"(?:^|[\s;&|(/'\"`])(?:sh|dash|ksh|ash|bash|zsh)(?=$|[\s;&|)'\"`])")
 _DECLARERS = ("export", "declare", "typeset", "readonly", "local")
 
 
 def _loader_env_matches(original: list, ctx: _Ctx, depth: int) -> list:
     """Code loaded through the environment, set as a command prefix, with export, or in the
-    arguments of a wrapper. NODE_OPTIONS is read with node's loader-option rules; any other
-    of these variables set to a value is held."""
+    arguments of a wrapper. NODE_OPTIONS is read with node's loader-option rules; ENV and
+    BASH_ENV count when a shell is run on the same line; any other of these variables set
+    to a value is held."""
     rest = _strip_prefix(list(original))
     words = original[:len(original) - len(rest)]
     if rest and (os.path.basename(rest[0]) in _DECLARERS or os.path.basename(rest[0]) in WRAPPERS
@@ -609,6 +655,8 @@ def _loader_env_matches(original: list, ctx: _Ctx, depth: int) -> list:
         held = {"id": "control-loader-env", "category": "control",
                 "describe": "load code through the environment: %s" % _short(word)}
         value = m.group(2)
+        if m.group(1) in ("ENV", "BASH_ENV") and not _SHELL_WORD_RE.search(ctx.full_text):
+            continue  # an ordinary variable of that name
         if m.group(1) != "NODE_OPTIONS" or _expand(value) is None or "__dwsub" in value:
             out.append(held)
             continue
@@ -705,6 +753,14 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
         out += _analyze(suffix, [], inner_seg, sub.fork(), depth + 1, incomplete)
     for token in tokens[start:]:
         out += _string_matches(_command_strings(token), sub, depth)
+    if incomplete and first_operand is not None and seg["pipe_in"] and \
+            any(ctx.protected.text_names(w) for w in ctx.stdin_words):
+        # The words on standard input spell a protected path: do they land in a write position?
+        inner = replaced[first_operand:]
+        if not any("__dwsub_input__" in t for t in inner):
+            inner = inner + ["__dwsub_input__"]  # no replace string: appended at the end
+        if any("__dwsub_input__" in inner[i] for i in _write_positions(inner, sub, False)):
+            out.append(_state_match(" ".join(ctx.stdin_words + ["|"] + tokens)))
     return out
 
 
@@ -718,7 +774,15 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
     matches: list = []
     ctx.sub_bodies = lexed.subs
     start = ctx.fork()
+    before = None
     for seg in lexed.segments:
+        ctx.stdin_words = []
+        if seg["pipe_in"] and before is not None:
+            try:
+                ctx.stdin_words = _tokens(before["words"])[1:]
+            except _Unreadable:
+                pass
+        before = seg
         matches += _segment_matches(seg, ctx, depth)
     for body in lexed.subs:
         matches += _shell_matches(body, start.fork(), depth + 1)
@@ -729,6 +793,8 @@ def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
     try:
         original = _tokens(seg["words"])
         redirects = [_unquote(w) for w in seg["redirects"]]
+        for word in seg["reads"]:  # an input redirect is a read
+            redirects.remove(_unquote(word))
     except _Unreadable:
         return [_unreadable_match()]
     return _analyze(original, redirects, seg, ctx, depth)
@@ -864,6 +930,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             ctx.cwd = _resolve(target, ctx.cwd)
     if tokens and os.path.basename(tokens[0]) == "find":
         matches += _find_exec_matches(tokens, ctx, depth)
+        matches += _find_write_matches(tokens, ctx)
     matches += _control_matches(original, tokens, redirects, ctx, wrapped)
     if tokens and os.path.basename(tokens[0]) == "git":
         matches += _git_control_matches(tokens, ctx)
@@ -933,6 +1000,93 @@ def _find_exec_matches(tokens: list, ctx: _Ctx, depth: int) -> list:
             i = j
         i += 1
     return out
+
+
+# The protected files find may come across below a start directory, as (directory, path in it).
+_GIT_HOOK_NAMES = """applypatch-msg pre-applypatch post-applypatch pre-commit pre-merge-commit
+prepare-commit-msg commit-msg post-commit pre-rebase post-checkout post-merge pre-push pre-receive
+update proc-receive post-receive post-update reference-transaction push-to-checkout pre-auto-gc
+post-rewrite sendemail-validate fsmonitor-watchman post-index-change""".split()
+_FINDABLE = [(".git", "hooks/" + hook) for hook in _GIT_HOOK_NAMES] + \
+    [(".git", "config"), (".git", "config.worktree"), (".git", "info/attributes")] + \
+    [(name, f) for name, files in _PROTECTED_NAMES.items() for f in files or ()]
+
+
+def _writes_what_it_finds(inner: list, ctx: _Ctx) -> bool:
+    """Whether the command of a find -exec has {} in a write position."""
+    if not inner or not any("{}" in t for t in inner):
+        return False
+    name = os.path.basename(inner[0])
+    if name in WRAPPERS or name in SHELLS or name in _RUNNERS or _INTERPRETER_RE.match(name):
+        return True  # what it does with the name is not modelled
+    return any("{}" in inner[i] for i in _write_positions(inner, ctx, False))
+
+
+def _may_hold_protected(start: str, ctx: _Ctx) -> bool:
+    """Whether a start directory of find is, contains or lies inside a protected directory.
+    A directory that cannot be looked at may."""
+    real = None if _dynamic(start) else _resolve(start, ctx.cwd)
+    if real is None or not os.path.isdir(real):
+        return True
+    low = real.lower()
+    if any(part in _PROTECTED_NAMES for part in low.split("/")) or \
+            any(os.path.lexists(os.path.join(real, name)) for name in _PROTECTED_NAMES):
+        return True
+    targets = list(ctx.protected.files) + ctx.protected.dirs
+    return any(_inside(t, low) or _inside(low, t) for t in targets)
+
+
+def _find_write_matches(tokens: list, ctx: _Ctx) -> list:
+    """find that deletes, or hands to a writing command, files it finds by itself: held when
+    a start directory may hold protected files and the -name/-path tests do not rule every
+    one of them out (a directory named in a negated or pruned test is ruled out)."""
+    starts, names, paths, excluded = [], [], [], set()
+    writes = False
+    i = 1
+    while i < len(tokens) and not (tokens[i].startswith("-") or tokens[i] in ("(", "!", ")")):
+        starts.append(tokens[i])
+        i += 1
+    negated = False
+    while i < len(tokens):
+        t = tokens[i]
+        if t in ("-exec", "-execdir", "-ok", "-okdir"):
+            j = i + 1
+            while j < len(tokens) and tokens[j] not in (";", "+"):
+                j += 1
+            writes = writes or _writes_what_it_finds(tokens[i + 1:j], ctx)
+            i = j
+        elif t == "-delete":
+            writes = True
+        elif t in ("-name", "-iname", "-path", "-ipath", "-wholename") and i + 1 < len(tokens):
+            pattern = tokens[i + 1].lower()
+            if negated or "-prune" in tokens[i + 2:i + 4]:
+                excluded |= {name for name in _PROTECTED_NAMES  # the name, not .github for .git
+                             if re.search(re.escape(name) + r"(?![a-z0-9_-])", pattern)}
+            elif "name" in t and "whole" not in t:
+                names.append(pattern)
+            else:
+                paths.append(pattern)
+            i += 1
+        negated = t in ("!", "-not")
+        i += 1
+    if not writes:
+        return []
+    # Tests that ask for a protected file outright (-name pre-push, -path '*/.git/*') hold
+    # wherever find starts; otherwise it depends on what the start directories may hold.
+    asked = any(n == os.path.basename(inside) for n in names for _d, inside in _FINDABLE) or \
+        any(re.search(re.escape(name) + r"(?![a-z0-9_-])", q) for q in paths
+            for name in _PROTECTED_NAMES)
+    if not asked and not any(_may_hold_protected(start, ctx) for start in starts or ["."]):
+        return []
+    for directory, inside in _FINDABLE:
+        if directory in excluded:
+            continue
+        found = "./%s/%s" % (directory, inside)
+        if (not names or any(_may_equal(n, os.path.basename(inside)) for n in names)) and \
+                (not paths or any(_may_equal(q, found) or _may_equal(q, "./x" + found[1:])
+                                  for q in paths)):
+            return [_state_match(" ".join(tokens))]
+    return []
 
 
 # -- inline interpreter code ------------------------------------------------------
@@ -1007,42 +1161,104 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
     return out
 
 
-# Programs that only read the files they are given. Some have options that make them write or
-# run something after all: with one of those the program is not read-only.
-_READ_ONLY = dict.fromkeys(("cat", "ls", "head", "tail", "more", "wc", "du", "stat", "file", "grep",
-                            "rg", "diff", "echo", "printf", "basename", "dirname", "realpath"))
-_READ_ONLY.update({"tree": re.compile(r"-o"), "less": re.compile(r"-[A-Za-z]*[oO]|--log-file", re.I),
-                   "find": re.compile(r"-(delete|exec|ok|fprint|fls)")})
-# Programs whose operands before the last are only read, while every option is a plain flag
-# from this list (an option with a value might name a file to write).
+# -- write positions --------------------------------------------------------------
+#
+# Every word of a command is a write position, with two shortcuts. Both apply only when the
+# program word is a bare name (./cat need not be cat) and every option on the line is one
+# the program's entry accounts for; otherwise every word is checked.
+#   read-only programs: no word is a write position;
+#   cp and rsync: only the last operand (the destination) and the options are.
+
+def _read_only(plain: str = r".*", operands: Optional[int] = None, never: Optional[str] = None):
+    """(the options that keep the program read-only, the most operands it may have, text
+    that no word may contain)."""
+    return re.compile(plain, re.S), operands, re.compile(never, re.S) if never else None
+
+
+_READ_ONLY = dict.fromkeys(
+    ("cat", "ls", "head", "tail", "wc", "du", "stat", "grep", "diff", "echo", "printf", "basename",
+     "dirname", "realpath", "jq", "cut", "tr", "column", "od", "strings", "md5", "md5sum",
+     "shasum", "sha1sum", "sha256sum"), _read_only())  # no option of these writes or runs
+_LESS = _read_only(r"-[^-oO=][^oO=]*|\+.*|--(quit-if-one-screen|RAW-CONTROL-CHARS|"
+                   r"raw-control-chars|chop-long-lines|LINE-NUMBERS|line-numbers|no-init|"
+                   r"ignore-case|IGNORE-CASE)")  # not -o, -O, --log-file
+_AWK = _read_only(r"-F.*|-v", never=r"system\s*\(|\||>|getline")  # not -f, -i inplace
+_READ_ONLY.update({
+    "file": _read_only(r"(?!--compile)(--.*|-[^-C]*)"),
+    "less": _LESS, "more": _LESS,
+    "tree": _read_only(r"-[^-oR=][^oR=]*|--(charset=.*|dirsfirst|gitignore|noreport|prune|du|si)"),
+    "rg": _read_only(r"(?!--pre(-glob)?(=|$)|--hostname-bin).*"),
+    "find": _read_only(r"(?!-(delete|exec|ok|fprint|fls)).*"),
+    "sort": _read_only(r"(?!--output|--temporary-directory|--compress-program)(--.*|-[^-oT=]*)"),
+    "uniq": _read_only(operands=1),  # a second operand is the output file
+    "xxd": _read_only(r"-[^-r]*", operands=1),
+    "yq": _read_only(r"(?!--inplace|--in-place)(--.*|-[^-i]*)"),
+    "sed": _read_only(r"-[nEru]+|-[nEru]*e|--(quiet|silent|regexp-extended|posix|debug|expression=.*)",
+                      never=r"(?:^|[^A-Za-z])[we]\s+\S|/[A-Za-z0-9]*e\s*(?:;|\}|$)"),
+    "awk": _AWK, "gawk": _AWK, "mawk": _AWK, "nawk": _AWK,
+})
+# Plain flags of cp and rsync: none takes a separate value, none names a file to write.
 _COPY_FLAGS = {
-    "cp": re.compile(r"^(-[aAbcdfHiLnpPrRTuvxX]+|--(archive|recursive|force|interactive|"
+    "cp": re.compile(r"-[aAbcdfHiLnpPrRTuvxX]+|--(archive|recursive|force|interactive|"
                      r"no-clobber|preserve(=.*)?|no-preserve=.*|verbose|update|dereference|"
-                     r"no-dereference|parents))$"),  # not -l or -s: a link to the source
-    "rsync": re.compile(r"^(-[aAvzrhPnqtlpgoDuHXEcixWSO]+|--(archive|recursive|verbose|compress|"
+                     r"no-dereference|parents)"),  # not -l or -s: a link to the source
+    "rsync": re.compile(r"-[aAvzrhPnqtlpgoDuHXEcixWSO]+|--(archive|recursive|verbose|compress|"
                         r"human-readable|progress|stats|dry-run|quiet|checksum|update|links|"
                         r"times|perms|itemize-changes|mkpath|relative|partial|info=.*|"
                         r"delete(-after|-before|-during|-excluded|-delay)?|"
-                        r"(exclude|include)(=.*)?))$"),
+                        r"(exclude|include)=.*)"),
 }
+# Of those, the ones that print file contents, not the names they were given.
+_CONTENT_READERS = set(_READ_ONLY) - {"echo", "printf", "ls", "find", "tree", "realpath",
+                                      "basename", "dirname", "stat", "du", "file"}
+# git subcommands that read or stage the working tree: their path arguments are not written.
+_GIT_READS = {"add", "diff", "status", "log", "show", "blame", "ls-files", "grep", "stash"}
+_GIT_WRITE_OPTION_RE = re.compile(r"--output|-O|--open-files-in-pager|--ext-diff|--textconv")
+# Options whose value is a pattern to match names with, not a file.
+_PATTERN_OPTION_RE = re.compile(r"(--exclude|--include|--exclude-dir|--ignore|-i?path|-i?name)(=.*)?$",
+                                re.S)
 
 
-def _write_positions(tokens: list, ctx: _Ctx) -> list:
-    """Indexes of the words of one command that may name a file it writes: all of them,
-    except every word of a read-only program and the sources of cp and rsync."""
-    name = os.path.basename(tokens[0])
-    if name in _READ_ONLY:
-        writes = _READ_ONLY[name]
-        if writes is None or not any(writes.match(t) for t in tokens[1:]):
+def _is_option(word: str) -> bool:
+    return word.startswith("-") and len(word) > 1
+
+
+def _write_positions(tokens: list, ctx: _Ctx, incomplete: Optional[bool] = None) -> list:
+    """Indexes of the words of one command that may name a file it writes."""
+    incomplete = ctx.incomplete if incomplete is None else incomplete
+    found = list(range(len(tokens)))
+    name = tokens[0]  # only a bare name is the program it is called after
+    options = [t for t in tokens[1:] if _is_option(t)]
+    entry = _READ_ONLY.get(name)
+    if entry is not None:
+        plain, most, never = entry
+        operands = len(tokens) - 1 - len(options)
+        if all(plain.fullmatch(t) for t in options) and (most is None or operands <= most) and \
+                not (never and any(never.search(t) for t in tokens[1:])):
             return []
-    flags = _COPY_FLAGS.get(name)
-    if flags is not None and not ctx.incomplete:
+    elif name in _COPY_FLAGS and not incomplete:
         end = tokens.index("--") if "--" in tokens else len(tokens)
-        options = [i for i in range(1, end) if tokens[i].startswith("-") and len(tokens[i]) > 1]
-        operands = [i for i in range(1, len(tokens)) if i not in options and i != end]
-        if len(operands) >= 2 and all(flags.match(tokens[i]) for i in options):
-            return [0] + options + operands[-1:]
-    return list(range(len(tokens)))
+        operands = [i for i in range(1, len(tokens)) if i != end
+                    and not (i < end and _is_option(tokens[i]))]
+        if len(operands) >= 2 and all(_COPY_FLAGS[name].fullmatch(t) for t in tokens[1:end]
+                                      if _is_option(t)):
+            found = [i for i in found if i not in operands[:-1]]
+    elif name == "git":
+        sub, args, _repo, unreadable = _git_parts(tokens, ctx)
+        reads = sub in _GIT_READS or (sub == "restore" and any(
+            a == "--staged" or re.fullmatch(r"-[A-Za-z]*S[A-Za-z]*", a) for a in args) and not any(
+            a == "--worktree" or re.fullmatch(r"-[A-Za-z]*W[A-Za-z]*", a) for a in args))
+        if reads and not unreadable and not any(_GIT_WRITE_OPTION_RE.match(a) for a in args):
+            found = found[:len(tokens) - len(args) - 1]  # git's own options before the subcommand
+    # The value of a pattern option is never a write position.
+    out = []
+    for i in found:
+        m = _PATTERN_OPTION_RE.match(tokens[i])
+        if m and m.group(2) is None and i + 1 in found:
+            found.remove(i + 1)
+        if not (m and m.group(2) is not None):
+            out.append(i)
+    return out
 
 
 def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
@@ -1076,14 +1292,19 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
     if wrapped:
         own = len(original) - len(_strip_prefix(list(original)))
         checked = [i for i, t in enumerate(original)
-                   if i <= own or t.startswith("-") or re.search(r"\s", t)]
+                   if i <= own or re.search(r"\s", t)
+                   or (t.startswith("-") and not _PATTERN_OPTION_RE.match(t))]
     elif tokens and original[head:] == tokens:
         positions = _write_positions(tokens, ctx)
         checked = [head + i for i in positions]
         if positions:
             checked = list(range(head)) + checked
+    elif next((t for t in original if not _ASSIGNMENT_RE.match(t)), "") in ("for", "select", "case"):
+        checked = []  # the words a loop runs over are data; its body is read on its own
     else:
         checked = list(range(len(original)))
+    if tokens and os.path.basename(tokens[0]) == "rg" and any(re.match(r"--pre(-glob)?(=|$)", t) for t in tokens[1:]):
+        out.append(_unreadable_match())  # rg runs the --pre command on every file it reads
     words = [original[i] for i in checked if i != skip] + list(redirects)
     if any(ctx.protected.token_hit(w, ctx.cwd, ctx.sub_bodies, ctx.marks) for w in words):
         out.append(_state_match(" ".join(original)))

@@ -58,9 +58,13 @@ def _set_aside(run_id: str, event: str) -> None:
 
 
 def _find_active_run(session_id: str) -> Optional[dict]:
-    for record in store.list_runs()[0]:
+    records, corrupt = store.list_runs()
+    for record in records:
         if record.get("agterm_session") == session_id and record.get("state") in runs.ACTIVE_STATES:
             return record
+    if corrupt:  # the run may be among the unreadable records: leave a trace
+        log_error("find run for session %s" % session_id,
+                  store.CorruptFile(", ".join(str(p) for p in corrupt)))
     return None
 
 

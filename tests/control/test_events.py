@@ -274,6 +274,9 @@ class HookRobustnessTests(EventBase):
         (self.dw_home / "runs" / (rid + ".json")).write_text("{broken")
         r = self.closed_event(sid)
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        log = (self.dw_home / "dw.log").read_text()
+        self.assertIn(rid + ".json", log)
+        self.assertIn(sid, log)
 
     def test_hook_with_missing_environment_exits_zero_silently(self):
         for args in (("status",), ("session-closed",), ("bogus",), ()):
@@ -386,6 +389,41 @@ class ResumeTests(EventBase):
         r = self.dw("resume", rid)
         self.assertEqual(r.returncode, 2)
         self.assertEqual(self.record(rid)["state"], "interrupted")
+
+
+class StaleApprovalTests(EventBase):
+    def test_interrupt_and_resume_clear_pending_approval_and_grants(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.set_record(rid, state="blocked", reason="awaiting approval: git push",
+                        pending_approval={"action": "git push"}, grants=[{"g": 1}],
+                        approvals=[{"action": "ls"}])
+        self.closed_event(sid)
+        rec = self.record(rid)
+        self.assertEqual(rec["state"], "interrupted")
+        self.assertIsNone(rec["pending_approval"])
+        self.assertEqual(rec["grants"], [])
+        self.assertEqual(rec["approvals"], [{"action": "ls"}])
+        self.set_record(rid, pending_approval={"action": "stale"}, grants=[{"g": 2}])
+        self.assertEqual(self.dw("resume", rid).returncode, 0)
+        rec = self.record(rid)
+        self.assertIsNone(rec["pending_approval"])
+        self.assertEqual(rec["grants"], [])
+        self.assertEqual(rec["approvals"], [{"action": "ls"}])
+        sid2 = rec["agterm_session"]
+        self.status_event(sid2, "blocked")
+        rec = self.record(rid)
+        self.assertEqual((rec["state"], rec["reason"]), ("blocked", "waiting for input"))
+        self.status_event(sid2, "active")
+        self.assertEqual(self.record(rid)["state"], "running")
+
+    def test_cancel_clears_pending_approval(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.set_record(rid, pending_approval={"action": "x"}, grants=[{"g": 1}])
+        self.assertEqual(self.dw("cancel", rid).returncode, 0)
+        rec = self.record(rid)
+        self.assertEqual((rec["pending_approval"], rec["grants"]), (None, []))
 
 
 class DismissTests(EventBase):

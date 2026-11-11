@@ -35,6 +35,11 @@ def _moved(run: dict, now: float, **fields) -> dict:
     return {**run, **fields, "state_changed_at": now}
 
 
+def _clear_approvals(run: dict) -> dict:
+    """Drop the pending approval and one-shot grants; `approvals` already granted are kept."""
+    return {**run, "pending_approval": None, "grants": []}
+
+
 def new_run_id() -> str:
     return "r-%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), secrets.token_hex(2))
 
@@ -270,7 +275,8 @@ def cancel_run(run_id: str) -> dict:
         def cancel(r):
             if r.get("state") in FINISHED_STATES:
                 raise RunError("run %s is already %s" % (run_id, r["state"]))
-            return _moved(r, now, state="cancelled", reason="cancelled by owner", ended_at=now)
+            return _clear_approvals(
+                _moved(r, now, state="cancelled", reason="cancelled by owner", ended_at=now))
 
         cancelled = store.update_run(run_id, cancel)
     start_eligible()
@@ -289,7 +295,7 @@ def finish_run_changed(run_id: str, state: str, reason: Optional[str]) -> tuple:
         if r.get("state") not in ACTIVE_STATES:
             return r
         changed.append(True)
-        return _moved(r, now, state=state, reason=reason, ended_at=now)
+        return _clear_approvals(_moved(r, now, state=state, reason=reason, ended_at=now))
 
     record = store.update_run(run_id, finish)
     return record, bool(changed)
@@ -345,7 +351,8 @@ def resume_run(run_id: str) -> dict:
         def mark(r):
             if r.get("state") != "interrupted":
                 raise RunError("run %s is no longer interrupted" % run_id)
-            moved = _moved(r, now, state="running", reason=None, agterm_session=sid, ended_at=None)
+            moved = _clear_approvals(
+                _moved(r, now, state="running", reason=None, agterm_session=sid, ended_at=None))
             moved.pop("acknowledged", None)
             moved.pop("acknowledged_at", None)
             return moved

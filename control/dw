@@ -94,6 +94,12 @@ def cmd_run(args) -> int:
         run = runs.request_run(project, " ".join(command))
     except runs.RunRefused as exc:
         raise UserError(str(exc))
+    if run["state"] == "failed":
+        sys.stderr.write("dw: %s failed: %s\n" % (run["id"], run.get("reason")))
+        return 2
+    if run["state"] == "queued" and run.get("reason") == "AGTerm unavailable":
+        sys.stderr.write("dw: AGTerm did not respond; %s stays queued\n" % run["id"])
+        return 2
     if run["state"] == "queued":
         print("%s queued (%s)" % (run["id"], run.get("reason") or "waiting"))
     else:
@@ -169,6 +175,9 @@ def main(argv=None) -> int:
         return 2
     except agterm.AgtermUnavailable as exc:
         sys.stderr.write("dw: AGTerm is not reachable: %s\n" % exc)
+        return 2
+    except agterm.AgtermError as exc:
+        sys.stderr.write("dw: AGTerm call failed: %s\n" % (str(exc).splitlines() or ["error"])[0])
         return 2
     except store.CorruptFile as exc:
         sys.stderr.write("dw: corrupt file: %s\n" % exc.path)

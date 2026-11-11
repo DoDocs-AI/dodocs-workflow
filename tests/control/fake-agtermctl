@@ -80,6 +80,19 @@ def main(argv):
         fail("cannot connect to socket: connection refused")
     if not argv:
         fail("missing command", 2)
+    # Scripted failure: $DW_HOME/fake-agterm/fail-next holds a command prefix such as
+    # "session new"; the next matching call (only) exits 1 with a non-connection error.
+    fail_file = os.path.join(state_dir(), "fail-next")
+    if os.path.exists(fail_file):
+        with open(fail_file) as fh:
+            prefix = fh.read().strip().split()
+        if argv[:len(prefix)] == prefix:
+            os.unlink(fail_file)
+            fail("invalid argument: scripted failure")
+    # FAKE_AGTERM_SLEEP=<seconds> delays every `session new` (to exercise timeouts).
+    if os.environ.get("FAKE_AGTERM_SLEEP") and argv[:2] == ["session", "new"]:
+        import time
+        time.sleep(float(os.environ["FAKE_AGTERM_SLEEP"]))
     cmd = argv[0]
     rest = argv[1:]
     opts, pos = parse(rest)

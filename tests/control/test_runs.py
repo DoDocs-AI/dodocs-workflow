@@ -372,6 +372,127 @@ class CancelAndQueueTests(RunTestBase):
         self.assertEqual(json.loads(r.stdout), [])
 
 
+class StateGuardTests(RunTestBase):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict(os.environ, {
+            "DW_AGTERMCTL": str(FAKE_AGTERMCTL), "DW_HOME": str(self.dw_home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _project(self, name="slotme"):
+        self.add_project(name)
+        from dwlib import store
+        return store.find_project(store.load_registry(), name)
+
+    def _queued_record(self, project, state="queued"):
+        from dwlib import runs, store
+        rec = {"id": runs.new_run_id(), "project_id": project["id"], "command": "go",
+               "state": state, "reason": None, "agterm_session": None,
+               "harness_session": None, "created_at": 1.0, "started_at": None,
+               "ended_at": None, "approvals": [], "pending_approval": None, "grants": []}
+        store.create_run(rec)
+        return rec
+
+    def test_start_refuses_record_that_is_no_longer_queued(self):
+        from dwlib import runs
+        project = self._project()
+        rec = self._queued_record(project, state="cancelled")
+        with self.assertRaises(runs.RunError):
+            runs._start(rec, project)
+        self.assertEqual(self.record(rec["id"])["state"], "cancelled")
+        self.assertEqual(self.new_session_calls(), [])
+
+    def test_cancelled_while_launching_is_not_resurrected_and_session_closed(self):
+        from dwlib import agterm, runs
+        project = self._project()
+        rec = self._queued_record(project)
+
+        def cancel_during_launch(**kwargs):
+            self.set_record(rec["id"], state="cancelled")
+            return "SID-1"
+
+        with mock.patch.object(agterm, "new_session", side_effect=cancel_during_launch), \
+                mock.patch.object(agterm, "close_session") as close:
+            with self.assertRaises(runs.RunError):
+                runs._start(rec, project)
+        close.assert_called_once_with("SID-1")
+        self.assertEqual(self.record(rec["id"])["state"], "cancelled")
+
+    def test_run_cancelled_while_queued_is_not_started_later(self):
+        from dwlib import runs
+        self.add_project("slotme")
+        first = self.run_id(self.run_cmd("slotme", "one"))
+        queued = self.run_id(self.run_cmd("slotme", "two"))
+        self.assertEqual(self.dw("cancel", queued).returncode, 0)
+        self.set_record(first, state="done")
+        self.assertEqual(runs.start_eligible(), [])
+        self.assertEqual(self.record(queued)["state"], "cancelled")
+        self.assertEqual(len(self.new_session_calls()), 1)
+
+    def test_cancel_does_not_overwrite_done(self):
+        self.add_project("slotme")
+        rid = self.run_id(self.run_cmd("slotme", "go"))
+        self.set_record(rid, state="done")
+        self.assertEqual(self.dw("cancel", rid).returncode, 2)
+        self.assertEqual(self.record(rid)["state"], "done")
+
+    def test_cancel_finishing_underneath_leaves_done(self):
+        from dwlib import runs
+        self.add_project("slotme")
+        rid = self.run_id(self.run_cmd("slotme", "go"))
+        from dwlib import agterm
+
+        def finish(_sid):
+            self.set_record(rid, state="done")
+
+        with mock.patch.object(agterm, "close_session", side_effect=finish):
+            with self.assertRaises(runs.RunError):
+                runs.cancel_run(rid)
+        self.assertEqual(self.record(rid)["state"], "done")
+
+
+class LaunchFailureTests(RunTestBase):
+    def test_launch_error_marks_run_failed_and_next_queued_run_starts(self):
+        for name in ("a", "b", "c"):
+            self.add_project(name)
+        reg = json.loads((self.dw_home / "registry.json").read_text())
+        reg["limits"]["total"] = 1
+        (self.dw_home / "registry.json").write_text(json.dumps(reg))
+        first = self.run_id(self.run_cmd("a", "go"))
+        bad = self.run_id(self.run_cmd("b", "go"))
+        good = self.run_id(self.run_cmd("c", "go"))
+        self.assertEqual(self.record(bad)["state"], "queued")
+        self.fake_agterm_dir.joinpath("fail-next").write_text("session new")
+        self.assertEqual(self.dw("cancel", first).returncode, 0)
+        failed = self.record(bad)
+        self.assertEqual(failed["state"], "failed")
+        self.assertIn("scripted failure", failed["reason"])
+        self.assertIsInstance(failed["ended_at"], float)
+        self.assertEqual(self.record(good)["state"], "running")
+
+    def test_run_with_launch_error_exits_2_with_one_line(self):
+        self.add_project("slotme")
+        self.fake_agterm_dir.mkdir(parents=True, exist_ok=True)
+        (self.fake_agterm_dir / "fail-next").write_text("session new")
+        r = self.run_cmd("slotme", "go")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual([x["state"] for x in self.run_records()], ["failed"])
+
+    def test_adapter_timeout_is_unreachable_not_a_traceback(self):
+        self.add_project("slotme")
+        r = self.run_cmd("slotme", "go", env={
+            "FAKE_AGTERM_SLEEP": "5", "DW_AGTERMCTL_TIMEOUT": "1"})
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
+        self.assertIn("AGTerm", r.stderr)
+        rec = self.run_records()[0]
+        self.assertEqual((rec["state"], rec["reason"]), ("queued", "AGTerm unavailable"))
+
+
 class AgtermAdapterTests(RunTestBase):
     def setUp(self):
         super().setUp()

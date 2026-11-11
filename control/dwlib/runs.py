@@ -122,7 +122,10 @@ def _session_name(project: dict, command: str) -> str:
 
 
 def _start(run: dict, project: dict) -> dict:
+    """Launch a queued run. Only a record that is still `queued` may become `running`."""
     run_id = run["id"]
+    if store.load_run(run_id).get("state") != "queued":
+        raise RunError("run %s is no longer queued" % run_id)
     harness_session = str(uuid.uuid4())
     _write_prompt(run_id, run["command"])
     sid = agterm.new_session(
@@ -132,14 +135,37 @@ def _start(run: dict, project: dict) -> dict:
     now = time.time()
 
     def mark(r):
+        if r.get("state") != "queued":
+            raise RunError("run %s is no longer queued" % run_id)
         return {**r, "state": "running", "reason": None, "agterm_session": sid,
                 "harness_session": harness_session, "started_at": now}
 
-    return store.update_run(run_id, mark)
+    try:
+        return store.update_run(run_id, mark)
+    except RunError:
+        try:  # cancelled while launching: do not leave its session behind
+            agterm.close_session(sid)
+        except agterm.AgtermError:
+            pass
+        raise
 
 
 def _set_reason(run_id: str, reason: str) -> None:
-    store.update_run(run_id, lambda r: {**r, "reason": reason})
+    def setter(r):
+        return {**r, "reason": reason} if r.get("state") == "queued" else r
+
+    store.update_run(run_id, setter)
+
+
+def _fail_queued(run_id: str, reason: str) -> None:
+    now = time.time()
+
+    def fail(r):
+        if r.get("state") != "queued":
+            return r
+        return {**r, "state": "failed", "reason": reason, "ended_at": now}
+
+    store.update_run(run_id, fail)
 
 
 def start_eligible() -> list:
@@ -165,10 +191,7 @@ def start_eligible() -> list:
             pid = run["project_id"]
             project = projects.get(pid)
             if project is None:
-                now = time.time()
-                store.update_run(run["id"], lambda r: {
-                    **r, "state": "failed", "reason": "project removed from registry",
-                    "ended_at": now})
+                _fail_queued(run["id"], "project removed from registry")
                 continue
             reason = None
             if per_project.get(pid, 0) >= per_limit:
@@ -181,9 +204,14 @@ def start_eligible() -> list:
                 continue
             try:
                 started.append(_start(run, project))
+            except RunError:
+                continue  # no longer queued (cancelled meanwhile)
             except agterm.AgtermUnavailable:
                 _set_reason(run["id"], "AGTerm unavailable")
                 break
+            except agterm.AgtermError as exc:
+                _fail_queued(run["id"], "launch failed: %s" % (str(exc) or "unknown error")[:300])
+                continue
             per_project[pid] = per_project.get(pid, 0) + 1
             total += 1
     return started
@@ -204,21 +232,27 @@ def request_run(project: dict, command: str) -> dict:
 
 
 def cancel_run(run_id: str) -> dict:
-    try:
-        run = store.load_run(run_id)
-    except store.RunNotFound:
-        raise RunError("unknown run: %s" % run_id)
-    if run["state"] in FINISHED_STATES:
-        raise RunError("run %s is already %s" % (run_id, run["state"]))
-    if run["state"] in ACTIVE_STATES and run.get("agterm_session"):
+    with store.file_lock(paths.home() / "start.lock"):
         try:
-            agterm.close_session(run["agterm_session"])
-        except agterm.AgtermUnavailable:
-            raise RunError("AGTerm is not reachable; cannot close the session of %s" % run_id)
-        except agterm.AgtermError:
-            pass  # session is already gone
-    now = time.time()
-    cancelled = store.update_run(run_id, lambda r: {
-        **r, "state": "cancelled", "reason": "cancelled by owner", "ended_at": now})
+            run = store.load_run(run_id)
+        except store.RunNotFound:
+            raise RunError("unknown run: %s" % run_id)
+        if run["state"] in FINISHED_STATES:
+            raise RunError("run %s is already %s" % (run_id, run["state"]))
+        if run["state"] in ACTIVE_STATES and run.get("agterm_session"):
+            try:
+                agterm.close_session(run["agterm_session"])
+            except agterm.AgtermUnavailable:
+                raise RunError("AGTerm is not reachable; cannot close the session of %s" % run_id)
+            except agterm.AgtermError:
+                pass  # session is already gone
+        now = time.time()
+
+        def cancel(r):
+            if r.get("state") in FINISHED_STATES:
+                raise RunError("run %s is already %s" % (run_id, r["state"]))
+            return {**r, "state": "cancelled", "reason": "cancelled by owner", "ended_at": now}
+
+        cancelled = store.update_run(run_id, cancel)
     start_eligible()
     return cancelled

@@ -27,8 +27,18 @@ def _socket() -> Optional[str]:
     return os.environ.get("AGT_SOCKET") or os.environ.get("AGTERM_SOCKET") or None
 
 
+def _timeout(default: Optional[float]) -> Optional[float]:
+    override = os.environ.get("DW_AGTERMCTL_TIMEOUT")
+    if override and default is not None:
+        try:
+            return float(override)
+        except ValueError:
+            pass
+    return default
+
+
 def _run(words: list, options: Optional[list] = None, timeout: Optional[float] = None,
-         ok_codes: tuple = (0,)):
+         ok_codes: tuple = (0,), raise_timeout: bool = False):
     """Run `agtermctl <words> [--socket S] <options>`; options go after the subcommand."""
     argv = [_binary()] + list(words)
     sock = _socket()
@@ -37,6 +47,10 @@ def _run(words: list, options: Optional[list] = None, timeout: Optional[float] =
     argv += list(options or [])
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if raise_timeout:
+            raise
+        raise AgtermUnavailable("agtermctl timed out after %ss: %s" % (timeout, " ".join(words)))
     except FileNotFoundError:
         raise AgtermUnavailable("agtermctl not found: %s" % _binary())
     except PermissionError:
@@ -64,9 +78,9 @@ def _result(proc) -> dict:
 
 def available() -> bool:
     try:
-        _run(["window", "list"], ["--json"], timeout=10)
+        _run(["window", "list"], ["--json"], timeout=_timeout(10))
         return True
-    except (AgtermError, subprocess.TimeoutExpired):
+    except AgtermError:
         return False
 
 
@@ -74,7 +88,7 @@ def new_session(cwd: str, workspace_name: str, name: str, command: str, context:
     """Start a background session running `command`; returns its session id."""
     proc = _run(["session", "new"], [
         "--no-select", "--workspace-name", workspace_name, "--create-workspace",
-        "--cwd", cwd, "--name", name, "--command", command, "--json"], timeout=30)
+        "--cwd", cwd, "--name", name, "--command", command, "--json"], timeout=_timeout(30))
     sid = None
     try:
         sid = _result(proc).get("id")
@@ -84,8 +98,8 @@ def new_session(cwd: str, workspace_name: str, name: str, command: str, context:
         raise AgtermError("agtermctl did not return a session id")
     try:
         # A restored session must not re-run the harness; pin the restore to a plain shell.
-        _run(["session", "restore"], ["--none", "--target", sid], timeout=15)
-        _run(["session", "context", context], ["--target", sid], timeout=15)
+        _run(["session", "restore"], ["--none", "--target", sid], timeout=_timeout(15))
+        _run(["session", "context", context], ["--target", sid], timeout=_timeout(15))
     except AgtermError:
         try:
             close_session(sid)
@@ -97,12 +111,12 @@ def new_session(cwd: str, workspace_name: str, name: str, command: str, context:
 
 def session_states() -> dict:
     """session id -> {status, status_changed_at, name}, across all open windows."""
-    windows = _result(_run(["window", "list"], ["--json"], timeout=15)).get("windows") or []
+    windows = _result(_run(["window", "list"], ["--json"], timeout=_timeout(15))).get("windows") or []
     states: dict = {}
     for win in windows:
         if not win.get("open", True):
             continue
-        tree = _result(_run(["tree"], ["--json", "--window", str(win["id"])], timeout=15))
+        tree = _result(_run(["tree"], ["--json", "--window", str(win["id"])], timeout=_timeout(15)))
         for ws in (tree.get("tree") or {}).get("workspaces") or []:
             for node in ws.get("sessions") or []:
                 states[node["id"]] = {
@@ -114,7 +128,7 @@ def session_states() -> dict:
 
 
 def notify(session_id: str, title: str, body: str) -> None:
-    _run(["notify", body], ["--title", title, "--target", session_id], timeout=15)
+    _run(["notify", body], ["--title", title, "--target", session_id], timeout=_timeout(15))
 
 
 def ask(session_id: str, title: str, message: str, buttons: list, timeout: int) -> Optional[str]:
@@ -124,7 +138,7 @@ def ask(session_id: str, title: str, message: str, buttons: list, timeout: int) 
         options += ["--button", "%s=%s" % (button_id, label)]
     try:
         proc = _run(["ask", title], options + ["--json"], timeout=timeout,
-                    ok_codes=(0, 2, 3, 124))
+                    ok_codes=(0, 2, 3, 124), raise_timeout=True)
     except subprocess.TimeoutExpired:
         return None
     if proc.returncode != 0:
@@ -141,9 +155,9 @@ def ask(session_id: str, title: str, message: str, buttons: list, timeout: int) 
 
 
 def close_session(session_id: str) -> None:
-    _run(["session", "close"], ["--target", session_id], timeout=15)
+    _run(["session", "close"], ["--target", session_id], timeout=_timeout(15))
 
 
 def session_tail(session_id: str, lines: int) -> str:
-    proc = _run(["session", "text"], ["--lines", str(lines), "--target", session_id], timeout=15)
+    proc = _run(["session", "text"], ["--lines", str(lines), "--target", session_id], timeout=_timeout(15))
     return proc.stdout

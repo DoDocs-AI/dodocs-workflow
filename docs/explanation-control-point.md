@@ -135,6 +135,9 @@ Things that pass although you might expect them to be held.
   (`x=.git; echo x > $x/config`, `cd "$(git rev-parse --git-dir)" && echo x > config`).
 - A substitution that prints a protected name: `echo x > $(echo .git)/config`,
   `echo x > $(basename .git)/config`.
+- A command hidden in a variable that is then used as an arithmetic operand of `test`, `[` or
+  `[[` (a variable holding `a[$(cmd)]` in `[ "$x" -eq 0 ]`) is run by the shell's arithmetic
+  evaluation and is not seen.
 - Words that are run-time values outside a deciding position, such as the body of
   `curl -d "$DATA"` to a local host.
 - Names produced by an earlier command and piped into a writer are not checked:

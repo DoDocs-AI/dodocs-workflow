@@ -407,22 +407,25 @@ Opens the control session: a thin prompt over the `dw` command. It runs `dw doct
 starts runs with `dw run`, answers status questions (what needs you, then what is running,
 then what finished), and runs `dw approve` or `dw deny` only on your explicit word. It never
 edits a project. Refusals from `dw run` (project not trusted in Claude Code,
-`/container-team` and `--docker` commands, guard not installed) are relayed as they are.
+`/container-team` and `--docker` commands, guard not installed or not working) are relayed as
+they are. Open it outside your registered projects: inside a project with an active run, its
+own `dw` commands are held by the guard.
 
 ### `dw` subcommands
 
 `install.sh` puts `dw` at `~/.dodocs-workflow/bin/dw` (linked into `~/.local/bin` when that
-directory exists). State lives in `~/.dodocs-workflow/` (override with `DW_HOME`).
+directory exists). State lives in `~/.dodocs-workflow/`. (`DW_HOME` moves it for tests only;
+launched sessions and the terminal hooks always use the default directory.)
 
 | Subcommand | Effect |
 |---|---|
-| `dw setup [--yes] [--remove]` | Add (or remove) the guard entry in `~/.claude/settings.json` and the two hook lines in AGTerm's `hooks.conf`; shows the change and asks first. Runs cannot start until it has been run |
+| `dw setup [--yes] [--remove]` | Add (or remove) the guard entry in `~/.claude/settings.json` and the two hook lines in AGTerm's `hooks.conf`; shows the change and asks first. Runs cannot start until it has been run. Run again, it replaces a guard entry whose program is gone |
 | `dw doctor` | Check the installation: guard entry, terminal hooks, AGTerm, registry |
 | `dw project add --name N --path P --group G [--notes T]` | Register a project; `group` is the AGTerm workspace its runs appear in |
 | `dw project list [--json]` | List registered projects |
 | `dw project remove <id>` | Unregister a project |
 | `dw project import-legacy [--from PATH] [--group NAME]` | Import projects from the old `/workspace` registry (asks for each group unless `--group` is given); the old files are not modified |
-| `dw run <project> "<command>"` | Start a run as a background AGTerm session, or queue it when a limit is reached (1 per project, 3 in total) |
+| `dw run <project> "<command>"` | Start a run as a background AGTerm session, or queue it when a limit is reached (1 per project, 3 in total). Refuses unless the guard entry runs and allows a harmless call |
 | `dw queue [--json]` | List queued runs |
 | `dw status [project] [--json]` | Merged status: run record, live session state, pipeline progress |
 | `dw tail <run-id> [--lines N]` | Read-only tail of a live run's terminal |

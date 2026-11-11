@@ -37,15 +37,19 @@ It is **not**:
    warning and the rest installs. It never edits your Claude Code settings or terminal hooks.
 2. **`dw setup`.** Shows the change it will make and asks before making it: one guard entry in
    `~/.claude/settings.json` and two lines in AGTerm's `hooks.conf`. It merges and never
-   rewrites other entries. **Runs cannot start until this has been run.** `dw doctor` checks
-   the result; `dw setup --remove` takes it all out again.
+   rewrites other entries. **Runs cannot start until this has been run**, and `dw run` and
+   `dw resume` test the guard entry once before each launch: an entry whose program is gone
+   or fails refuses the run. Running `dw setup` again repairs such an entry. `dw doctor`
+   checks the result; `dw setup --remove` takes it all out again.
 3. **Register projects.** `dw project add --name <name> --path <path> --group <AGTerm workspace>`, or
    `dw project import-legacy` to import the projects from the old `/workspace` registry
    (it asks for each project's workspace; the old command and its files are left untouched).
 4. **Trust each project in Claude Code once.** Open Claude Code in the directory and accept
    the trust dialog. `dw run` refuses projects that are not trusted yet.
 5. **Open `/control`** in a Claude Code session and talk to it. It is meant to live in one
-   long-running session, but holds no state: closing it loses nothing.
+   long-running session, but holds no state: closing it loses nothing. Open it in a directory
+   outside your registered projects: inside a project with an active run, the guard holds the
+   control session's own `dw` commands like that run's.
 
 Uninstalling (`uninstall.sh`) first runs `dw setup --remove`, then removes the program. Your
 registry, run records and log in `~/.dodocs-workflow/` are kept.
@@ -86,6 +90,13 @@ change the control point's own settings. Everything it does not recognise is all
   the run and never with `dw approve`.
 - While a run is active in a project, your own Claude sessions in that project see the same
   questions. That is accepted.
+- **After the run ends.** A session that belongs to a run that has finished, failed, been
+  interrupted or cancelled (or not started yet) keeps working until it is closed, but every
+  action the guard would hold is refused outright, with no dialog. Do such an action by hand,
+  or start a new run for it.
+- **State directory.** Run records, the registry and the log live in `~/.dodocs-workflow/`.
+  `DW_HOME` overrides that for tests only: launched sessions and the terminal hooks always use
+  the default directory.
 
 ## What the guard does not protect against
 
@@ -137,14 +148,13 @@ Things that pass although you might expect them to be held.
 - A symlink to a protected directory made earlier in the same command line.
 
 **Protected directories named as a whole**
-- `rm -rf .claude`, `rm -rf .git`, `rm -rf .*`, `mv .claude c`, `cp -r /tmp/x .claude`,
+- `rm -rf .claude`, `rm -rf .git`, `mv .claude c`, `cp -r /tmp/x .claude`,
   `rsync -a /tmp/x/.claude/ .claude/`, `rsync -a --delete /tmp/x/ ./`, `tar -xzf o.tgz -C .claude`, `unzip x.zip -d .claude`,
   `chmod -R 755 .claude`, `git checkout HEAD .claude/`, `git stash -- .claude`.
 - `git clean -fd[x]`, `git reset --hard`, `git checkout -f`, `git stash -u`, which can delete
   untracked or revert tracked settings files.
 
 **`find`** (the weakest part; it is a heuristic over find's expression language)
-- `find . -name .git -prune -o -name config -delete`: prune has no effect under `-delete`.
 - A find that writes what it finds, started in an existing directory that shows no `.git`,
   `.claude` or `agterm` directly inside (a monorepo subfolder), and `find -exec sh -c '...' _ {} \;`.
 
@@ -168,12 +178,17 @@ Things that pass although you might expect them to be held.
 - A tag pushed by plain name (`git push origin v1.0`).
 - Deletion other than `rm` or `find`: moving out of the project and deleting in `/tmp`,
   overwriting with `>` or `cp` outside the project, `rsync --delete`, `truncate`, `dd`,
-  `git clean` in another repository. Writes to `~/.zshrc` or `~/.ssh/authorized_keys`, and
-  `rm -rf ../x`, `rm -rf ~` or `rm -rf $HOME/x`, are not guarded.
+  `git clean` in another repository. Writes to `~/.zshrc` or `~/.ssh/authorized_keys` are not
+  guarded. (Deletions with `rm` outside the project are held, except under `/tmp` and
+  `/private/tmp`.)
 
 **Outside the hook**
 - `launchd` or `cron` jobs that run later; hooks disabled through managed settings or
   `CLAUDE_*` variables in a nested process.
+- Killing the hook process (`pkill -f "dw guard"`) lets the call it was deciding through.
+- A result note that says `DONE`, written early, ends the run early. The session keeps
+  working; from then on the guard refuses every action it would hold, but everything else
+  goes ahead.
 - In-process teammates, built-in tools that act outward, MCP servers whose write tools have
   read-only names, a browser `navigate` to a GET URL with side effects.
 - Your own sessions are guarded only while a run is active in that project.
@@ -188,7 +203,7 @@ Things that are held although they are harmless. They are held as `control`, so 
 be approved for the run, unless noted.
 
 - **Reading a protected file** (`.git`, `.claude/settings.json`) in a way the guard cannot
-  prove is a read: `test -f`, `[ -f ]`, `cmp`, `readlink`, `git cat-file`, a read-only program
+  prove is a read: a read-only program
   called by path or with an unlisted option (`/bin/cat`, `grep --no-color`, `sed -n '/a/,/b/{p}'`,
   `awk '$3 > 100'`), `rg --debug`, anything under a wrapper or inside a shell string
   (`sudo cat .git/config`, `bash -c 'cat .claude/settings.json'`), an assignment whose value

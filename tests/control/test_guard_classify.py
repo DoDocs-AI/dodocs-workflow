@@ -1368,6 +1368,12 @@ class ReviewRound5Tests(GuardClassifyBase):
             ("find . -not -path '*/node_modules/*' -name config -delete", "control"),
             ("find . -not -path '*/.github/*' -name pre-push -delete", "control"),
             ("find . -path './.git/hooks/*' -exec cp /tmp/x {} \\;", "control"),
+            ("find . -not -path '*/.git/objects/*' -name pre-push -exec cp /tmp/x {} \\;", "control"),
+            ("find . -path './src/*' -o -name pre-push -exec cp /tmp/x {} \\;", "control"),
+            ("find . -name '*.md' -o -name pre-push -delete", "control"),
+            ("find . \\( -name '*.md' -o -name pre-push \\) -delete", "control"),
+            ("find . -name pre-push -print -o -name '*.md' -delete", None),
+            ("find . \\( -name .git -o -name node_modules \\) -prune -o -name config -delete", None),
             ("find . -name '*.pyc' -delete", None),
             ("find . -name '*.py' -exec sed -i '' s/a/b/ {} +", None),
             ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
@@ -1417,6 +1423,9 @@ class ReviewRound5Tests(GuardClassifyBase):
             ("echo x > \"$(git rev-parse --git-path hooks)/pre-push\"", "control"),
             ("echo x > $(echo out.txt)", None),
             ("echo .claude/settings.json | xargs cat", None),
+            ("cat .claude/settings.json | xargs -I{} mkdir -p {}", None),
+            ("jq -r '.dirs[]' .claude/settings.json | xargs touch", None),
+            ("git ls-files .claude/settings.json | xargs sed -i '' s/a/b/", "control"),
             ("echo .claude/settings.json | xargs -I{} cp {} /tmp/", None),
             ("ls .claude/agents/*.md | xargs wc -l", None),
             ("echo x > $(mktemp)", None),
@@ -1431,7 +1440,7 @@ class ReviewRound5Tests(GuardClassifyBase):
             ("ENV=staging ./deploy.sh", None),
             ("export ENV=production", None),
             ("env ENV=x make", None),
-            ("BASH_ENV=x make test", None),
+            ("BASH_ENV=x make test", "control"),
             ("ENV=$F sh x.sh", "control"),
             ("BASH_ENV=$F bash x.sh", "control"),
             ("BASH_ENV=/tmp/x bash x.sh", "control"),
@@ -1530,6 +1539,130 @@ class ReviewRound5Tests(GuardClassifyBase):
             ("git checkout -- .claude/settings.json", "control"),
             ("ENV=$F sh x.sh", "control"),
             ("BASH_ENV=/tmp/x bash x.sh", "control"),
+        ])
+
+
+class TightenedExemptionTests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_1_pattern_options_belong_to_their_program(self):
+        self.check_rows([
+            ("mytool --exclude .git/hooks/pre-push", "control"),
+            ("cp --exclude .claude/settings.json x", "control"),
+            ("tee -name .git/hooks/pre-push", "control"),
+            ("tar czf o.tgz --ignore .git/config", "control"),
+            ("rsync -a --filter .git/hooks/pre-push a b", "control"),
+            ("rsync -a --excluded .git/config a b", "control"),
+            ("tar xzf o.tgz --include-x=.git/config", "control"),
+            ("tar czf o.tgz --exclude='.git/*' .", None),
+            ("tar czf o.tgz --exclude '.git/*' .", None),
+            ("zip -r o.zip . --exclude '.git/*'", None),
+            ("rsync -a --exclude='.git/*' . /tmp/x/", None),
+            ("grep -rn foo . --exclude-dir=.git", None),
+            ("grep -rn foo . --exclude-dir .git/hooks", None),
+            ("rg foo -g '!.git/*' .", None),
+            ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
+        ])
+
+    def test_2_loop_words_are_write_targets_when_the_body_writes_the_variable(self):
+        self.check_rows([
+            ("for f in .git/hooks/pre-push; do cp /tmp/x \"$f\"; done", "control"),
+            ("for f in a .claude/settings.json; do echo x > $f; done", "control"),
+            ("for f in .git/hooks/*; do chmod +x ${f}; done", "control"),
+            ("for f in .claude/*; do sed -i '' s/a/b/ \"$f\"; done", "control"),
+            ("for d in .git .claude; do cp /tmp/x $d/config; done", "control"),
+            ("for f in $LIST; do cp /tmp/x .git/hooks/$f; done", "control"),
+            ("select f in .git/config; do rm $f; done", "control"),
+            ("for f in src/*.py; do cp \"$f\" build/; done", None),
+            ("for f in .claude/agents/*.md; do head -3 \"$f\"; done", None),
+            ("for f in .claude/*; do echo \"$f\"; done", None),
+            ("for f in .git/hooks/*; do cat \"$f\"; done", None),
+            ("for f in .claude/agents/*.md; do cp \"$f\" /tmp/x/; done", None),
+            ("for f in a b; do echo x > out/$f.txt; done", None),
+            ("for f in .claude/agents/*.md; do sed -i '' s/a/b/ \"$f\"; done", None),
+        ])
+
+    def test_3_sed_is_read_only_for_a_strict_set_of_scripts(self):
+        self.check_rows([
+            ("sed -n 'w.git/x' .claude/settings.json", "control"),
+            ("sed -n '1w out' .claude/settings.json", "control"),
+            ("sed 's/a/b/w out' .claude/settings.json", "control"),
+            ("sed 's/a/b/e' .claude/settings.json", "control"),
+            ("sed -n '1e date' .claude/settings.json", "control"),
+            ("sed -e 'W out' .claude/settings.json", "control"),
+            ("sed -f script.sed .claude/settings.json", "control"),
+            ("sed -i '' s/a/b/ .claude/settings.json", "control"),
+            ("sed --in-place s/a/b/ .claude/settings.json", "control"),
+            ("sed -n '1,5p' .claude/agents/a.md", None),
+            ("sed -n '1,5p' .claude/settings.json", None),
+            ("sed -n 5p .claude/settings.json", None),
+            ("sed '$d' .claude/settings.json", None),
+            ("sed -n '/hooks/p' .claude/settings.json", None),
+            ("sed 's/a/b/g' .claude/settings.json", None),
+            ("sed -E 's#a+#b#' .claude/settings.json", None),
+            ("sed -e 's/a/b/' -e '5q' .claude/settings.json", None),
+            ("sed 's/a/b/g' x.txt", None),
+        ])
+
+    def test_4_long_options_are_on_an_allowlist(self):
+        self.check_rows([
+            ("sort --outp=.claude/settings.json x", "control"),
+            ("sort --out .claude/settings.json x", "control"),
+            ("sort --compr=/tmp/x .claude/settings.json", "control"),
+            ("file --comp .claude/settings.json", "control"),
+            ("yq --inpl .a=1 .claude/settings.json", "control"),
+            ("tree --outp=.git/hooks/pre-push .", "control"),
+            ("less --log-f=.git/hooks/pre-push x", "control"),
+            ("grep --unknown-option x .claude/settings.json", "control"),
+            ("git diff --outp=.git/hooks/pre-push", "control"),
+            ("sort -u a.txt", None),
+            ("sort --unique --reverse .claude/settings.json", None),
+            ("grep --color=always -rn hooks .claude/settings.json", None),
+            ("ls --color=auto -la .git/hooks", None),
+            ("head --lines=5 .git/config", None),
+            ("wc --lines .claude/settings.json", None),
+            ("jq --raw-output .hooks .claude/settings.json", None),
+            ("diff --unified .claude/settings.json /tmp/x", None),
+            ("rg --hidden --glob '*.json' hooks .claude", None),
+            ("echo --output .git/config", None),
+        ])
+
+    def test_5_bash_env_is_always_held(self):
+        self.check_rows([
+            ("BASH_ENV=/tmp/x make", "control"),
+            ("BASH_ENV=x make test", "control"),
+            ("export BASH_ENV=/tmp/x", "control"),
+            ("ENV=/tmp/x sh x.sh", "control"),
+            ("ENV=production npm run build", None),
+            ("export ENV=production", None),
+            ("BASH_ENV= make", None),
+        ])
+
+    def test_6_git_stash_with_paths_writes_them(self):
+        self.check_rows([
+            ("git stash push -- .claude/settings.json", "control"),
+            ("git stash -- .git/config", "control"),
+            ("git stash", None),
+            ("git stash pop", None),
+            ("git stash list", None),
+            ("git stash show -p stash@{0}", None),
+            ("git stash push -m wip", None),
+        ])
+
+    def test_7_find_excludes_a_directory_only_by_prune_or_a_covering_negation(self):
+        self.check_rows([
+            ("find . -not -name .git -name pre-push -exec cp /tmp/x {} \\;", "control"),
+            ("find . -not -path ./.git -name config -delete", "control"),
+            ("find . ! -path '*.git' -name pre-push -delete", "control"),
+            ("find . -not -path '*/.git/objects/*' -name pre-push -delete", "control"),
+            ("find . -not -path '*/.github/*' -name pre-push -delete", "control"),
+            ("find . -not -path '*/.git/*' -name config -delete", None),
+            ("find . -name .git -prune -o -name config -delete", None),
+            ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
         ])
 
 

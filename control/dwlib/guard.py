@@ -507,7 +507,8 @@ class _Ctx:
         self.git_cache: dict = {}
         self.sub_bodies: list = []  # what the substitutions of the command being read run
         self.marks: tuple = ()  # replace strings of the xargs, parallel or find running this
-        self.stdin_words: list = []  # arguments of the command piped into the one being read
+        self.loop_words: dict = {}  # loop variable -> the words it runs over
+        self.stdin_words: list = []  # words of the command piped into the one being read
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
 
     def fork(self) -> "_Ctx":
@@ -632,15 +633,15 @@ def _runs_a_command(tokens: list) -> bool:
 # Variables that make an interpreter, a shell or the dynamic linker load a file.
 _LOADER_ENV_RE = re.compile(r"^(NODE_OPTIONS|PERL5OPT|RUBYOPT|PYTHONSTARTUP|BASH_ENV|ENV|LD_PRELOAD|"
                             r"DYLD_INSERT_LIBRARIES|LESSOPEN|LESSCLOSE)\+?=(.+)$", re.S)
-# ENV and BASH_ENV are read by a shell only: a shell as a program word somewhere on the line.
+# ENV is also an ordinary variable name: it counts with a shell as a program word on the line.
 _SHELL_WORD_RE = re.compile(r"(?:^|[\s;&|(/'\"`])(?:sh|dash|ksh|ash|bash|zsh)(?=$|[\s;&|)'\"`])")
 _DECLARERS = ("export", "declare", "typeset", "readonly", "local")
 
 
 def _loader_env_matches(original: list, ctx: _Ctx, depth: int) -> list:
     """Code loaded through the environment, set as a command prefix, with export, or in the
-    arguments of a wrapper. NODE_OPTIONS is read with node's loader-option rules; ENV and
-    BASH_ENV count when a shell is run on the same line; any other of these variables set
+    arguments of a wrapper. NODE_OPTIONS is read with node's loader-option rules; ENV counts
+    when a shell is run on the same line; any other of these variables set
     to a value is held."""
     rest = _strip_prefix(list(original))
     words = original[:len(original) - len(rest)]
@@ -655,7 +656,7 @@ def _loader_env_matches(original: list, ctx: _Ctx, depth: int) -> list:
         held = {"id": "control-loader-env", "category": "control",
                 "describe": "load code through the environment: %s" % _short(word)}
         value = m.group(2)
-        if m.group(1) in ("ENV", "BASH_ENV") and not _SHELL_WORD_RE.search(ctx.full_text):
+        if m.group(1) == "ENV" and not _SHELL_WORD_RE.search(ctx.full_text):
             continue  # an ordinary variable of that name
         if m.group(1) != "NODE_OPTIONS" or _expand(value) is None or "__dwsub" in value:
             out.append(held)
@@ -754,7 +755,8 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
     for token in tokens[start:]:
         out += _string_matches(_command_strings(token), sub, depth)
     if incomplete and first_operand is not None and seg["pipe_in"] and \
-            any(ctx.protected.text_names(w) for w in ctx.stdin_words):
+            ctx.stdin_words[:1] and ctx.stdin_words[0] not in _CONTENT_READERS and \
+            any(ctx.protected.text_names(w) for w in ctx.stdin_words[1:]):
         # The words on standard input spell a protected path: do they land in a write position?
         inner = replaced[first_operand:]
         if not any("__dwsub_input__" in t for t in inner):
@@ -779,7 +781,7 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
         ctx.stdin_words = []
         if seg["pipe_in"] and before is not None:
             try:
-                ctx.stdin_words = _tokens(before["words"])[1:]
+                ctx.stdin_words = _strip_prefix(_tokens(before["words"]))
             except _Unreadable:
                 pass
         before = seg
@@ -1036,57 +1038,108 @@ def _may_hold_protected(start: str, ctx: _Ctx) -> bool:
     return any(_inside(t, low) or _inside(low, t) for t in targets)
 
 
+_FIND_NAME_TESTS = ("-name", "-iname")
+_FIND_PATH_TESTS = ("-path", "-ipath", "-wholename", "-iwholename")
+_FIND_OR = ("-o", "-or", ",")
+
+
+def _find_chain_start(tokens: list, action: int, first: int) -> int:
+    """Where the and-chain of tests that leads to the action at `action` begins: after the
+    nearest -o before it that is not inside a parenthesis the chain closes."""
+    depth = 0
+    for i in range(action - 1, first - 1, -1):
+        if tokens[i] == ")":
+            depth += 1
+        elif tokens[i] == "(":
+            if depth == 0:
+                return i + 1
+            depth -= 1
+        elif tokens[i] in _FIND_OR and depth == 0:
+            return i + 1
+    return first
+
+
+def _find_pruned(tokens: list, i: int) -> bool:
+    """Whether the test at `i` belongs to a group that is pruned: -prune follows it, with
+    only alternatives of the same group in between."""
+    j = i + 2
+    while j < len(tokens):
+        t = tokens[j]
+        if t == "-prune":
+            return True
+        if t in _FIND_NAME_TESTS + _FIND_PATH_TESTS + ("-type",):
+            j += 2
+        elif t in _FIND_OR + (")", "-a", "-and"):
+            j += 1
+        else:
+            return False
+    return False
+
+
 def _find_write_matches(tokens: list, ctx: _Ctx) -> list:
-    """find that deletes, or hands to a writing command, files it finds by itself: held when
-    a start directory may hold protected files and the -name/-path tests do not rule every
-    one of them out (a directory named in a negated or pruned test is ruled out)."""
-    starts, names, paths, excluded = [], [], [], set()
-    writes = False
-    i = 1
-    while i < len(tokens) and not (tokens[i].startswith("-") or tokens[i] in ("(", "!", ")")):
-        starts.append(tokens[i])
-        i += 1
-    negated = False
+    """find that deletes, or hands to a writing command, files it finds by itself. For each
+    such action the tests of its and-chain are read: positive -name and -path tests say what
+    it may find, negated ones and pruned directories what it cannot. Held when a protected
+    file (_FINDABLE) is not ruled out, and either the tests ask for one outright (-name
+    pre-push, -path '*/.git/*') or a start directory may hold protected files."""
+    first = 1
+    while first < len(tokens) and not (tokens[first].startswith("-") or tokens[first] in ("(", "!", ")")):
+        first += 1
+    starts = tokens[1:first] or ["."]
+    pruned = [(tokens[i], tokens[i + 1].lower()) for i in range(first, len(tokens) - 1)
+              if tokens[i] in _FIND_NAME_TESTS + _FIND_PATH_TESTS and _find_pruned(tokens, i)]
+    i = first
     while i < len(tokens):
         t = tokens[i]
+        end = i
         if t in ("-exec", "-execdir", "-ok", "-okdir"):
-            j = i + 1
-            while j < len(tokens) and tokens[j] not in (";", "+"):
-                j += 1
-            writes = writes or _writes_what_it_finds(tokens[i + 1:j], ctx)
-            i = j
-        elif t == "-delete":
-            writes = True
-        elif t in ("-name", "-iname", "-path", "-ipath", "-wholename") and i + 1 < len(tokens):
-            pattern = tokens[i + 1].lower()
-            if negated or "-prune" in tokens[i + 2:i + 4]:
-                excluded |= {name for name in _PROTECTED_NAMES  # the name, not .github for .git
-                             if re.search(re.escape(name) + r"(?![a-z0-9_-])", pattern)}
-            elif "name" in t and "whole" not in t:
-                names.append(pattern)
-            else:
-                paths.append(pattern)
-            i += 1
-        negated = t in ("!", "-not")
-        i += 1
-    if not writes:
-        return []
-    # Tests that ask for a protected file outright (-name pre-push, -path '*/.git/*') hold
-    # wherever find starts; otherwise it depends on what the start directories may hold.
+            while end < len(tokens) and tokens[end] not in (";", "+"):
+                end += 1
+            writes = _writes_what_it_finds(tokens[i + 1:end], ctx)
+        else:
+            writes = t == "-delete"
+        if writes and _find_may_reach_protected(tokens, _find_chain_start(tokens, i, first), i,
+                                                pruned, starts, ctx):
+            return [_state_match(" ".join(tokens))]
+        i = end + 1
+    return []
+
+
+def _find_may_reach_protected(tokens: list, begin: int, action: int, pruned: list, starts: list,
+                              ctx: _Ctx) -> bool:
+    names, paths, negated = [], [], []
+    for k in range(begin, action - 1):
+        t = tokens[k]
+        if t not in _FIND_NAME_TESTS + _FIND_PATH_TESTS:
+            continue
+        test = (t, tokens[k + 1].lower())
+        if test in pruned:
+            continue
+        if tokens[k - 1] in ("!", "-not"):
+            negated.append(test)
+        else:
+            (names if t in _FIND_NAME_TESTS else paths).append(test[1])
+
+    def matches(test, directory, inside, as_directory=False) -> bool:
+        kind, pattern = test
+        where = directory if as_directory else directory + "/" + inside
+        if kind in _FIND_NAME_TESTS:
+            return _may_equal(pattern, os.path.basename(where))
+        return _may_equal(pattern, "./" + where) or _may_equal(pattern, "./x/" + where)
+
     asked = any(n == os.path.basename(inside) for n in names for _d, inside in _FINDABLE) or \
         any(re.search(re.escape(name) + r"(?![a-z0-9_-])", q) for q in paths
             for name in _PROTECTED_NAMES)
-    if not asked and not any(_may_hold_protected(start, ctx) for start in starts or ["."]):
-        return []
+    if not asked and not any(_may_hold_protected(start, ctx) for start in starts):
+        return False
     for directory, inside in _FINDABLE:
-        if directory in excluded:
-            continue
-        found = "./%s/%s" % (directory, inside)
-        if (not names or any(_may_equal(n, os.path.basename(inside)) for n in names)) and \
-                (not paths or any(_may_equal(q, found) or _may_equal(q, "./x" + found[1:])
-                                  for q in paths)):
-            return [_state_match(" ".join(tokens))]
-    return []
+        if any(matches(test, directory, inside) for test in negated) or \
+                any(matches(test, directory, inside, as_directory=True) for test in pruned):
+            continue  # ruled out
+        if (not names or any(matches(("-name", n), directory, inside) for n in names)) and \
+                (not paths or any(matches(("-path", q), directory, inside) for q in paths)):
+            return True
+    return False
 
 
 # -- inline interpreter code ------------------------------------------------------
@@ -1169,34 +1222,125 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
 #   read-only programs: no word is a write position;
 #   cp and rsync: only the last operand (the destination) and the options are.
 
-def _read_only(plain: str = r".*", operands: Optional[int] = None, never: Optional[str] = None):
-    """(the options that keep the program read-only, the most operands it may have, text
-    that no word may contain)."""
-    return re.compile(plain, re.S), operands, re.compile(never, re.S) if never else None
+def _sed_scripts_only_print(tokens: list) -> bool:
+    """Every sed script on the line is one this guard knows to write nothing and run nothing:
+    an address with p, d or q, or a plain substitution with the flags g, p, i, I or a
+    number. (w, W and e, as commands or as flags of s, write files and run commands.)"""
+    scripts, operands, i = [], [], 1
+    while i < len(tokens):
+        t = tokens[i]
+        if t in ("-e", "--expression") and i + 1 < len(tokens):
+            scripts.append(tokens[i + 1])
+            i += 1
+        elif t.startswith("--expression="):
+            scripts.append(t.split("=", 1)[1])
+        elif not _is_option(t):
+            operands.append(t)
+        i += 1
+    scripts = scripts or operands[:1]
+    return bool(scripts) and all(_SED_SCRIPT_RE.fullmatch(script) for script in scripts)
 
 
-_READ_ONLY = dict.fromkeys(
-    ("cat", "ls", "head", "tail", "wc", "du", "stat", "grep", "diff", "echo", "printf", "basename",
-     "dirname", "realpath", "jq", "cut", "tr", "column", "od", "strings", "md5", "md5sum",
-     "shasum", "sha1sum", "sha256sum"), _read_only())  # no option of these writes or runs
-_LESS = _read_only(r"-[^-oO=][^oO=]*|\+.*|--(quit-if-one-screen|RAW-CONTROL-CHARS|"
-                   r"raw-control-chars|chop-long-lines|LINE-NUMBERS|line-numbers|no-init|"
-                   r"ignore-case|IGNORE-CASE)")  # not -o, -O, --log-file
-_AWK = _read_only(r"-F.*|-v", never=r"system\s*\(|\||>|getline")  # not -f, -i inplace
-_READ_ONLY.update({
-    "file": _read_only(r"(?!--compile)(--.*|-[^-C]*)"),
+_SED_ADDRESS = r"(?:[0-9,$]*|/[^/\n]*/(?:,/[^/\n]*/)?)"
+_SED_SCRIPT_RE = re.compile(
+    r"\s*%s\s*(?:[pdq]|s([^\w\s\\])(?:(?!\1)[^\n\\]|\\.)*\1(?:(?!\1)[^\n\\]|\\.)*\1[gpiI0-9]*)\s*"
+    % _SED_ADDRESS)
+
+
+def _awk_program_only_prints(tokens: list) -> bool:
+    return not any(re.search(r"system\s*\(|\||>|getline", t) for t in tokens[1:])
+
+
+def _read_only(short: str = r"-.*", long: str = "", operands: Optional[int] = None, check=None):
+    """One read-only program: its short options that write nothing, its long options that
+    write nothing (an allowlist: GNU programs accept any unambiguous prefix of a long
+    option, so a list of the ones that write could be walked around), the most operands it
+    may have, and a test of the whole line."""
+    return (re.compile(short, re.S), re.compile(r"--(?:help|version%s)" % ("|" + long if long else ""),
+                                                re.S), operands, check)
+
+
+_DIGEST = _read_only(long=r"algorithm=.*|check|binary|text|tag|quiet|status|warn|strict|zero|"
+                          r"ignore-missing")
+_LESS = _read_only(r"-[^-oO=][^oO=]*",  # not -o, -O, --log-file
+                   r"quit-if-one-screen|RAW-CONTROL-CHARS|raw-control-chars|chop-long-lines|"
+                   r"LINE-NUMBERS|line-numbers|no-init|ignore-case|IGNORE-CASE")
+_AWK = _read_only(r"-F.*|-v", check=_awk_program_only_prints)  # not -f, -i inplace
+_READ_ONLY = {
+    "echo": _read_only(long=r".*"), "printf": _read_only(long=r".*"),  # their words are text
+    "cat": _read_only(long=r"number|number-nonblank|show-all|show-ends|show-tabs|"
+                           r"show-nonprinting|squeeze-blank"),
+    "ls": _read_only(long=r"all|almost-all|human-readable|color(=.*)?|group-directories-first|"
+                          r"recursive|reverse|sort=.*|time=.*|time-style=.*|size|classify|"
+                          r"directory|inode|no-group|format=.*|full-time|literal|si"),
+    "head": _read_only(long=r"lines=.*|bytes=.*|quiet|silent|verbose|zero-terminated"),
+    "tail": _read_only(long=r"lines=.*|bytes=.*|quiet|silent|verbose|zero-terminated|"
+                            r"follow(=.*)?|retry|pid=.*|sleep-interval=.*"),
+    "wc": _read_only(long=r"lines|words|bytes|chars|max-line-length"),
+    "du": _read_only(long=r"human-readable|summarize|max-depth=.*|total|all|apparent-size|"
+                          r"block-size=.*|exclude=.*|si|bytes|one-file-system"),
+    "stat": _read_only(long=r"format=.*|printf=.*|terse|dereference|file-system"),
+    "grep": _read_only(long=r"colou?r(=.*)?|include(=.*)?|exclude(=.*)?|exclude-dir(=.*)?|"
+                            r"recursive|dereference-recursive|line-number|ignore-case|"
+                            r"extended-regexp|fixed-strings|perl-regexp|basic-regexp|invert-match|"
+                            r"word-regexp|line-regexp|count|files-with-matches|"
+                            r"files-without-match|only-matching|quiet|silent|no-filename|"
+                            r"with-filename|null|text|binary-files=.*|max-count=.*|"
+                            r"context(=.*)?|after-context(=.*)?|before-context(=.*)?|no-messages|"
+                            r"line-buffered|regexp(=.*)?|byte-offset|initial-tab|null-data"),
+    "diff": _read_only(long=r"unified(=.*)?|context(=.*)?|recursive|brief|ignore-[a-z-]+(=.*)?|"
+                            r"side-by-side|colou?r(=.*)?|new-file|exclude=.*|label=.*|text|"
+                            r"strip-trailing-cr|minimal|report-identical-files|width=.*|"
+                            r"suppress-common-lines|show-c-function|expand-tabs|normal"),
+    "basename": _read_only(long=r"suffix=.*|multiple|zero"),
+    "dirname": _read_only(long=r"zero"),
+    "realpath": _read_only(long=r"relative-to=.*|relative-base=.*|canonicalize-existing|"
+                                r"canonicalize-missing|no-symlinks|physical|logical|quiet|zero|"
+                                r"strip"),
+    "jq": _read_only(long=r"arg|argjson|slurp|raw-output|raw-input|null-input|compact-output|tab|"
+                          r"indent|sort-keys|color-output|monochrome-output|exit-status|"
+                          r"join-output|slurpfile|rawfile|args|jsonargs|from-file|stream|seq|"
+                          r"ascii-output"),
+    "cut": _read_only(long=r"delimiter=.*|fields=.*|bytes=.*|characters=.*|complement|"
+                           r"only-delimited|output-delimiter=.*|zero-terminated"),
+    "tr": _read_only(long=r"delete|squeeze-repeats|complement|truncate-set1"),
+    "column": _read_only(long=r"table|separator(=.*)?|output-separator(=.*)?|json|"
+                              r"table-columns(=.*)?|fillrows"),
+    "od": _read_only(long=r"address-radix=.*|format=.*|read-bytes=.*|skip-bytes=.*|"
+                          r"width(=.*)?|output-duplicates|endian=.*"),
+    "strings": _read_only(long=r"all|bytes=.*|radix=.*|encoding=.*|print-file-name"),
+    "md5": _DIGEST, "md5sum": _DIGEST, "shasum": _DIGEST, "sha1sum": _DIGEST, "sha256sum": _DIGEST,
+    "file": _read_only(r"-[^-C]*", r"mime(-type|-encoding)?|brief|dereference|no-dereference|"
+                                   r"uncompress|separator=.*"),  # not -C, --compile
     "less": _LESS, "more": _LESS,
-    "tree": _read_only(r"-[^-oR=][^oR=]*|--(charset=.*|dirsfirst|gitignore|noreport|prune|du|si)"),
-    "rg": _read_only(r"(?!--pre(-glob)?(=|$)|--hostname-bin).*"),
-    "find": _read_only(r"(?!-(delete|exec|ok|fprint|fls)).*"),
-    "sort": _read_only(r"(?!--output|--temporary-directory|--compress-program)(--.*|-[^-oT=]*)"),
-    "uniq": _read_only(operands=1),  # a second operand is the output file
-    "xxd": _read_only(r"-[^-r]*", operands=1),
-    "yq": _read_only(r"(?!--inplace|--in-place)(--.*|-[^-i]*)"),
-    "sed": _read_only(r"-[nEru]+|-[nEru]*e|--(quiet|silent|regexp-extended|posix|debug|expression=.*)",
-                      never=r"(?:^|[^A-Za-z])[we]\s+\S|/[A-Za-z0-9]*e\s*(?:;|\}|$)"),
+    "tree": _read_only(r"-[^-oR=][^oR=]*",  # not -o, --output
+                       r"charset=.*|dirsfirst|gitignore|noreport|prune|du|si"),
+    "rg": _read_only(long=r"glob(=.*)?|iglob(=.*)?|files|files-with-matches|files-without-match|"
+                          r"hidden|no-ignore[a-z-]*|ignore-case|smart-case|case-sensitive|"
+                          r"line-number|no-line-number|count|count-matches|context(=.*)?|"
+                          r"after-context(=.*)?|before-context(=.*)?|type(=.*)?|type-not(=.*)?|"
+                          r"fixed-strings|word-regexp|invert-match|only-matching|json|"
+                          r"color(=.*)?|pretty|no-heading|heading|with-filename|no-filename|"
+                          r"max-count(=.*)?|max-depth(=.*)?|multiline|pcre2|regexp(=.*)?|"
+                          r"sortr?(=.*)?|stats|text|follow|null|vimgrep|column|replace(=.*)?|"
+                          r"passthru|quiet|trim|unrestricted|max-columns(=.*)?"),  # not --pre
+    "find": _read_only(r"(?!-(delete|exec|ok|fprint|fls))-.*"),  # primaries: never abbreviated
+    "sort": _read_only(r"-[^-oT=]*",  # not -o, -T, --output, --compress-program
+                       r"reverse|numeric-sort|unique|key=.*|field-separator=.*|ignore-case|"
+                       r"human-numeric-sort|version-sort|stable|check(=.*)?|general-numeric-sort|"
+                       r"month-sort|random-sort|ignore-leading-blanks|dictionary-order|"
+                       r"zero-terminated|merge"),
+    "uniq": _read_only(long=r"count|repeated|unique|ignore-case|skip-fields=.*|skip-chars=.*|"
+                            r"check-chars=.*|all-repeated(=.*)?|zero-terminated|group(=.*)?",
+                       operands=1),  # a second operand is the output file
+    "xxd": _read_only(r"-[^-r]*", operands=1),  # not -r; a second operand is the output file
+    "yq": _read_only(r"-[^-i]*",  # not -i, --inplace
+                     r"prettyPrint|raw-output|output-format=.*|input-format=.*|no-colors|colors|"
+                     r"null-input|indent=.*|unwrapScalar(=.*)?|exit-status|no-doc"),
+    "sed": _read_only(r"-[nEru]+|-[nEru]*e", r"quiet|silent|regexp-extended|posix|debug|"
+                                             r"expression(=.*)?", check=_sed_scripts_only_print),
     "awk": _AWK, "gawk": _AWK, "mawk": _AWK, "nawk": _AWK,
-})
+}
 # Plain flags of cp and rsync: none takes a separate value, none names a file to write.
 _COPY_FLAGS = {
     "cp": re.compile(r"-[aAbcdfHiLnpPrRTuvxX]+|--(archive|recursive|force|interactive|"
@@ -1212,11 +1356,24 @@ _COPY_FLAGS = {
 _CONTENT_READERS = set(_READ_ONLY) - {"echo", "printf", "ls", "find", "tree", "realpath",
                                       "basename", "dirname", "stat", "du", "file"}
 # git subcommands that read or stage the working tree: their path arguments are not written.
-_GIT_READS = {"add", "diff", "status", "log", "show", "blame", "ls-files", "grep", "stash"}
-_GIT_WRITE_OPTION_RE = re.compile(r"--output|-O|--open-files-in-pager|--ext-diff|--textconv")
-# Options whose value is a pattern to match names with, not a file.
-_PATTERN_OPTION_RE = re.compile(r"(--exclude|--include|--exclude-dir|--ignore|-i?path|-i?name)(=.*)?$",
-                                re.S)
+# (Of git stash, only list and show.)
+_GIT_READS = {"add", "diff", "status", "log", "show", "blame", "ls-files", "grep"}
+_GIT_WRITE_OPTIONS = ("--output", "--open-files-in-pager", "--ext-diff", "--textconv")
+# Per program, the options whose value is a pattern to match names with, not a file.
+_EXCLUDES = ("--exclude", "--include")
+_PATTERN_OPTIONS = {"find": ("-name", "-iname", "-path", "-ipath", "-wholename"),
+                    "rsync": _EXCLUDES, "tar": _EXCLUDES, "zip": _EXCLUDES,
+                    "grep": _EXCLUDES + ("--exclude-dir",),
+                    "rg": _EXCLUDES + ("--exclude-dir", "-g", "--glob")}
+
+
+def _git_option_writes(arg: str) -> bool:
+    """An option that makes a reading git subcommand write a file or run a program; git
+    accepts any unambiguous prefix of a long option."""
+    name = arg.split("=", 1)[0]
+    if arg.startswith("-O"):
+        return True
+    return len(name) > 3 and any(o.startswith(name) or name.startswith(o) for o in _GIT_WRITE_OPTIONS)
 
 
 def _is_option(word: str) -> bool:
@@ -1231,10 +1388,10 @@ def _write_positions(tokens: list, ctx: _Ctx, incomplete: Optional[bool] = None)
     options = [t for t in tokens[1:] if _is_option(t)]
     entry = _READ_ONLY.get(name)
     if entry is not None:
-        plain, most, never = entry
+        short, long, most, check = entry
         operands = len(tokens) - 1 - len(options)
-        if all(plain.fullmatch(t) for t in options) and (most is None or operands <= most) and \
-                not (never and any(never.search(t) for t in tokens[1:])):
+        if all((long if t.startswith("--") else short).fullmatch(t) for t in options) and \
+                (most is None or operands <= most) and (check is None or check(tokens)):
             return []
     elif name in _COPY_FLAGS and not incomplete:
         end = tokens.index("--") if "--" in tokens else len(tokens)
@@ -1245,19 +1402,41 @@ def _write_positions(tokens: list, ctx: _Ctx, incomplete: Optional[bool] = None)
             found = [i for i in found if i not in operands[:-1]]
     elif name == "git":
         sub, args, _repo, unreadable = _git_parts(tokens, ctx)
-        reads = sub in _GIT_READS or (sub == "restore" and any(
-            a == "--staged" or re.fullmatch(r"-[A-Za-z]*S[A-Za-z]*", a) for a in args) and not any(
-            a == "--worktree" or re.fullmatch(r"-[A-Za-z]*W[A-Za-z]*", a) for a in args))
-        if reads and not unreadable and not any(_GIT_WRITE_OPTION_RE.match(a) for a in args):
+        staged = any(a == "--staged" or re.fullmatch(r"-[A-Za-z]*S[A-Za-z]*", a) for a in args)
+        worktree = any(a == "--worktree" or re.fullmatch(r"-[A-Za-z]*W[A-Za-z]*", a) for a in args)
+        reads = sub in _GIT_READS or (sub == "stash" and args[:1] in (["list"], ["show"])) or \
+            (sub == "restore" and staged and not worktree)
+        if reads and not unreadable and not any(_git_option_writes(a) for a in args):
             found = found[:len(tokens) - len(args) - 1]  # git's own options before the subcommand
-    # The value of a pattern option is never a write position.
-    out = []
-    for i in found:
-        m = _PATTERN_OPTION_RE.match(tokens[i])
-        if m and m.group(2) is None and i + 1 in found:
-            found.remove(i + 1)
-        if not (m and m.group(2) is not None):
-            out.append(i)
+    # The value of one of the program's pattern options is not a write position.
+    patterns = _PATTERN_OPTIONS.get(name, ())
+    skip = {i + 1 for i in found if tokens[i] in patterns}
+    skip |= {i for i in found if tokens[i].split("=", 1)[0] in patterns and "=" in tokens[i]}
+    return [i for i in found if i not in skip]
+
+
+MAX_LOOP_WORDS = 64
+
+
+def _loop_words(original: list, ctx: _Ctx) -> bool:
+    """For `for NAME in WORDS`, `select NAME in WORDS` and `case WORD in`: remember the words
+    a loop variable stands for. They are data until a write position uses the variable."""
+    words = [t for t in original if not _ASSIGNMENT_RE.match(t)]
+    if words[:1] == ["case"]:
+        return True
+    if words[:1] not in (["for"], ["select"]) or len(words) < 2:
+        return False
+    ctx.loop_words[words[1]] = words[3:3 + MAX_LOOP_WORDS] if words[2:3] == ["in"] else []
+    return True
+
+
+def _loop_variants(word: str, ctx: _Ctx) -> list:
+    """A word, and the word with each value of a loop variable it uses put in."""
+    out = [word]
+    for name, values in ctx.loop_words.items():
+        rx = re.compile(r"\$\{%s\}|\$%s(?![A-Za-z0-9_])" % (re.escape(name), re.escape(name)))
+        if rx.search(word):
+            out += [rx.sub(lambda m: value, word) for value in values]
     return out
 
 
@@ -1292,20 +1471,20 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
     if wrapped:
         own = len(original) - len(_strip_prefix(list(original)))
         checked = [i for i, t in enumerate(original)
-                   if i <= own or re.search(r"\s", t)
-                   or (t.startswith("-") and not _PATTERN_OPTION_RE.match(t))]
+                   if i <= own or t.startswith("-") or re.search(r"\s", t)]
     elif tokens and original[head:] == tokens:
         positions = _write_positions(tokens, ctx)
         checked = [head + i for i in positions]
         if positions:
             checked = list(range(head)) + checked
-    elif next((t for t in original if not _ASSIGNMENT_RE.match(t)), "") in ("for", "select", "case"):
-        checked = []  # the words a loop runs over are data; its body is read on its own
+    elif _loop_words(original, ctx):
+        checked = []  # data here; checked where the loop's body writes the variable
     else:
         checked = list(range(len(original)))
     if tokens and os.path.basename(tokens[0]) == "rg" and any(re.match(r"--pre(-glob)?(=|$)", t) for t in tokens[1:]):
         out.append(_unreadable_match())  # rg runs the --pre command on every file it reads
     words = [original[i] for i in checked if i != skip] + list(redirects)
+    words = [variant for w in words for variant in _loop_variants(w, ctx)]
     if any(ctx.protected.token_hit(w, ctx.cwd, ctx.sub_bodies, ctx.marks) for w in words):
         out.append(_state_match(" ".join(original)))
     return out

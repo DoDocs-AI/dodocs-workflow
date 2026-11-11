@@ -40,6 +40,8 @@ from .guard_shell import (  # noqa: F401
     WRAPPERS,
     _INTERPRETER_RE,
     _Lexer,
+    _TooMany,
+    _brace_expand,
     _REMOTE_PARALLEL,
     _RUNNERS,
     _SHELL_STARTERS,
@@ -139,24 +141,118 @@ def settings_path() -> Path:
     return Path(override) if override else Path(_home()) / ".claude" / "settings.json"
 
 
-# Inside any .git directory (worktree and submodule git dirs included): the config, hooks and
-# attributes files.
-_GIT_INTERNAL_RE = re.compile(
-    r"/\.git/(?:(?:worktrees|modules)/.+/)?(?:config|config\.worktree|info/attributes|hooks(?:/.*)?)$",
-    re.I)
+# -- protected paths -----------------------------------------------------------
+#
+# One model for every path check. A word in a WRITE position (see _write_positions) is a
+# path pattern: fixed text, glob parts (* ? [..], never crossing "/") and run-time parts
+# (variables, substitutions, text from standard input; they may cross "/"). Braces are
+# expanded first, ~, $HOME and $DW_HOME are filled in. The word is held when the pattern
+# may name one of the control point's files, judged two ways:
+#   by name      a segment names a protected directory (.git, .claude, agterm, .agterm,
+#                .dodocs-workflow) and what follows may be a protected file in it;
+#   by real path the fixed leading directories, resolved against the working directory and
+#                through symbolic links, lead to a protected real path the rest may match.
+
+# The files git reads its configuration, hooks and attributes from, relative to a git dir
+# (worktree and submodule git dirs included).
+_GIT_FILES = r"(?:(?:worktrees|modules)/.+/)?(?:config|config\.worktree|info/attributes|hooks(?:/.*)?)"
+_GIT_FILES_RE = re.compile(r"^%s$" % _GIT_FILES, re.I)
+_GIT_INTERNAL_RE = re.compile(r"/\.git/%s$" % _GIT_FILES, re.I)
+_GIT_DIR_CHILDREN = ("hooks", "info", "config", "config.worktree", "worktrees", "modules")
+# Protected directory names, and the protected files directly inside each (None: git's own
+# list above; (): everything).
+_PROTECTED_NAMES = {".git": None, ".dodocs-workflow": (),
+                    ".claude": ("settings.json", "settings.local.json"),
+                    "agterm": ("hooks.conf",), ".agterm": ("hooks.conf",)}
 # A run-time part of a word: a variable, a substitution placeholder, or stdin text.
 _RUN_TIME_PART_RE = re.compile(
     r"\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!-]|__dwsub(\d+)__|__dwsub_input__|`[^`]*`")
-_GIT_DIR_SUFFIX_RE = re.compile(r"^/(config|config\.worktree|hooks/.+|info/attributes)$", re.I)
+_DW_HOME_VAR_RE = re.compile(r"\$\{DW_HOME(?![A-Za-z0-9_])[^}]*\}|\$DW_HOME(?![A-Za-z0-9_])")
+_GLOB_PART_RE = re.compile(r"\[[^\]/]*\]|[*?]")
+# In a path skeleton a run-time part is one of these characters; _GIT_ANY is a run-time
+# part whose text mentions git (a git dir by reference: $GIT_DIR, $(git rev-parse ...)).
+_ANY, _GIT_ANY = "\x01", "\x02"  # not NUL: os.path.normpath stops at one
+_RUN_TIME_MARKS_RE = re.compile("[\x01\x02]+")
+MAX_WILDCARDS = 6  # in a path matched part by part against a real path
+
+
+def _run_time(seg: str) -> bool:
+    return _ANY in seg or _GIT_ANY in seg
+
+
+def _wild(seg: str) -> bool:
+    return _run_time(seg) or bool(_GLOB_PART_RE.search(seg))
+
+
+def _wildcards(text: str) -> int:
+    return len(_RUN_TIME_MARKS_RE.findall(text)) + len(_GLOB_PART_RE.findall(text))
+
+
+_WILD_PART_RE = re.compile("%s|%s" % (_RUN_TIME_MARKS_RE.pattern, _GLOB_PART_RE.pattern))
+
+
+def _segment_regex(seg: str) -> str:
+    """A regular expression for one segment of a path skeleton, to match against a real
+    path. A run-time part may be any text; a glob part stays inside the segment, and a
+    leading one does not match a dot file."""
+    rx = r"(?!\.)" if seg[:1] in ("*", "?", "[") else ""
+    pos = 0
+    for m in _WILD_PART_RE.finditer(seg):
+        part = m.group(0)
+        rx += re.escape(seg[pos:m.start()])
+        rx += ".*" if part[0] in (_ANY, _GIT_ANY) else "[^/]*" if part == "*" else "[^/]"
+        pos = m.end()
+    return rx + re.escape(seg[pos:])
+
+
+def _may_equal(pattern: str, text: str) -> bool:
+    """May a skeleton be exactly `text`, taking every wildcard part as "any text"? Its fixed
+    chunks must occur in `text` in order, the first at the start and the last at the end.
+    Linear, and never says no to something a glob could match."""
+    chunks = _WILD_PART_RE.split(pattern.lower())
+    text = text.lower()
+    if len(chunks) == 1:
+        return chunks[0] == text
+    first, last = chunks[0], chunks[-1]
+    if len(first) + len(last) > len(text) or not text.startswith(first) or not text.endswith(last):
+        return False
+    pos, end = len(first), len(text) - len(last)
+    for chunk in chunks[1:-1]:
+        pos = text.find(chunk, pos, end)
+        if pos < 0:
+            return False
+        pos += len(chunk)
+    return True
+
+
+def _could_be(seg: str, name: str) -> bool:
+    """May this segment be `name`? A segment made of wildcards only names nothing: a bare
+    `$D/settings.json` is not a path under .claude."""
+    if not _wild(seg):
+        return seg.lower() == name
+    if not _RUN_TIME_MARKS_RE.sub("", _GLOB_PART_RE.sub("", seg)):
+        return False
+    return _may_equal(seg, name)
+
+
+def _may_be_path(segs: list, path: str) -> bool:
+    """May these skeleton segments be exactly the relative real path `path`? Exact about
+    which parts may cross "/" while the wildcard parts are few; beyond that, by the fixed
+    chunks only (_may_equal), which costs no backtracking."""
+    if _wildcards("/".join(segs)) > MAX_WILDCARDS:
+        return _may_equal("/".join(segs), path)
+    rx = "/".join(_segment_regex(seg) for seg in segs)
+    return bool(re.fullmatch(rx, path, re.I | re.S))
 
 
 class _Protected:
-    """The control point's own files, as real paths."""
+    """The control point's own files."""
 
     def __init__(self, run_id: Optional[str]):
         home = _home()
         # Compared in lower case: the file system may ignore case (macOS does by default).
-        self.dirs = sorted({os.path.realpath(str(paths.home())).lower(),
+        self.dw_home = os.path.realpath(str(paths.home()))
+        self.dirs = sorted({self.dw_home.lower(),
                             os.path.realpath(os.path.join(home, ".dodocs-workflow")).lower()})
         self.files = {os.path.realpath(os.path.join(home, ".claude", "settings.json")).lower(),
                       os.path.realpath(str(settings_path())).lower(),
@@ -164,15 +260,9 @@ class _Protected:
         self.home = os.path.realpath(home).lower()
         self.note = os.path.realpath(str(paths.result_note_path(run_id))).lower() if run_id else None
         self.markers = [".dodocs-workflow", "agterm/hooks.conf"] + self.dirs + sorted(self.files)
-        names = {os.path.basename(d) for d in self.dirs} | {".dodocs-workflow"}
-        self.dir_names = {".git", ".claude", "agterm"} | names
-        self.suffix_res = [
-            re.compile(r"(^|/)\.claude/settings(\.local)?\.json$", re.I),
-            re.compile(r"(^|/)agterm/hooks\.conf$", re.I),
-        ] + [re.compile(r"(^|/)%s/(registry\.json|guard-rules\.default\.json|runs/[^/]+\.json|"
-                        r"bin/dw|lib/dwlib/.*)$" % re.escape(n), re.I) for n in sorted(names)]
 
     def hit(self, path: str) -> bool:
+        """A real path without wildcards."""
         path = path.lower()
         if path == self.note:
             return False
@@ -187,85 +277,135 @@ class _Protected:
             return any(_inside(t, path) for t in list(self.files) + self.dirs)
         return False
 
-    def run_time_path_hit(self, text: str, bodies: list, marks=()) -> bool:
-        """For a path with run-time parts (variables, substitutions, globs, braces, xargs or
-        parallel replace strings): split it into fixed and run-time parts. It is a hit when a
-        run-time part follows a segment naming a protected directory (.git, .claude, agterm,
-        the DW_HOME directory), or when its normalised fixed ending names a protected file."""
+    def _skeletons(self, word: str, bodies: list, marks) -> list:
+        """The paths a word stands for: ~, $HOME and $DW_HOME filled in, the other run-time
+        parts (and xargs, parallel or find replace strings) turned into markers, braces
+        expanded. Braces too many to expand become run-time parts."""
         home = _home()
+        text = _DW_HOME_VAR_RE.sub(lambda m: self.dw_home, word)
         text = text.replace("${HOME}", home).replace("$HOME", home)
-        if text == "~" or text.startswith("~/"):
-            text = home + text[1:]
         for mark in marks:
             text = text.replace(mark, "__dwsub_input__")
-        last = None
-        for last in _RUN_TIME_PART_RE.finditer(text):
-            pass
-        skeleton = re.sub(r"[*?\[\]{}]", "\0", _RUN_TIME_PART_RE.sub("\0", text))
-        if "\0" not in skeleton:
-            return False
-        segments = [seg for seg in skeleton.split("/") if seg not in ("", ".")]
-        for i, seg in enumerate(segments):
-            if seg.lower() in self.dir_names and any("\0" in later for later in segments[i + 1:]):
-                return True
-        tail = skeleton[skeleton.rfind("\0") + 1:]
-        if not tail.strip("/"):
-            return False
-        ending = posixpath.normpath("/" + tail.lstrip("/"))
-        if _GIT_INTERNAL_RE.search(ending) or any(rx.search(ending) for rx in self.suffix_res):
-            return True
 
-        def body(m):
+        def marker(m):
+            body = m.group(0)
             if m.group(1) is not None and int(m.group(1)) < len(bodies):
-                return "$(" + bodies[int(m.group(1))] + ")"
-            return m.group(0)
+                body = bodies[int(m.group(1))]
+            return _GIT_ANY if "git" in body.lower() else _ANY
 
-        prefix = _RUN_TIME_PART_RE.sub(body, text[:last.end()]) if last else text
-        return bool(_GIT_DIR_SUFFIX_RE.match(ending)) and "git" in prefix.lower()
-
-    def pattern_hit(self, text: str, cwd: Optional[str]) -> bool:
-        """For a path with glob characters, braces or run-time parts: may it name a protected path?"""
-        home = _home()
-        text = text.replace("${HOME}", home).replace("$HOME", home)
-        if text == "~" or text.startswith("~/"):
-            text = home + text[1:]
-        cuts = [text.find(ch) for ch in ("*", "?", "[", "{", "$", "`", "__dwsub") if ch in text]
-        if not cuts:
-            resolved = _resolve(text, cwd)
-            return resolved is not None and self.hit(resolved)
-        cut = min(cuts)
-        dynamic = any(ch in text for ch in ("$", "`", "__dwsub")) or "{" in text
-        prefix = text[:cut]
-        if not os.path.isabs(prefix):
-            if cwd is None:
-                return False
-            prefix = os.path.join(cwd, prefix)
-        head, base = os.path.split(prefix)
-        rdir = os.path.realpath(head or "/").lower()
-        base = base.lower()
-        rprefix = rdir.rstrip("/") + "/" + base
-        targets = self.dirs + sorted(self.files)
-        if any(_inside(rdir, d) for d in self.dirs):
-            return True
-        if base and any(t.startswith(rprefix) for t in targets):
-            return True
-        def undecided() -> bool:  # fail closed next to the control point's own files
-            claude = os.path.realpath(os.path.join(home, ".claude")).lower()
-            if _inside(rdir, claude):
-                return True
-            for d in self.dirs:
-                parent, name = os.path.split(d)
-                if rdir == parent and name.startswith(base):
-                    return True
-            return False
-
-        if dynamic:
-            return undecided()
-        pattern = text if os.path.isabs(text) else os.path.join(cwd or "/", text)
+        text = _RUN_TIME_PART_RE.sub(marker, text)
         try:
-            found, complete = _bounded_glob(pattern)
+            found = _brace_expand(text) if "{" in text else [text]
+        except _TooMany:
+            found = [re.sub(r"[{}]", _ANY, text)]
+        out = []
+        for one in found:
+            if one == "~" or one.startswith("~/"):
+                one = home + one[1:]
+            elif one.startswith("~"):
+                one = os.path.expanduser(one)
+            out.append(one)
+        return out
+
+    def _named(self, segs: list) -> bool:
+        """By name: some segment names a protected directory, and the rest of the path may
+        be a protected file in it."""
+        for i, seg in enumerate(segs):
+            tail = segs[i + 1:]
+            for name, files in _PROTECTED_NAMES.items():
+                if not _could_be(seg, name):
+                    continue
+                if _wild(seg):
+                    # The name itself is a pattern: hold when anything follows, or when a
+                    # run-time part ends the segment (it may hold the rest of the path).
+                    if tail or seg[-1] in (_ANY, _GIT_ANY):
+                        return True
+                elif self._file_in(files, tail):
+                    return True
+            if _GIT_ANY in seg and self._git_dir_child(tail):
+                return True
+        return False
+
+    @staticmethod
+    def _file_in(files, tail: list) -> bool:
+        """May `tail`, the segments after a protected directory's name, be one of its
+        protected files? A run-time part may hold "/" and "..": then only the last segment
+        decides. A glob part stays inside its segment."""
+        wild = any(_wild(s) for s in tail)
+        if files is None:  # .git: hooks/ takes any name, so any wildcard may reach one
+            return wild or bool(_GIT_FILES_RE.match("/".join(tail)))
+        if not files:  # .dodocs-workflow: everything in it, and the directory itself
+            return True
+        if not tail:
+            return False
+        last = tail[-1]
+        if not wild:
+            return len(tail) == 1 and last.lower() in files
+        if len(tail) > 1 and not any(_run_time(s) for s in tail):
+            return False
+        return last[-1] in (_ANY, _GIT_ANY) or any(_may_equal(last, f) for f in files)
+
+    @staticmethod
+    def _git_dir_child(tail: list) -> bool:
+        """After a git dir given by reference: the fixed rest is one of git's own files; or
+        the first segment is one of git's directories (hooks, info, worktrees, modules) and it
+        ends the path or a wildcard follows; or it starts with "config" and ends the path;
+        or it is a pattern that may be one of those names."""
+        if not tail:
+            return False
+        first, rest = tail[0], tail[1:]
+        if not any(_wild(s) for s in tail) and _GIT_FILES_RE.match("/".join(tail)):
+            return True
+        if _wild(first):
+            return any(_could_be(first, child) for child in _GIT_DIR_CHILDREN)
+        if first.lower().startswith("config"):
+            return not rest  # git's config is a file: nothing of git's lies below it
+        return first.lower() in _GIT_DIR_CHILDREN and (not rest or any(_wild(s) for s in rest))
+
+    def _real_targets(self, rdir: str) -> tuple:
+        """(files, directories) protected as real paths: the control point's own, and those
+        of a .git, .claude or agterm directory that `rdir` is or is inside."""
+        files, dirs = set(self.files), set(self.dirs)
+        parts = rdir.split("/")
+        for k in range(1, len(parts) + 1):
+            names = _PROTECTED_NAMES.get(parts[k - 1])
+            above = "/".join(parts[:k])
+            if parts[k - 1] == ".git":
+                files |= {above + "/config", above + "/config.worktree", above + "/info/attributes"}
+                dirs.add(above + "/hooks")
+            elif names:
+                files |= {above + "/" + n for n in names}
+        return files, dirs
+
+    def _real_hit(self, skel: str, cwd: Optional[str]) -> bool:
+        """By real path: resolve the fixed leading directories; may the rest name a protected
+        real path below them? Glob-only patterns are also expanded on disk."""
+        segs = [s for s in skel.split("/") if s]
+        k = next((i for i, s in enumerate(segs) if _wild(s)), None)
+        if k is None:
+            return False
+        absolute = skel.startswith("/")
+        if not absolute and cwd is None:
+            return False  # no known directory to start from
+        real = os.path.realpath(os.path.join("/" if absolute else cwd, *segs[:k]))
+        rdir, rest = real.lower(), segs[k:]
+        files, dirs = self._real_targets(rdir)
+        if any(_inside(rdir, d) for d in dirs):
+            return True
+        below = rdir.rstrip("/") + "/"
+        files = [f[len(below):] for f in files if f.startswith(below)]
+        dirs = [d[len(below):] for d in dirs if d.startswith(below)]
+        if any(_may_be_path(rest, f) for f in files):
+            return True
+        if dirs:  # the pattern names the directory, or goes through it
+            if any(_may_be_path(rest[:i], d) for i in range(1, len(rest) + 1) for d in dirs):
+                return True
+        if any(_run_time(s) for s in rest):
+            return False
+        try:
+            found, complete = _bounded_glob(os.path.join(real, *rest))
         except (re.error, ValueError):
-            return undecided()
+            return False
         if not complete:
             return True  # too much to look at: cannot decide, so hold
         return any(self.hit(os.path.realpath(f)) for f in found)
@@ -277,31 +417,32 @@ class _Protected:
 
     def token_hit(self, token: str, cwd: Optional[str], bodies: Optional[list] = None,
                   marks=()) -> bool:
+        """Whether a word in a write position may name one of the control point's files."""
         candidates = [token]
         if "=" in token:
             candidates.append(token.split("=", 1)[1])
         for cand in candidates:
-            if not cand or len(cand) > 4096:
+            if not cand or len(cand) > 4096 or "\n" in cand or "\0" in cand or \
+                    cand in ("[", "[[", "{", "}"):
                 continue
-            plain = cand.replace("${HOME}", "").replace("$HOME", "")
-            marked = any(mark in cand for mark in marks)
-            if any(ch in plain for ch in "*?[{") or _expand(cand) is None or marked:
-                if self.run_time_path_hit(cand, bodies or [], marks):
+            for skel in self._skeletons(cand, bodies or [], marks):
+                if not skel:
+                    continue
+                if not _wild(skel):
+                    if not os.path.isabs(skel) and cwd is None:
+                        continue
+                    resolved = os.path.realpath(os.path.join(cwd or "/", skel))
+                    if resolved.lower() == self.note:
+                        return False
+                    if self.hit(resolved):
+                        return True
+                    continue
+                skel = posixpath.normpath(skel)
+                if self._named([s for s in skel.split("/") if s]) or self._real_hit(skel, cwd):
                     return True
-                if cand not in ("[", "[[", "{", "}") and self.pattern_hit(cand, cwd):
-                    return True
-                continue
-            resolved = _resolve(cand, cwd)
-            if resolved is not None:
-                if resolved.lower() == self.note:
-                    return False
-                if self.hit(resolved):
-                    return True
-        text = token.replace("\\", "").lower()
-        if any(m in text for m in self.markers) or \
-                re.search(r"\.claude/settings(\.local)?\.json", text):
-            return True
-        return False
+        return self.text_hit(token)
+
+
 SQL_CLIENTS = {"psql", "mysql", "mariadb", "sqlite3", "sqlcmd", "clickhouse-client", "clickhouse",
                "cockroach", "mongosh", "mongo", "redis-cli", "duckdb", "pgcli", "mycli", "usql",
                "litecli"}
@@ -322,6 +463,8 @@ class _Ctx:
         self.full_text = full_text
         self.incomplete = False
         self.git_cache: dict = {}
+        self.sub_bodies: list = []  # what the substitutions of the command being read run
+        self.marks: tuple = ()  # replace strings of the xargs, parallel or find running this
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
 
     def fork(self) -> "_Ctx":
@@ -360,29 +503,34 @@ def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
 
 # Option letters (and long options) whose value is code, per program family.
 _CODE_LETTERS = {"python": "c", "pypy": "c", "perl": "eE", "ruby": "e", "node": "ep",
-                 "nodejs": "ep", "bun": "ep", "deno": "", "php": "r", "lua": "e", "luajit": "e",
+                 "bun": "ep", "deno": "", "php": "r", "lua": "e", "luajit": "e",
                  "Rscript": "e", "julia": "e", "expect": "c", "pwsh": "c", "powershell": "c"}
 _CODE_LONG = ("--eval", "--print", "--command")
 
 
 # Option letters (and long options) whose value names code to load before the script runs.
-_LOADER_LETTERS = {"perl": "Mm", "ruby": "r", "node": "r", "nodejs": "r", "bun": "r", "deno": ""}
-_LOADER_LONG = ("--require", "--import", "--loader", "--experimental-loader")
+_LOADER_LETTERS = {"perl": "Mm", "ruby": "r", "node": "r", "bun": "r", "python": "m", "pypy": "m"}
+_NODE_LOADERS = ("--require", "--import", "--loader", "--experimental-loader", "--preload")
+_LOADER_LONG = {"node": _NODE_LOADERS, "bun": _NODE_LOADERS, "deno": _NODE_LOADERS,
+                "ruby": ("--require",)}
+_FAMILY_ALIASES = {"nodejs": "node", "tsx": "node", "ts-node": "node"}
 
 
 def _loader_args(args: list, family: str) -> list:
-    """Values of the options that load code (perl -MMod, ruby -rlib, node -r/--require/...),
-    anywhere on the line: which options take a separate value is not modelled."""
+    """Values of the options that load code (perl -MMod, ruby -rlib/--require, python -mmod,
+    node -r/--require/..., bun --preload), anywhere on the line: which options take a
+    separate value is not modelled."""
     letters = _LOADER_LETTERS.get(family, "")
+    long_options = _LOADER_LONG.get(family, ())
     found: list = []
     i = 0
     while i < len(args):
         t = args[i]
         if t == "--":
             break
-        if t.startswith("--") and family in ("node", "nodejs", "bun", "deno"):
+        if t.startswith("--"):
             head, eq, val = t.partition("=")
-            if head in _LOADER_LONG:
+            if head in long_options:
                 if eq:
                     found.append(val)
                 elif i + 1 < len(args):
@@ -430,6 +578,48 @@ def _code_args(args: list, letters: str, stop: str = "") -> list:
                     i += 1
         i += 1
     return codes
+
+
+def _runs_a_command(tokens: list) -> bool:
+    """A package runner in the form that runs another command (npm exec, uv run, uvx ...)."""
+    name = os.path.basename(tokens[0])
+    return name in _RUNNERS and (not _RUNNERS[name] or tokens[1:2] and tokens[1] in _RUNNERS[name])
+
+
+# Variables that make an interpreter, a shell or the dynamic linker load a file.
+_LOADER_ENV_RE = re.compile(r"^(NODE_OPTIONS|PERL5OPT|RUBYOPT|PYTHONSTARTUP|BASH_ENV|ENV|LD_PRELOAD|"
+                            r"DYLD_INSERT_LIBRARIES)\+?=(.+)$", re.S)
+_DECLARERS = ("export", "declare", "typeset", "readonly", "local")
+
+
+def _loader_env_matches(original: list, ctx: _Ctx, depth: int) -> list:
+    """Code loaded through the environment, set as a command prefix, with export, or in the
+    arguments of a wrapper. NODE_OPTIONS is read with node's loader-option rules; any other
+    of these variables set to a value is held."""
+    rest = _strip_prefix(list(original))
+    words = original[:len(original) - len(rest)]
+    if rest and (os.path.basename(rest[0]) in _DECLARERS or os.path.basename(rest[0]) in WRAPPERS
+                 or _runs_a_command(rest)):
+        words = original
+    out: list = []
+    for word in words:
+        m = _LOADER_ENV_RE.match(word)
+        if not m:
+            continue
+        held = {"id": "control-loader-env", "category": "control",
+                "describe": "load code through the environment: %s" % _short(word)}
+        value = m.group(2)
+        if m.group(1) != "NODE_OPTIONS" or _expand(value) is None or "__dwsub" in value:
+            out.append(held)
+            continue
+        try:
+            options = shlex.split(value)
+        except ValueError:
+            out.append(held)
+            continue
+        for loader in _loader_args(options, "node"):
+            out += _inline_matches(loader, ctx, depth)
+    return out
 
 
 def _placeholders(name: str, tokens: list) -> set:
@@ -498,7 +688,7 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
                 t = t.replace(mark, "__dwsub_input__")
             replaced.append(t)
     inner_seg = seg
-    sub.marks = tuple(marks)  # replace strings are run-time parts of paths
+    sub.marks = tuple(marks) + tuple(ctx.marks)  # replace strings are run-time parts of paths
     first_operand = None
     for k in range(start, len(tokens)):
         if tokens[k].startswith("-") or re.search(r"\s", tokens[k]):
@@ -526,7 +716,7 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
     except _Unreadable:
         return [_unreadable_match()]
     matches: list = []
-    ctx.sub_bodies = lexed.subs  # lets path checks see what a substitution runs
+    ctx.sub_bodies = lexed.subs
     start = ctx.fork()
     for seg in lexed.segments:
         matches += _segment_matches(seg, ctx, depth)
@@ -555,6 +745,8 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     tokens = original
     if any(_GIT_ENV_RE.match(t) for t in original):
         matches.append(_unreadable_match())
+    matches += _loader_env_matches(original, ctx, depth)
+    wrapped = False
     for _ in range(16):
         tokens = _strip_prefix(tokens)
         if not tokens:
@@ -596,6 +788,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                     tokens = rest[k + 1:]
                     continue
             family = re.sub(r"[0-9.]+$", "", name)
+            family = _FAMILY_ALIASES.get(family, family)
             codes = _code_args(rest, _CODE_LETTERS.get(family, "ce"),
                                stop=_LOADER_LETTERS.get(family, ""))
             for loader in _loader_args(rest, family):
@@ -654,11 +847,11 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             break
         if name in WRAPPERS:
             matches += _wrapper_matches(tokens, seg, ctx, depth)
-            tokens = []
+            tokens, wrapped = [], True
             break
-        if name in _RUNNERS and (not _RUNNERS[name] or tokens[1:2] and tokens[1] in _RUNNERS[name]):
+        if _runs_a_command(tokens):
             matches += _wrapper_matches(tokens, seg, ctx, depth, start=1 if not _RUNNERS[name] else 2)
-            tokens = []
+            tokens, wrapped = [], True
             break
         break
     if tokens and os.path.basename(tokens[0]) in ("cd", "pushd"):
@@ -671,7 +864,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             ctx.cwd = _resolve(target, ctx.cwd)
     if tokens and os.path.basename(tokens[0]) == "find":
         matches += _find_exec_matches(tokens, ctx, depth)
-    matches += _control_matches(original, tokens, redirects, ctx)
+    matches += _control_matches(original, tokens, redirects, ctx, wrapped)
     if tokens and os.path.basename(tokens[0]) == "git":
         matches += _git_control_matches(tokens, ctx)
     if tokens and os.path.basename(tokens[0]) == "gh":
@@ -712,6 +905,10 @@ def _gh_control_matches(tokens: list) -> list:
     return []
 
 
+_FOUND = "found-by-find"  # stands for a file find passes to -exec, somewhere under a start path
+MAX_FIND_STARTS = 8
+
+
 def _find_exec_matches(tokens: list, ctx: _Ctx, depth: int) -> list:
     """Classify the commands that `find -exec/-execdir/-ok/-okdir` runs."""
     starts = []
@@ -719,7 +916,8 @@ def _find_exec_matches(tokens: list, ctx: _Ctx, depth: int) -> list:
         if t.startswith("-") or t in ("(", "!", ")"):
             break
         starts.append(t)
-    sample = (starts[0] if starts else ".").rstrip("/") + "/x"
+    sub = ctx.fork()
+    sub.marks = (_FOUND,) + tuple(ctx.marks)  # the found name is a run-time part of paths
     out = []
     i = 0
     while i < len(tokens):
@@ -727,9 +925,11 @@ def _find_exec_matches(tokens: list, ctx: _Ctx, depth: int) -> list:
             j = i + 1
             while j < len(tokens) and tokens[j] not in (";", "+"):
                 j += 1
-            inner = [sample if t == "{}" else t for t in tokens[i + 1:j]]
-            if inner:
-                out += _analyze(inner, [], _new_segment(False), ctx.fork(), depth + 1)
+            for start in (starts or ["."])[:MAX_FIND_STARTS]:
+                sample = start.rstrip("/") + "/" + _FOUND
+                inner = [sample if t == "{}" else t for t in tokens[i + 1:j]]
+                if inner:
+                    out += _analyze(inner, [], _new_segment(False), sub.fork(), depth + 1)
             i = j
         i += 1
     return out
@@ -807,7 +1007,46 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
     return out
 
 
-def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx) -> list:
+# Programs that only read the files they are given. Some have options that make them write or
+# run something after all: with one of those the program is not read-only.
+_READ_ONLY = dict.fromkeys(("cat", "ls", "head", "tail", "more", "wc", "du", "stat", "file", "grep",
+                            "rg", "diff", "echo", "printf", "basename", "dirname", "realpath"))
+_READ_ONLY.update({"tree": re.compile(r"-o"), "less": re.compile(r"-[A-Za-z]*[oO]|--log-file", re.I),
+                   "find": re.compile(r"-(delete|exec|ok|fprint|fls)")})
+# Programs whose operands before the last are only read, while every option is a plain flag
+# from this list (an option with a value might name a file to write).
+_COPY_FLAGS = {
+    "cp": re.compile(r"^(-[aAbcdfHiLnpPrRTuvxX]+|--(archive|recursive|force|interactive|"
+                     r"no-clobber|preserve(=.*)?|no-preserve=.*|verbose|update|dereference|"
+                     r"no-dereference|parents))$"),  # not -l or -s: a link to the source
+    "rsync": re.compile(r"^(-[aAvzrhPnqtlpgoDuHXEcixWSO]+|--(archive|recursive|verbose|compress|"
+                        r"human-readable|progress|stats|dry-run|quiet|checksum|update|links|"
+                        r"times|perms|itemize-changes|mkpath|relative|partial|info=.*|"
+                        r"delete(-after|-before|-during|-excluded|-delay)?|"
+                        r"(exclude|include)(=.*)?))$"),
+}
+
+
+def _write_positions(tokens: list, ctx: _Ctx) -> list:
+    """Indexes of the words of one command that may name a file it writes: all of them,
+    except every word of a read-only program and the sources of cp and rsync."""
+    name = os.path.basename(tokens[0])
+    if name in _READ_ONLY:
+        writes = _READ_ONLY[name]
+        if writes is None or not any(writes.match(t) for t in tokens[1:]):
+            return []
+    flags = _COPY_FLAGS.get(name)
+    if flags is not None and not ctx.incomplete:
+        end = tokens.index("--") if "--" in tokens else len(tokens)
+        options = [i for i in range(1, end) if tokens[i].startswith("-") and len(tokens[i]) > 1]
+        operands = [i for i in range(1, len(tokens)) if i not in options and i != end]
+        if len(operands) >= 2 and all(flags.match(tokens[i]) for i in options):
+            return [0] + options + operands[-1:]
+    return list(range(len(tokens)))
+
+
+def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
+                     wrapped: bool = False) -> list:
     out = []
     skip = None
     if not tokens:  # a wrapper: its suffixes were classified; spare a read-only dw program
@@ -830,18 +1069,24 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx) -
             out.append({"id": "control-agent", "category": "control",
                         "describe": "start another agent session outside the guard: %s"
                                     % _short(" ".join(tokens))})
-    for i, token in enumerate(original):
-        if i == skip:
-            continue
-        if ctx.protected.token_hit(token, ctx.cwd, getattr(ctx, "sub_bodies", None),
-                                    getattr(ctx, "marks", ())):
-            out.append(_state_match(" ".join(original)))
-            return out
-    for target in redirects:
-        if ctx.protected.token_hit(target, ctx.cwd, getattr(ctx, "sub_bodies", None),
-                                    getattr(ctx, "marks", ())):
-            out.append(_state_match(" ".join(original)))
-            return out
+    # Write positions. Redirect targets always are. Of the words: for a wrapper, its own
+    # leading words and options (every suffix of its arguments was classified as a command of
+    # its own, with that command's write positions); otherwise see _write_positions.
+    head = len(original) - len(tokens)
+    if wrapped:
+        own = len(original) - len(_strip_prefix(list(original)))
+        checked = [i for i, t in enumerate(original)
+                   if i <= own or t.startswith("-") or re.search(r"\s", t)]
+    elif tokens and original[head:] == tokens:
+        positions = _write_positions(tokens, ctx)
+        checked = [head + i for i in positions]
+        if positions:
+            checked = list(range(head)) + checked
+    else:
+        checked = list(range(len(original)))
+    words = [original[i] for i in checked if i != skip] + list(redirects)
+    if any(ctx.protected.token_hit(w, ctx.cwd, ctx.sub_bodies, ctx.marks) for w in words):
+        out.append(_state_match(" ".join(original)))
     return out
 
 
@@ -864,7 +1109,8 @@ _ALWAYS_SENSITIVE = {"git", "gh", "ssh", "scp", "rsync", "curl", "wget", "osascr
 def sensitive_programs(rules: list) -> set:
     """Programs whose unreadable deciding words make a command `control` (see module doc)."""
     names = set(_ALWAYS_SENSITIVE) | set(SHELLS) | WRAPPERS | set(_RUNNERS) | SQL_CLIENTS
-    names |= {"python", "python3", "pypy", "perl", "ruby", "node", "nodejs", "php", "deno", "bun"}
+    names |= {"python", "python3", "pypy", "perl", "ruby", "node", "nodejs", "php", "deno", "bun",
+              "tsx", "ts-node"}
     for rule in rules:
         names |= set(rule.get("program") or ())
     return names

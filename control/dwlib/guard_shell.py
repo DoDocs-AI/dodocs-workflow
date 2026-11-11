@@ -524,7 +524,7 @@ def _tokens(words: list) -> list:
 
 SHELLS = ("sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh")
 _INTERPRETER_RE = re.compile(r"^(python[0-9.]*|pypy[0-9.]*|perl[0-9.]*|ruby[0-9.]*|node|nodejs|php[0-9.]*|"
-                             r"deno|bun|lua[0-9.]*|luajit|Rscript|julia|tclsh|wish|pwsh|powershell|"
+                             r"deno|bun|tsx|ts-node|lua[0-9.]*|luajit|Rscript|julia|tclsh|wish|pwsh|powershell|"
                              r"groovy|elixir|erl|escript|swift|expect)$")
 _KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{", "}",
              "coproc"}

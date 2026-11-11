@@ -203,13 +203,14 @@ class ShellFormTests(GuardClassifyBase):
             ("Bash", {"command": "cp a ${HOME}/.config/agterm/hooks.conf"}),
             ("Bash", {"command": "cd %s && rm -f registry.json" % dw_home}),
             ("Write", {"file_path": str(link / "registry.json")}),
-            ("Bash", {"command": "cat %s/registry.json" % link}),
+            ("Bash", {"command": "tee %s/registry.json" % link}),
             ("Bash", {"command": "cd ~ && echo x > .claude/settings.json"}),
         ]
         for tool, tool_input in rows:
             with self.subTest(input=tool_input):
                 result = self.guard.classify(tool, tool_input, "/p", "/p", self.rules)
                 self.assertEqual(self.category(result), "control", result)
+        self.assertIsNone(self.bash("cat %s/registry.json" % link))  # a read
         # relative path resolved against cwd
         result = self.guard.classify("Bash", {"command": "rm -f home/registry.json"},
                                      str(self.tmp), "/p", self.rules)
@@ -360,7 +361,8 @@ class InlineCodeAndWrapperTests(GuardClassifyBase):
             ("git push origin {feature,main}", "merge"),
             ("git push origin feature/{a,b}", None),
             ("echo x > ~/.{claude/settings.json,zshrc}", "control"),
-            ("cat ~/.dodocs-workflow/{registry,x}.json", "control"),
+            ("rm ~/.dodocs-workflow/{registry,x}.json", "control"),
+            ("cat ~/.dodocs-workflow/{registry,x}.json", None),
             ("rm -rf /Users/me/{a,b}", "destroy"),
             ("rm -rf build/{a,b}", None),
             ("touch file{1..3}.txt", None),
@@ -379,11 +381,14 @@ class InlineCodeAndWrapperTests(GuardClassifyBase):
         (claude / "settings.json").write_text("{}")
         self.check_rows([
             ("rm ~/.clau*/settings.json", "control"),
-            ("cat ~/.dodocs-w*/reg*", "control"),
+            ("rm ~/.dodocs-w*/reg*", "control"),
             ("echo x > ~/.claude/sett*", "control"),
             ("cp x ~/.claude/s?ttings.json", "control"),
-            ("cat ~/.*/settings.json", "control"),
-            ("cat ~/.config/agterm/hook*", "control"),
+            ("cp x ~/.*/settings.json", "control"),
+            ("rm ~/.config/agterm/hook*", "control"),
+            ("cat ~/.dodocs-w*/reg*", None),
+            ("cat ~/.*/settings.json", None),
+            ("cat ~/.config/agterm/hook*", None),
             ("rm ~/.claude/$NAME", "control"),
             ("ls ~/*.txt", None),
             ("ls src/*.py", None),
@@ -600,7 +605,7 @@ class SecurityReviewTests(GuardClassifyBase):
         for i in range(6000):
             (big / ("f%d" % i)).touch()
         start = time.time()
-        result = self.guard.classify("Bash", {"command": "cat big/*/settings.json"}, str(self.home),
+        result = self.guard.classify("Bash", {"command": "cp x big/*/settings.json"}, str(self.home),
                                      "/p", self.rules)
         self.assertLess(time.time() - start, 3.0)
         self.assertEqual(self.category(result), "control")
@@ -1003,6 +1008,264 @@ class ReviewRound3Tests(GuardClassifyBase):
             ("python3 -m pytest -q", None),
             ("cat .git/HEAD", None),
             ("node app.js \"$PORT\"", None),
+        ])
+
+
+class ReviewRound4Tests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_g1_run_time_or_glob_part_inside_a_protected_name(self):
+        self.check_rows([
+            ("echo x > ${D}/.git${X}", "control"),
+            ("echo x > $D/.gi$X/config", "control"),
+            ("echo x > $D/.agterm/$F", "control"),
+            ("echo x > .cla*/settings.json", "control"),
+            ("echo x > .cl?ude/settings.json", "control"),
+            ("echo x > [.]git/config", "control"),
+            ("echo x > .gi?/hooks/pre-push", "control"),
+            ("echo x > .gi{t,x}/hooks/pre-push", "control"),
+            ("echo x > .cl$A/settings.json", "control"),
+            ("cp x .g${X}t/config", "control"),
+            ("cp x $D.git/config", "control"),
+            ("tee .GI$X/hooks/pre-push < x", "control"),
+            ("echo x > .dodocs-w$X/registry.json", "control"),
+            ("echo x > $D/.git/config", "control"),
+            ("echo x > $D/config", None),
+            ("echo x > $D/.github/$F", None),
+            ("echo x > $D/.gitignore", None),
+            ("echo x > $NAME.gitignore", None),
+            ("echo x > src/$NAME.git.txt", None),
+            ("echo x > .gi[r-1]/config", "control"),  # not a valid range: still a pattern
+            ("cp x src/[r-1]x/$F", None),
+            ("cp x .claude/$X/../settings.json", "control"),
+            ("cp x .claude/agents/$X", "control"),
+            ("echo x > .claude/agents/sub/$NAME.md", None),
+            ("echo x > ~/.claude/projects/$P/memory/MEMORY.md", None),
+        ])
+
+    def test_g2_hooks_and_info_through_a_run_time_git_dir(self):
+        self.check_rows([
+            ("echo x > $(git rev-parse --git-dir)/hooks/$NAME", "control"),
+            ("cp x $GIT_DIR/hooks/*", "control"),
+            ("echo x > $GIT_DIR/info/{attributes,x}", "control"),
+            ("tee $GIT_DIR/info/{attributes,x} < y", "control"),
+            ("echo x > `git rev-parse --git-dir`/hooks/$NAME", "control"),
+            ("echo x >> $GIT_DIR/config", "control"),
+            ("echo x >> $GIT_DIR/config$X", "control"),
+            ("echo x > $GIT_DIR/hooks", "control"),
+            ("echo x > ${GIT_COMMON_DIR}/hooks/pre-push", "control"),
+            ("echo x > $GIT_DIR/worktrees/$W/config", "control"),
+            ("echo x > $GIT_DIR/info/exclude", None),
+            ("echo x > $(git rev-parse --show-toplevel)/README.md", None),
+            ("echo x > $(git rev-parse --show-toplevel)/src/$F", None),
+            ("echo x > $D/hooks/$NAME", None),
+        ])
+
+    def test_g3_loader_options_for_every_family(self):
+        self.check_rows([
+            ("ruby -I lib --require $X x.rb", "control"),
+            ("ruby -I lib --require=$X x.rb", "control"),
+            ("ruby -rjson --require=$X x.rb", "control"),
+            ("python3 -m$MOD", "control"),
+            ("bun --preload=$X x.ts", "control"),
+            ("bun --preload $X x.ts", "control"),
+            ("tsx -r $X x.ts", "control"),
+            ("ts-node -r $X x.ts", "control"),
+            ("npx tsx --require=$X x.ts", "control"),
+            ("ruby -I lib -r json x.rb", None),
+            ("ruby --require json x.rb", None),
+            ("python3 -m pytest -q", None),
+            ("python3 -mpytest -q", None),
+            ("tsx scripts/x.ts", None),
+            ("npx tsx scripts/x.ts", None),
+            ("tsx scripts/x.ts \"$PORT\"", None),
+            ("ts-node -r tsconfig-paths/register src/x.ts", None),
+            ("bun --preload ./setup.ts test", None),
+            ("python3 tool.py --require \"$F\"", None),
+        ])
+
+    def test_g4_loader_code_through_the_environment(self):
+        self.check_rows([
+            ("NODE_OPTIONS=\"--require $X\" node app.js", "control"),
+            ("PERL5OPT=-M$X perl x.pl", "control"),
+            ("RUBYOPT=-r$X ruby x.rb", "control"),
+            ("PYTHONSTARTUP=$F python3", "control"),
+            ("BASH_ENV=$F bash x.sh", "control"),
+            ("ENV=$F sh x.sh", "control"),
+            ("LD_PRELOAD=/tmp/x.so ls", "control"),
+            ("DYLD_INSERT_LIBRARIES=/tmp/x.dylib ls", "control"),
+            ("env NODE_OPTIONS=\"--require $X\" node app.js", "control"),
+            ("env RUBYOPT=-rx ruby x.rb", "control"),
+            ("export PERL5OPT=-Mx; perl x.pl", "control"),
+            ("export NODE_OPTIONS=--import=$X && node app.js", "control"),
+            ("NODE_OPTIONS=$OPTS node app.js", "control"),
+            ("NODE_OPTIONS='--require ~/.dodocs-workflow/x.js' node app.js", "control"),
+            ("timeout 5 env LD_PRELOAD=/tmp/x.so ls", "control"),
+            ("BASH_ENV=/tmp/x bash x.sh", "control"),
+            ("NODE_OPTIONS=--max-old-space-size=4096 npm run build", None),
+            ("NODE_OPTIONS='--require dotenv/config' node app.js", None),
+            ("LD_PRELOAD= ls", None),
+            ("NODE_ENV=production npm run build", None),
+            ("PYTHONPATH=. python3 -m pytest -q", None),
+            ("make ENV=prod build", None),
+            ("grep -r LD_PRELOAD=/x src", None),
+        ])
+
+    def test_g5_dw_home_through_its_variable(self):
+        dw_home = self.paths.home()
+        self.check_rows([
+            ("echo x > $DW_HOME/registry.json", "control"),
+            ("echo x > $DW_HOME/runs/$R.json", "control"),
+            ("cp x $DW_HOME/bin/dw", "control"),
+            ("ls | xargs -I{} cp x $DW_HOME/{}", "control"),
+            ("echo x > ${DW_HOME}/registry.json", "control"),
+            ("echo x > \"${DW_HOME:-$HOME/.dodocs-workflow}/registry.json\"", "control"),
+            ("rm -rf $DW_HOME", "control"),
+            ("echo DONE > $DW_HOME/runs/r-1.result.md", None),
+            ("echo DONE > ${DW_HOME}/runs/r-1.result.md", None),
+            ("echo x > $DW_HOME/runs/r-2.result.md", "control"),
+            ("echo DONE > %s/runs/r-1.result.md" % dw_home, None),
+        ])
+
+    def test_o1_reads_under_protected_directories_are_allowed(self):
+        self.check_rows([
+            ("ls .claude/*", None),
+            ("cat .claude/agents/*.md", None),
+            ("cp -r .claude/skills/* /tmp/x/", None),
+            ("ls ~/.claude/*", None),
+            ("cat ~/.claude/projects/*/memory/MEMORY.md", None),
+            ("cat .git/*", None),
+            ("cat $D/.git/refs/heads/*", None),
+            ("cat $D/.claude/$F", None),
+            ("echo \"$D/.claude/$F\"", None),
+            ("ls ~/.config/agterm/*", None),
+            ("ls -la ~/.claude", None),
+            ("cat .git/config", None),
+            ("ls ~/.claude/projects/$P", None),
+            ("cat ~/.claude/settings.json", None),
+            ("grep -rn guard ~/.claude/settings.json .claude/settings.local.json", None),
+            ("head -5 .git/hooks/pre-push", None),
+            ("find .claude -name '*.md'", None),
+            ("find ~/.claude -name settings.json", None),
+            ("diff .claude/settings.json /tmp/x", None),
+            ("rsync -a .claude/agents/ /tmp/agents/", None),
+            ("cp .claude/settings.json /tmp/settings.bak", None),
+            ("cat ~/.dodocs-workflow/registry.json", None),
+            ("wc -l .claude/agents/*.md | sort -n | tail -3", None),
+        ])
+
+    def test_o1_write_positions_are_still_held(self):
+        self.check_rows([
+            ("cp /tmp/x .claude/settings.json", "control"),
+            ("cat x > ~/.claude/settings.json", "control"),
+            ("tee .git/hooks/pre-push < x", "control"),
+            ("cp x .git/hooks/$N", "control"),
+            ("sed -i '' s/a/b/ ~/.claude/settings.json", "control"),
+            ("rm ~/.claude/settings.json", "control"),
+            ("find .git/hooks -name '*' -delete", "control"),
+            ("find ~/.claude -name settings.json -exec cp /tmp/x {} \\;", "control"),
+            ("find .claude -name settings.json -exec cp /tmp/x {} \\;", "control"),
+            ("find .git -name config -exec sudo cp /tmp/x {} \\;", "control"),
+            ("find . -fprint .git/hooks/pre-push", "control"),
+            ("cat .claude/agents/*.md > .claude/settings.json", "control"),
+            ("ls .claude/* > .git/hooks/$N", "control"),
+            ("cp -t .git/hooks /tmp/pre-push", "control"),
+            ("cp .git/config.new .git/config", "control"),
+            ("cp -l ~/.claude/settings.json s.json", "control"),
+            ("cp -s ~/.claude/settings.json s.json", "control"),
+            ("echo x > ~/$a$b$c$d$e$f$g$h/registry.json", "control"),
+            ("echo x > ~/.dodocs-w$a$b*$c?$d*$e*$f*$g/registry.json", "control"),
+            ("rsync -a /tmp/x/ ~/.dodocs-workflow/", "control"),
+            ("rsync --log-file=.git/config -a a b", "control"),
+            ("rsync --remove-source-files -a ~/.dodocs-workflow/ /tmp/x/", "control"),
+            ("mv .claude/settings.json /tmp/x", "control"),
+            ("dd if=/tmp/x of=.git/hooks/$N", "control"),
+            ("ln -sf /tmp/x ~/.claude/settings.json", "control"),
+            ("chmod +x .git/hooks/$N", "control"),
+            ("truncate -s 0 ~/.config/agterm/hooks.conf", "control"),
+            ("touch .git/hooks/$N", "control"),
+            ("install -m 755 /tmp/x .git/hooks/pre-push", "control"),
+            ("tree -o .git/hooks/pre-push .", "control"),
+            ("ls | xargs cp -r ~/.dodocs-workflow", "control"),
+            ("strace -o$HOME/.claude/settings.json ls", "control"),
+            ("valgrind --log-file=$HOME/.claude/settings.json ls", "control"),
+            ("script -q $HOME/.claude/settings.json ls", "control"),
+            ("sudo cp /tmp/x .git/hooks/$N", "control"),
+        ])
+        for tool, inp in (("Write", {"file_path": "/p/.claude/settings.json", "content": "x"}),
+                          ("Edit", {"file_path": "/p/.git/hooks/pre-push"}),
+                          ("Write", {"file_path": "~/.config/agterm/hooks.conf"})):
+            with self.subTest(tool=tool, inp=inp):
+                result = self.guard.classify(tool, inp, "/p", "/p", self.rules)
+                self.assertEqual(self.category(result), "control")
+        for tool, inp in (("Write", {"file_path": "/p/.claude/agents/x.md", "content": "x"}),
+                          ("Edit", {"file_path": "/p/app/[id]/page.tsx"}),
+                          ("Write", {"file_path": "/p/src/routes/$id.tsx", "content": "x"}),
+                          ("Write", {"file_path": "/p/.github/workflows/ci.yml", "content": "x"})):
+            with self.subTest(tool=tool, inp=inp):
+                self.assertIsNone(self.guard.classify(tool, inp, "/p", "/p", self.rules))
+
+    def test_o2_dw_home_is_matched_by_full_path_not_by_basename(self):
+        custom = self.tmp / "x" / "home"
+        custom.mkdir(parents=True)
+        with mock.patch.dict(os.environ, {"DW_HOME": str(custom)}):
+            self.check_rows([
+                ("mkdir -p $TMPDIR/home/$X", None),
+                ("echo x > $D/home/registry.json", None),
+                ("echo x > src/home/$F", None),
+                ("echo x > %s/registry.json" % custom, "control"),
+                ("echo x > %s/$F" % custom, "control"),
+                ("rm %s/ho*/registry.json" % custom.parent, "control"),
+                ("echo x > %s/$D/registry.json" % custom.parent, "control"),
+                ("echo x > $H/.dodocs-workflow/registry.json", "control"),
+            ])
+
+    def test_o3_replace_strings_stay_inside_the_command_xargs_runs(self):
+        self.check_rows([
+            ("echo a | xargs -I{} cp {} /tmp/; ls .git/hooks/{x}", None),
+            ("echo a | xargs -I% cp % /tmp/; touch .git/%", None),
+            ("echo a | xargs -I% cp % /tmp/; touch .claude/agents/%", None),
+            ("echo a | xargs -I{} cp {} /tmp/; touch .git/{x}", None),
+            ("echo a | xargs -I% touch .git/%", "control"),
+            ("echo a | xargs -I% sh -c 'touch .git/%'", "control"),
+        ])
+
+    def test_must_stay_allowed(self):
+        self.check_rows([
+            ("ls .claude/*", None),
+            ("cat .claude/agents/*.md", None),
+            ("cat ~/.claude/projects/*/memory/MEMORY.md", None),
+            ("cat .git/config", None),
+            ("ls -la ~/.claude", None),
+            ("cp -r .claude/skills/* /tmp/x/", None),
+            ("NODE_OPTIONS=--max-old-space-size=4096 npm run build", None),
+            ("ruby -I lib -r json x.rb", None),
+            ("ruby --require json x.rb", None),
+            ("python3 -m pytest -q", None),
+            ("tsx scripts/x.ts", None),
+            ("ls | xargs -I{} cp {} /tmp/", None),
+            ("echo x > $D/settings.json", None),
+            ("echo x > .github/workflows/$NAME.yml", None),
+            ("echo x >> .gitignore", None),
+            ("mkdir -p build/$TARGET", None),
+            ("tar czf out.tgz --exclude=.git .", None),
+            ("git add .github/*", None),
+            ("echo x > .claude/agents/$NAME.md", None),
+            ("cp tmpl.md .claude/commands/$NAME.md", None),
+            ("find . -name '*.py' -exec sed -i '' s/a/b/ {} +", None),
+            ("find . -name '*.sh' -exec chmod +x {} \\;", None),
+            ("find . -name '*.orig' -exec git add {} \\;", None),
+            ("find bin -name '*.js' -exec node {} \\;", None),
+            ("find control -name '*.py' -exec python3 {} \\;", None),
+            # many pattern parts in one word: decided by the fixed text, not by their number
+            ("sed -E 's/^[[:space:]]*([a-z_]+)[[:space:]]*=[[:space:]]*(.*)$/\\1=\\2/' app.conf", None),
+            ("python3 -c \"print(d['a'][0], d['b'][1], d['c'][2], d['d'][3]/2)\"", None),
+            ("awk '{s=$1*$2*$3*$4/2; print s}' f", None),
+            ("awk '/^[a-z]+.*[0-9]$/ {print $1, $2, $3, $4}' f", None),
         ])
 
 

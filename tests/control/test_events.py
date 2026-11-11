@@ -164,6 +164,31 @@ class StatusEventTests(EventBase):
         self.note("r-c", "whatever\nx")
         self.assertEqual(events.read_result_note("r-c")[0], "DONE")
 
+    def test_read_result_note_marker_with_text_on_its_line(self):
+        from dwlib import events
+        for text, expected in (
+                ("BLOCKED: need a token\nmore", ("BLOCKED", "need a token\nmore")),
+                ("BLOCKED: need a token", ("BLOCKED", "need a token")),
+                ("\n\n  blocked:need a token\n", ("BLOCKED", "need a token")),
+                ("FAILED - tests red\nlog", ("FAILED", "tests red\nlog")),
+                ("# DONE\nmerged", ("DONE", "merged")),
+                ("**Blocked.** waiting\n", ("BLOCKED", "waiting")),
+                ("All finished\nok", ("DONE", "All finished\nok")),
+                ("BLOCKEDX need\n", ("DONE", "BLOCKEDX need"))):
+            with self.subTest(text=text):
+                self.note("r-m", text)
+                self.assertEqual(events.read_result_note("r-m"), expected)
+
+    def test_completed_with_marker_and_text_on_one_line_stays_blocked(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.note(rid, "BLOCKED: x\n")
+        self.status_event(sid, "completed")
+        rec = self.record(rid)
+        self.assertEqual(rec["state"], "blocked")
+        self.assertIn("x", rec["reason"])
+        self.assertIsNone(rec["ended_at"])
+
     def test_blocked_then_active_round_trip(self):
         self.add_project("alpha")
         rid, sid = self.start("alpha")

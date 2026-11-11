@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Optional
 
@@ -9,6 +10,10 @@ from . import agterm, paths, runs, store
 
 MARKERS = ("DONE", "BLOCKED", "FAILED")
 REASON_CHARS = 200
+# The marker: the first word of the note's first line, after any leading `#`, `*` or spaces and
+# before an optional `:`, `-` or `.` (Markdown emphasis around it is ignored). Group 2 is the rest
+# of the line, which joins the body.
+_MARKER_LINE_RE = re.compile(r"^[#*\s]*([A-Za-z]+)\**(?:\s*[:.\-]\**\s*|\s+|$)(.*)$")
 
 
 def log_error(event: str, exc: BaseException) -> None:
@@ -34,9 +39,9 @@ def read_result_note(run_id: str) -> Optional[tuple]:
     if not text.strip():
         return None
     first, _, rest = text.strip().partition("\n")
-    marker = first.strip().upper()
-    if marker in MARKERS:
-        return marker, rest.strip()
+    m = _MARKER_LINE_RE.match(first)
+    if m and m.group(1).upper() in MARKERS:
+        return m.group(1).upper(), (m.group(2) + "\n" + rest).strip()
     return "DONE", text.strip()
 
 

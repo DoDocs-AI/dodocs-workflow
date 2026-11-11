@@ -1773,6 +1773,10 @@ class FailClosedTests(GuardClassifyBase):
             ("[ -v 'a[$(touch .git/hooks/pre-push)]' ]", "control"),
             ("[[ -f .claude/settings.json && $(echo x > .git/config) ]]", "control"),
             ("test .claude/settings.json -nt x", "control"),
+            # ordinary arithmetic on variables stays allowed: only a literal command is held
+            ('[ "$n" -eq 0 ] && echo none', None),
+            ("[[ $? -ne 0 ]] && exit 1", None),
+            ('if [ "$count" -gt 5 ]; then echo many; fi', None),
         ])
 
 

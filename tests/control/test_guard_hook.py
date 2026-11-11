@@ -409,6 +409,52 @@ class GuardRunIdTests(GuardHookBase):
         self.assertIsNotNone(self.record(second)["pending_approval"])
         self.assertEqual(self.record(first), done_before)
 
+    def corruptions(self):
+        """name -> a file the guard reads; `with_corrupt` breaks it for one check."""
+        from dwlib import paths
+        return {"rules": paths.home() / "guard-rules.default.json",
+                "registry": paths.home() / "registry.json",
+                "sibling run": paths.runs_dir() / "r-sibling.json"}
+
+    def with_corrupt(self, path, check):
+        saved = path.read_bytes() if path.exists() else None
+        path.write_text("{broken")
+        try:
+            check()
+        finally:
+            if saved is None:
+                path.unlink()
+            else:
+                path.write_bytes(saved)
+
+    def test_guard_error_with_any_dw_run_id_fails_closed(self):
+        path, rid = self.start_run()
+        from dwlib import runs
+        runs.finish_run(rid, "done", None)
+        for run_id in (rid, "r-nope"):
+            for name, corrupt in self.corruptions().items():
+                for cwd in (path, self.tmp):
+                    if name == "sibling run" and cwd != path:
+                        continue  # a sibling record is read only for a cwd inside a project
+                    with self.subTest(run_id=run_id, corrupt=name, cwd=str(cwd)):
+                        def check():
+                            out = self.guard(self.payload(cwd, "git push origin main"),
+                                             env={"DW_RUN_ID": run_id})
+                            self.assertIsNotNone(out)
+                            self.assertEqual(out["permissionDecision"], "deny")
+                            self.assertTrue(out["permissionDecisionReason"].startswith("Guard error: "),
+                                            out)
+                        self.with_corrupt(corrupt, check)
+
+    def test_guard_error_without_dw_run_id_outside_projects_stays_silent(self):
+        path, rid = self.start_run()
+        from dwlib import runs
+        runs.finish_run(rid, "done", None)
+        for name, corrupt in self.corruptions().items():
+            with self.subTest(corrupt=name):
+                self.with_corrupt(corrupt, lambda: self.assertEqual(
+                    self.raw_guard(self.payload(self.tmp, "git push origin main")).stdout, ""))
+
     def test_hold_denies_when_the_run_ended_before_the_claim(self):
         path, rid = self.start_run()
         from dwlib import guard, runs

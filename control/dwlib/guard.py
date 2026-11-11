@@ -1670,17 +1670,11 @@ def _refuse_for_ended_run(run_id: str, tool: str, tool_input: dict, cwd: str) ->
 
 
 def _probably_inside_run(cwd) -> bool:
-    """After an error: whether the call may belong to an active run. Never raises."""
+    """After an error: whether the call may belong to a run. A session started by `dw run`
+    carries `DW_RUN_ID` whatever its run's state now is, so that alone counts. Never raises."""
     try:
-        run_id = os.environ.get("DW_RUN_ID")
-        if run_id:
-            try:
-                if store.load_run(run_id).get("state") in runs.ACTIVE_STATES:
-                    return True
-            except store.CorruptFile:
-                return True
-            except store.RunNotFound:
-                pass
+        if os.environ.get("DW_RUN_ID"):
+            return True
         if not cwd:
             return False
         real = os.path.realpath(cwd)
@@ -1696,7 +1690,7 @@ def _probably_inside_run(cwd) -> bool:
         return any(p.get("path") and _inside(real, p["path"]) and p.get("id") in ids
                    for p in registry.get("projects", []))
     except Exception:
-        return bool(os.environ.get("DW_RUN_ID"))
+        return False
 
 
 # -- the hook ------------------------------------------------------------------------

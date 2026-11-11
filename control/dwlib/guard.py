@@ -2,7 +2,9 @@
 
 `dw guard` reads the hook payload on stdin. Outside an active run it allows silently.
 Inside one, an action that matches a rule is held: the run is marked blocked, the owner
-is asked through AGTerm, and the answer allows or denies the tool call.
+is asked through AGTerm, and the answer allows or denies the tool call. A session whose
+`DW_RUN_ID` names a run that is no longer active (and no other run is active where it works)
+is refused every matching action outright, without asking.
 
 Classification rule for what the parser does not understand: a command whose program is
 SENSITIVE (see `sensitive_programs`: every program a rule names, git, gh, ssh, scp, rsync,
@@ -120,6 +122,8 @@ ASK_TIMEOUT = min(HOOK_MAX_WAIT_SECONDS - 30, 3000)
 PENDING_REASON = ("Approval is pending with the owner. Do not work around it. "
                   "Continue other work, then retry this exact action later.")
 DENIED_REASON = "Denied by the owner. Do not attempt this action another way."
+INACTIVE_REASON = ("Run %s is %s; guarded actions are refused in this session. "
+                   "The owner can do this by hand or start a new run.")
 DW_READ_ONLY = (["status"], ["queue"], ["tail"], ["project", "list"])
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 AGENT_HARNESSES = ("claude", "codex", "gemini", "aider", "opencode", "cursor-agent", "amp",
@@ -1585,6 +1589,32 @@ def _find_active(cwd: str) -> Optional[tuple]:
     return _run_from_env() or active_run_for_cwd(cwd)
 
 
+def _registered_project_at(cwd: str, registry: dict) -> Optional[dict]:
+    """The registered project whose path holds realpath(cwd) most closely, or None."""
+    real = os.path.realpath(cwd)
+    projects = [p for p in registry.get("projects", []) if p.get("path") and _inside(real, p["path"])]
+    return max(projects, key=lambda p: len(p["path"])) if projects else None
+
+
+def _refuse_for_ended_run(run_id: str, tool: str, tool_input: dict, cwd: str) -> Optional[dict]:
+    """`DW_RUN_ID` names a run that is not running or blocked (or no run at all) and no other
+    run is active here: a call that matches a rule is refused outright. No dialog is opened
+    and no record is changed; any other call is allowed."""
+    registry = store.load_registry()
+    try:
+        run = store.load_run(run_id)
+    except store.RunNotFound:
+        run = None
+    if run is not None:
+        project, state = _project_for(run, registry), str(run.get("state") or "unknown")
+        rules = load_rules(project) + [run_context(run_id)]  # its own result note stays writable
+    else:
+        project, state = _registered_project_at(cwd, registry), "unknown"
+        rules = load_rules(project or {})
+    match = classify(tool, tool_input, cwd, (project or {}).get("path") or cwd, rules)
+    return None if match is None else _inactive_output(run_id, state)
+
+
 def _probably_inside_run(cwd) -> bool:
     """After an error: whether the call may belong to an active run. Never raises."""
     try:
@@ -1622,6 +1652,10 @@ def _output(decision: str, reason: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                    "permissionDecision": decision,
                                    "permissionDecisionReason": reason}}
+
+
+def _inactive_output(run_id: str, state: str) -> dict:
+    return _output("deny", INACTIVE_REASON % (run_id, state))
 
 
 def _fingerprint(tool: str, tool_input: dict) -> str:
@@ -1703,6 +1737,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
     def claim(r):
         if r.get("state") not in runs.ACTIVE_STATES:
             outcome["kind"] = "gone"
+            outcome["state"] = str(r.get("state") or "unknown")
             return r
         if not control and all(p in (r.get("approvals") or []) for p in parts):
             outcome["kind"] = "approved"
@@ -1725,7 +1760,9 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
 
     run = store.update_run(run_id, claim)
     kind = outcome["kind"]
-    if kind in ("gone", "approved", "granted"):
+    if kind == "gone":  # the run ended after it was found: refused, as for any ended run
+        return _inactive_output(run_id, outcome["state"])
+    if kind in ("approved", "granted"):
         return None  # an approved action prints nothing: the harness's own flow decides
     if kind == "busy":
         return _output("deny", PENDING_REASON)
@@ -1900,7 +1937,8 @@ def decide(payload: dict) -> Optional[dict]:
         tool_input = {}
     found = _find_active(cwd)
     if found is None:
-        return None
+        run_id = os.environ.get("DW_RUN_ID")
+        return _refuse_for_ended_run(run_id, tool, tool_input, cwd) if run_id else None
     project, run = found
     rules = load_rules(project) + [run_context(run["id"])]
     match = classify(tool, tool_input, cwd, project.get("path") or cwd, rules)

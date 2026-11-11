@@ -10,6 +10,8 @@ from helpers import DW, DwTestCase
 PENDING_REASON = ("Approval is pending with the owner. Do not work around it. "
                   "Continue other work, then retry this exact action later.")
 DENIED_REASON = "Denied by the owner. Do not attempt this action another way."
+INACTIVE_REASON = ("Run %s is %s; guarded actions are refused in this session. "
+                   "The owner can do this by hand or start a new run.")
 
 
 class GuardHookBase(DwTestCase):
@@ -340,8 +342,9 @@ class GuardRunIdTests(GuardHookBase):
         path, rid = self.start_run()
         from dwlib import runs
         runs.finish_run(rid, "done", None)
-        self.assertIsNone(self.guard(self.payload(self.tmp, "git push origin main"),
-                                     env={"DW_RUN_ID": rid}))
+        out = self.guard(self.payload(self.tmp, "git push origin main"), env={"DW_RUN_ID": rid})
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", INACTIVE_REASON % (rid, "done")))
         other_path, other = self.start_run("other")
         out = self.guard(self.payload(other_path, "git push origin main"), env={"DW_RUN_ID": rid})
         self.assertEqual(out["permissionDecision"], "deny")
@@ -350,8 +353,9 @@ class GuardRunIdTests(GuardHookBase):
 
     def test_unknown_dw_run_id_falls_back_to_cwd(self):
         path, rid = self.start_run()
-        self.assertIsNone(self.guard(self.payload(self.tmp, "git push origin main"),
-                                     env={"DW_RUN_ID": "r-nope"}))
+        out = self.guard(self.payload(self.tmp, "git push origin main"), env={"DW_RUN_ID": "r-nope"})
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", INACTIVE_REASON % ("r-nope", "unknown")))
         out = self.guard(self.payload(path, "git push origin main"), env={"DW_RUN_ID": "r-nope"})
         self.assertEqual(out["permissionDecision"], "deny")
 
@@ -362,6 +366,62 @@ class GuardRunIdTests(GuardHookBase):
         out = self.guard(self.payload(self.tmp, "git push origin main"), env={"DW_RUN_ID": rid})
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertTrue(out["permissionDecisionReason"].startswith("Guard error: "))
+
+
+    def set_state(self, rid, state):
+        from dwlib import store
+        store.update_run(rid, lambda r: {**r, "state": state})
+        return self.record(rid)
+
+    def test_inactive_dw_run_id_refuses_guarded_calls_without_asking(self):
+        from dwlib import paths
+        for state in ("queued", "done", "failed", "interrupted", "cancelled"):
+            with self.subTest(state=state):
+                path, rid = self.start_run("p-" + state)
+                before = self.set_state(rid, state)
+                asks = len(self.ask_calls())
+                env = {"DW_RUN_ID": rid}
+                out = self.guard(self.payload(path, "git push origin main"), env=env)
+                self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                                 ("deny", INACTIVE_REASON % (rid, state)))
+                out = self.guard(self.payload(path, "dw run p x"), env=env)
+                self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                                 ("deny", INACTIVE_REASON % (rid, state)))
+                self.assertIsNone(self.guard(self.payload(path, "ls"), env=env))
+                note = str(paths.result_note_path(rid))
+                self.assertIsNone(self.guard(self.payload(
+                    path, tool="Write", tool_input={"file_path": note, "content": "DONE"}), env=env))
+                self.assertEqual(len(self.ask_calls()), asks)
+                self.assertEqual(self.record(rid), before)
+
+    def test_inactive_dw_run_id_leaves_the_hold_to_another_active_run_here(self):
+        path, first = self.start_run()
+        from dwlib import runs
+        runs.finish_run(first, "done", None)
+        r = self.dw("run", "slotme", "/scrum-team", "again")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        second = r.stdout.split()[0]
+        done_before = self.record(first)
+        out = self.guard(self.payload(path, "git push origin main"), env={"DW_RUN_ID": first})
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+        self.assertEqual(len(self.ask_calls()), 1)
+        self.assertIsNotNone(self.record(second)["pending_approval"])
+        self.assertEqual(self.record(first), done_before)
+
+    def test_hold_denies_when_the_run_ended_before_the_claim(self):
+        path, rid = self.start_run()
+        from dwlib import guard, runs
+        runs.finish_run(rid, "interrupted", "x")
+        before = self.record(rid)
+        project = {"id": "slotme", "name": "slotme", "path": str(path), "guard_rules": []}
+        match = {"id": "git-push", "category": "publish", "describe": "git push"}
+        out = guard._hold(project, {"id": rid}, match, "Bash", {"command": "git push origin main"})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecisionReason"],
+                         INACTIVE_REASON % (rid, "interrupted"))
+        self.assertEqual(self.ask_calls(), [])
+        self.assertEqual(self.record(rid), before)
 
 
 class GuardInstalledTests(GuardHookBase):

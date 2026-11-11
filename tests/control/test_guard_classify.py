@@ -1373,7 +1373,7 @@ class ReviewRound5Tests(GuardClassifyBase):
             ("find . -name '*.md' -o -name pre-push -delete", "control"),
             ("find . \\( -name '*.md' -o -name pre-push \\) -delete", "control"),
             ("find . -name pre-push -print -o -name '*.md' -delete", None),
-            ("find . \\( -name .git -o -name node_modules \\) -prune -o -name config -delete", None),
+            ("find . \\( -name .git -o -name node_modules \\) -prune -o -name config -delete", "control"),
             ("find . -name '*.pyc' -delete", None),
             ("find . -name '*.py' -exec sed -i '' s/a/b/ {} +", None),
             ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
@@ -1661,7 +1661,7 @@ class TightenedExemptionTests(GuardClassifyBase):
             ("find . -not -path '*/.git/objects/*' -name pre-push -delete", "control"),
             ("find . -not -path '*/.github/*' -name pre-push -delete", "control"),
             ("find . -not -path '*/.git/*' -name config -delete", None),
-            ("find . -name .git -prune -o -name config -delete", None),
+            ("find . -name .git -prune -o -name config -delete", "control"),
             ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
         ])
 
@@ -1682,13 +1682,32 @@ class FailClosedTests(GuardClassifyBase):
             ("find . \\( -name .git -o -type f \\) -prune -o -name config -delete", "control"),
             ("find . \\( -name .git -o -name x \\) -print -prune -o -name config -delete",
              "control"),
-            ("find . -path ./.git -prune -o -name config -delete", None),
-            ("find . -name .git -prune -o -name config -delete", None),
+            ("find . -path ./.git -prune -o -name config -delete", "control"),
+            ("find . -name .git -prune -o -name config -delete", "control"),
             ("find . \\( -path ./.git -o -path ./node_modules \\) -prune -o -name config -delete",
-             None),
+             "control"),
             ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
             ("find . \\( -path ./.git -o -path ./node_modules \\) -prune -o -type f -name '*.py' "
              "-exec wc -l {} +", None),
+        ])
+
+    def test_1b_prune_does_not_count_under_delete_or_depth(self):
+        # -delete, -depth and -d (find's own, not inside -exec) make find go depth-first, where
+        # -prune has no effect: no test is taken as pruned
+        self.check_rows([
+            ("find . -name .git -prune -o -name config -delete", "control"),
+            ("find . -path ./.git -prune -o -name config -delete", "control"),
+            ("find . \\( -name .git -o -name node_modules \\) -prune -o -name config -delete",
+             "control"),
+            ("find . -depth -name .git -prune -o -name config -exec rm {} \\;", "control"),
+            ("find -d . -name .git -prune -o -name config -exec rm {} \\;", "control"),
+            ("find . -name node_modules -prune -o -name '*.pyc' -delete", None),
+            ("find . -name .git -prune -o -name '*.pyc' -delete", None),
+            ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
+            ("find . -path ./.git -prune -o -name '*.b64' -exec base64 -d {} \\;", None),
+            ("find . -name '*.orig' -delete", None),
+            ("find . -name .git -prune -o -name config -exec rm {} \\;", None),
+            ("find . -path ./.git -prune -o -name config -exec tr -d x {} \\;", None),
         ])
 
     def test_2_names_on_stdin_reach_a_writer(self):

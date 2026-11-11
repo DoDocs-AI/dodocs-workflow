@@ -771,23 +771,42 @@ def _find_pruned(tokens: list, i: int) -> bool:
     return tokens[first - 1:first] == ["("] and tokens[last + 2:last + 4] == [")", "-prune"]
 
 
+_FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
+_FIND_DEPTH_FIRST = ("-delete", "-depth", "-d")  # -prune has no effect under any of these
+
+
+def _find_own_words(tokens: list) -> list:
+    """The words of a find command outside its -exec/-ok spans (`-exec ... ;` or `+`)."""
+    own, i = [], 1
+    while i < len(tokens):
+        if tokens[i] in _FIND_EXEC:
+            while i < len(tokens) and tokens[i] not in (";", "+"):
+                i += 1
+        else:
+            own.append(tokens[i])
+        i += 1
+    return own
+
+
 def _find_write_matches(tokens: list, ctx: _Ctx) -> list:
     """find that deletes, or hands to a writing command, files it finds by itself. For each
     such action the tests of its and-chain are read: positive -name and -path tests say what
-    it may find, negated ones and pruned directories what it cannot. Held when a protected
+    it may find, negated ones and pruned directories what it cannot (no directory counts as
+    pruned when find goes depth-first: -delete, -depth or -d). Held when a protected
     file (_FINDABLE) is not ruled out, and either the tests ask for one outright (-name
     pre-push, -path '*/.git/*') or a start directory may hold protected files."""
     first = 1
     while first < len(tokens) and not (tokens[first].startswith("-") or tokens[first] in ("(", "!", ")")):
         first += 1
     starts = tokens[1:first] or ["."]
-    pruned = [(tokens[i], tokens[i + 1].lower()) for i in range(first, len(tokens) - 1)
-              if tokens[i] in _FIND_NAME_TESTS + _FIND_PATH_TESTS and _find_pruned(tokens, i)]
+    pruned = [] if any(t in _FIND_DEPTH_FIRST for t in _find_own_words(tokens)) else \
+        [(tokens[i], tokens[i + 1].lower()) for i in range(first, len(tokens) - 1)
+         if tokens[i] in _FIND_NAME_TESTS + _FIND_PATH_TESTS and _find_pruned(tokens, i)]
     i = first
     while i < len(tokens):
         t = tokens[i]
         end = i
-        if t in ("-exec", "-execdir", "-ok", "-okdir"):
+        if t in _FIND_EXEC:
             while end < len(tokens) and tokens[end] not in (";", "+"):
                 end += 1
             writes = _writes_what_it_finds(tokens[i + 1:end], ctx)

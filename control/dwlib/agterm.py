@@ -127,14 +127,19 @@ def session_states() -> dict:
     return states
 
 
-def set_status(session_id: str, status: str) -> None:
+def _call_timeout(timeout: Optional[float]) -> Optional[float]:
+    return timeout if timeout is not None else _timeout(15)
+
+
+def set_status(session_id: str, status: str, timeout: Optional[float] = None) -> None:
     """Set a session's agent status glyph (idle, active, completed, blocked)."""
     options = ["--target", session_id] + (["--blink"] if status == "blocked" else [])
-    _run(["session", "status", status], options, timeout=_timeout(15))
+    _run(["session", "status", status], options, timeout=_call_timeout(timeout))
 
 
-def notify(session_id: str, title: str, body: str) -> None:
-    _run(["notify", body], ["--title", title, "--target", session_id], timeout=_timeout(15))
+def notify(session_id: str, title: str, body: str, timeout: Optional[float] = None) -> None:
+    _run(["notify", body], ["--title", title, "--target", session_id],
+         timeout=_call_timeout(timeout))
 
 
 def ask(session_id: str, title: str, message: str, buttons: list, timeout: int,
@@ -165,7 +170,7 @@ def ask(session_id: str, title: str, message: str, buttons: list, timeout: int,
 
 
 def ask_open(session_id: str, title: str, message: str, buttons: list,
-             default: Optional[str] = None) -> str:
+             default: Optional[str] = None, timeout: Optional[float] = None) -> str:
     """Open a question without waiting; returns its dialog id. AGTerm refuses a second
     question on a session with an AgtermError whose text says "ask already pending"."""
     options = ["--message", message, "--target", session_id, "--no-block", "--json"]
@@ -173,16 +178,17 @@ def ask_open(session_id: str, title: str, message: str, buttons: list,
         options += ["--default", default]
     for button_id, label in buttons:
         options += ["--button", "%s=%s" % (button_id, label)]
-    result = _result(_run(["ask", "open", title], options, timeout=_timeout(15)))
+    result = _result(_run(["ask", "open", title], options, timeout=_call_timeout(timeout)))
     ask_id = result.get("id")
     if not ask_id:
         raise AgtermError("agtermctl did not return a dialog id")
     return str(ask_id)
 
 
-def ask_result(ask_id: str) -> tuple:
+def ask_result(ask_id: str, timeout: Optional[float] = None) -> tuple:
     """("pending", None) | ("answered", button id) | ("cancelled", None)."""
-    proc = _run(["ask", "result", ask_id], ["--json"], timeout=_timeout(15), ok_codes=(0, 1, 2))
+    proc = _run(["ask", "result", ask_id], ["--json"], timeout=_call_timeout(timeout),
+                ok_codes=(0, 1, 2))
     try:
         data = json.loads(proc.stdout)
     except ValueError:
@@ -201,9 +207,10 @@ def ask_result(ask_id: str) -> tuple:
     return "cancelled", None
 
 
-def ask_cancel(ask_id: str) -> None:
+def ask_cancel(ask_id: str, timeout: Optional[float] = None) -> None:
     """Close a question nobody needs any more; a dialog already closed is not an error."""
-    _run(["ask", "cancel", ask_id], ["--json"], timeout=_timeout(15), ok_codes=(0, 1, 2))
+    _run(["ask", "cancel", ask_id], ["--json"], timeout=_call_timeout(timeout),
+         ok_codes=(0, 1, 2))
 
 
 def close_session(session_id: str) -> None:

@@ -138,6 +138,12 @@ def settings_path() -> Path:
     return Path(override) if override else Path(_home()) / ".claude" / "settings.json"
 
 
+# Inside any .git directory (worktree and submodule git dirs included): the config, hooks and
+# attributes files.
+_GIT_INTERNAL_RE = re.compile(
+    r"/\.git/(?:(?:worktrees|modules)/.+/)?(?:config|config\.worktree|info/attributes|hooks(?:/.*)?)$")
+
+
 class _Protected:
     """The control point's own files, as real paths."""
 
@@ -160,6 +166,8 @@ class _Protected:
         if os.path.basename(path) in ("settings.json", "settings.local.json") \
                 and os.path.basename(os.path.dirname(path)) == ".claude":
             return True  # any Claude settings file can switch hooks off
+        if _GIT_INTERNAL_RE.search(path):
+            return True  # git config, hooks and attributes decide what git runs and pushes
         if path not in ("/", self.home) and not _inside(self.home, path):
             return any(_inside(t, path) for t in list(self.files) + self.dirs)
         return False
@@ -259,7 +267,6 @@ class _Ctx:
         self.incomplete = False
         self.git_cache: dict = {}
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
-        self._plausible: Optional[set] = None
 
     def fork(self) -> "_Ctx":
         other = _Ctx.__new__(_Ctx)
@@ -268,42 +275,67 @@ class _Ctx:
         return other
 
 
-def _plausible_word(word: str, ctx: _Ctx) -> bool:
-    if word not in ("[", "[[", "{", "}") and _dynamic(word):
-        return True
-    if ctx._plausible is None:
-        ctx._plausible = sensitive_programs(ctx.rules) | set(AGENT_HARNESSES) | {"agtermctl"}
-    name = os.path.basename(word)
-    return name in ctx._plausible or bool(_INTERPRETER_RE.match(name))
-
-
-def _plausible_command(text: str, ctx: _Ctx) -> bool:
-    """Whether a string may be a command worth classifying: some simple command in it starts
-    with a sensitive program, a wrapper, a shell or an interpreter (or a computed word)."""
-    try:
-        lexed = _Lexer(text).run()
-    except _Unreadable:
-        words = text.split()
-        return bool(words) and _plausible_word(words[0], ctx)
-    if lexed.subs:
-        return True
-    for seg in lexed.segments:
-        try:
-            words = _strip_prefix(_tokens(seg["words"]))
-        except _Unreadable:
-            return True
-        if words and _plausible_word(words[0], ctx):
-            return True
-    return False
-
-
 def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
-    """Classify each plausible command string in full, unreadable results included."""
+    """Classify command strings in full, unreadable results included. A string the shell
+    itself could not parse (unbalanced quotes) is not a command anything would run."""
     out: list = []
     for text in texts:
-        if _plausible_command(text, ctx):
-            out += _shell_matches(text, ctx.fork(), depth + 1)
+        try:
+            _Lexer(text).run()
+        except _Unreadable:
+            continue
+        out += _shell_matches(text, ctx.fork(), depth + 1)
     return out
+
+
+# Option letters (and long options) whose value is code, per program family.
+_CODE_LETTERS = {"python": "c", "pypy": "c", "perl": "eE", "ruby": "e", "node": "ep",
+                 "nodejs": "ep", "bun": "ep", "deno": "", "php": "r", "lua": "e", "luajit": "e",
+                 "Rscript": "e", "julia": "e", "expect": "c", "pwsh": "c", "powershell": "c"}
+_CODE_LONG = ("--eval", "--print", "--command")
+
+
+def _code_args(args: list, letters: str) -> list:
+    """Values of the options that take code (-c CODE, -cCODE, -pe CODE, --eval=CODE)."""
+    codes: list = []
+    i = 0
+    while i < len(args):
+        t = args[i]
+        if t == "--":
+            break
+        if t.startswith("--"):
+            head, eq, val = t.partition("=")
+            if head in _CODE_LONG:
+                if eq:
+                    codes.append(val)
+                elif i + 1 < len(args):
+                    codes.append(args[i + 1])
+                    i += 1
+        elif t.startswith("-") and len(t) > 1:
+            k = next((k for k, ch in enumerate(t[1:], 1) if ch in letters), None)
+            if k is not None:
+                if t[k + 1:]:
+                    codes.append(t[k + 1:])
+                elif i + 1 < len(args):
+                    codes.append(args[i + 1])
+                    i += 1
+        i += 1
+    return codes
+
+
+def _placeholders(name: str, tokens: list) -> set:
+    """Words xargs or parallel replace with text read from standard input."""
+    found = {"{}"}
+    if name == "parallel":
+        found |= {"{.}", "{/}", "{//}", "{/.}", "{#}", "{%}"}
+    for i, t in enumerate(tokens[1:], 1):
+        if t in ("-I", "--replace") and i + 1 < len(tokens):
+            found.add(tokens[i + 1])
+        elif t.startswith("-I") and len(t) > 2:
+            found.add(t[2:])
+        elif t.startswith(("--replace=", "-i")) and "=" in t:
+            found.add(t.split("=", 1)[1])
+    return {p for p in found if p}
 
 
 def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int = 1) -> list:
@@ -333,7 +365,15 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
                 (t.startswith("-C") and len(t) > 2) for t in tokens):
         sub.cwd = None  # moved somewhere this guard does not follow
     incomplete = name in ("xargs", "parallel")
-    inner_seg = dict(seg, heredocs=[] if name in _SHELL_STARTERS else seg["heredocs"])
+    if incomplete:  # text from standard input replaces these words: unreadable
+        marks = sorted(_placeholders(name, tokens), key=len, reverse=True)
+        replaced = []
+        for t in tokens:
+            for mark in marks:
+                t = t.replace(mark, "__dwsub_input__")
+            replaced.append(t)
+        tokens = replaced
+    inner_seg = seg
     for k in range(start, len(tokens)):
         if tokens[k].startswith("-") or re.search(r"\s", tokens[k]):
             continue  # an option or a command string (read below) is not a program name
@@ -390,15 +430,18 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             break
         name = os.path.basename(prog)
         if name in SHELLS:
-            # Every argument may be the script (-c, -lc, an attached -c'...'): classify each
-            # as a command. Arguments only known at run time cannot be read.
+            # The -c value (or the first operand, the script file) is the code. A run-time
+            # value there cannot be read; later operands are data for the script.
             args = tokens[1:]
-            for arg in args:
-                if _run_time_text(arg):
-                    matches.append(_unreadable_match())
-                    continue
-                matches += _string_matches([arg] + _command_strings(arg)[1:], ctx, depth)
+            codes = _code_args(args, "c")
             operands = [a for a in args if not a.startswith(("-", "+"))]
+            for code in codes:
+                if _run_time_text(code) or "__dwsub" in code:
+                    matches.append(_unreadable_match())
+                else:
+                    matches += _string_matches([code], ctx, depth)
+            if not codes and operands and _run_time_text(operands[0]):
+                matches.append(_unreadable_match())  # the script itself is computed
             stdin_program = not operands or operands[0] in ("-", "/dev/stdin") or "-s" in args
             if stdin_program and seg["pipe_in"]:
                 matches.append(_unreadable_match())
@@ -416,19 +459,27 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                         matches += _inline_matches(arg, ctx, depth)
                     tokens = rest[k + 1:]
                     continue
-            for arg in rest:
-                if _run_time_text(arg):
+            family = re.sub(r"[0-9.]+$", "", name)
+            codes = _code_args(rest, _CODE_LETTERS.get(family, "ce"))
+            operands = [a for a in rest if not a.startswith("-")]
+            for code in codes:
+                if _run_time_text(code) or "__dwsub" in code:
                     matches.append(_unreadable_match())
+            if not codes and operands and _run_time_text(operands[0]):
+                matches.append(_unreadable_match())  # the script itself is computed
+            for arg in rest:
                 matches += _inline_matches(arg, ctx, depth)
             for body in seg["heredocs"]:
                 matches += _inline_matches(body, ctx, depth)
-            if name == "expect":  # spawn/system/exec run their words as a command
+            if name == "expect":  # spawn/system/exec anywhere run their words as a command
                 for text in rest + list(seg["heredocs"]):
-                    for statement in re.split(r"[\n;]", text):
-                        m = re.match(r"\s*(spawn|system|exec)\s+(.+)", statement)
-                        if m:
-                            matches += _shell_matches(m.group(2), ctx.fork(), depth + 1)
-            operands = [a for a in rest if not a.startswith("-")]
+                    found = []
+                    for m in re.finditer(r"\b(spawn|system|exec)\s+((?:-\w+\s+)*)([^;\n}\]]+)", text):
+                        found += _shell_matches(m.group(3), ctx.fork(), depth + 1)
+                    if not found and re.search(r"\b(spawn|system|exec)\b", text) and \
+                            _GUARDED_NAME_RE.search(text):
+                        found.append(_unreadable_match())
+                    matches += found
             if seg["pipe_in"] and (not operands or operands[0] in ("-", "/dev/stdin")):
                 matches.append(_unreadable_match())
             if operands and os.path.basename(operands[0]) == "dw":
@@ -481,11 +532,42 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     matches += _control_matches(original, tokens, redirects, ctx)
     if tokens and os.path.basename(tokens[0]) == "git":
         matches += _git_control_matches(tokens, ctx)
+    if tokens and os.path.basename(tokens[0]) == "gh":
+        matches += _gh_control_matches(tokens)
     if tokens:
         rule = _first_rule(tokens, seg, ctx)
         if rule is not None:
             matches.append(_render(rule, " ".join(original)))
     return matches
+
+
+_GH_COMMANDS = set("""
+agent-task alias api attestation auth browse cache co codespace completion config copilot
+extension ext gist gpg-key help issue label org pr preview project release repo ruleset run
+search secret ssh-key status variable workflow version
+""".split())
+
+
+def _gh_control_matches(tokens: list) -> list:
+    """gh aliases run arbitrary gh commands; extensions are code this guard cannot read."""
+    words = []
+    i = 1
+    while i < len(tokens):
+        t = tokens[i]
+        if t in ("-R", "--repo"):
+            i += 2
+            continue
+        if not t.startswith("-"):
+            words.append(t)
+        i += 1
+    if not words:
+        return []
+    if words[0] == "alias" and words[1:2] in (["set"], ["import"]):
+        return [{"id": "control-gh-alias", "category": "control",
+                 "describe": "define a gh alias: %s" % _short(" ".join(tokens))}]
+    if words[0] not in _GH_COMMANDS:
+        return [_unreadable_match()]
+    return []
 
 
 def _find_exec_matches(tokens: list, ctx: _Ctx, depth: int) -> list:
@@ -678,6 +760,15 @@ def _first_rule(tokens: list, seg: dict, ctx: _Ctx) -> Optional[dict]:
                 ("subcommand" in rule or "unless_subcommand" in rule) and \
                 _unreadable_deciding_word(rule, nonflags):
             undecided = _UNREADABLE_RULE  # a sensitive program's deciding word is unreadable
+    if undecided is None and ctx.incomplete:
+        # More words arrive from standard input: if the deciding ones may be among them, the
+        # command cannot be read.
+        lengths = [len(seq.split()) for r in ctx.rules if r.get("tool") == "Bash"
+                   and name in (r.get("program") or ()) for seq in r.get("subcommand", [])]
+        if name in ("git", "gh"):
+            lengths.append(1)
+        if lengths and len(nonflags) < max(lengths):
+            undecided = _UNREADABLE_RULE
     return undecided
 
 
@@ -1194,14 +1285,39 @@ def _without(grants: list, grant: dict) -> list:
     return out
 
 
-def _try(event: str, fn, *args) -> None:
+def _try(event: str, fn, *args, **kwargs) -> None:
     try:
-        fn(*args)
+        fn(*args, **kwargs)
     except Exception as exc:  # a lost status or notification must not skip the hold
         events.log_error(event, exc)
 
 
+_CLOCK: dict = {"start": None}  # when the current hook call began (set by run_hook)
+
+
+def _hook_limit() -> float:
+    """Seconds from hook start by which everything, trailing calls included, is done."""
+    try:
+        return float(os.environ.get("DW_GUARD_HOOK_LIMIT") or HOOK_MAX_WAIT_SECONDS - 10)
+    except ValueError:
+        return HOOK_MAX_WAIT_SECONDS - 10
+
+
+def _time_left(start: float) -> float:
+    return start + _hook_limit() - time.monotonic()
+
+
+def _bounded(event: str, start: float, fn, *args, **kwargs) -> None:
+    """Call an AGTerm function with a timeout that fits the hook limit; failures are logged."""
+    left = _time_left(start)
+    if left <= 0.2:
+        events.log_error(event, GuardError("no time left for this call"))
+        return
+    _try(event, fn, *args, timeout=min(5.0, left - 0.1), **kwargs)
+
+
 def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) -> Optional[dict]:
+    started = _CLOCK["start"] or time.monotonic()
     run_id = run["id"]
     action = _fingerprint(tool, tool_input)
     parts = match["id"].split("+")
@@ -1247,8 +1363,9 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
     if not sid:
         error = GuardError("run %s has no AGTerm session to ask in" % run_id)
     else:
-        _try("guard status", agterm.set_status, sid, "blocked")
-        _try("guard notify", agterm.notify, sid, "dw: approval needed", "%s: %s" % (name, describe))
+        _bounded("guard status", started, agterm.set_status, sid, "blocked")
+        _bounded("guard notify", started, agterm.notify, sid, "dw: approval needed",
+                 "%s: %s" % (name, describe))
         buttons = [("once", "Approve once")]
         if not control:
             buttons.append(("run", "Approve for this run"))
@@ -1256,7 +1373,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         message = "%s\n\n%s: %s" % (describe, tool, _short(_action_text(tool, tool_input), 600))
         answer, error = _wait_for_owner(
             run_id, sid, "%s: approve %s?" % (name, match["category"]), message, buttons,
-            lambda r: _decided_elsewhere(r, match["id"], parts, action, control))
+            lambda r: _decided_elsewhere(r, match["id"], parts, action, control), started)
     if answer == "run" and control:
         answer = "once"
     if answer not in ("once", "run", "deny"):
@@ -1291,8 +1408,10 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
                 return {**r, "grants": _without(grants, grant)}
             if pending == {}:
                 result["answered"] = True
-            result["out"] = _output("deny", DENIED_REASON if answer == "deny" or pending == {}
-                                    else PENDING_REASON)
+            last = r.get("last_decision") or {}
+            denied = answer == "deny" or (pending == {} and last.get("action") == action
+                                          and last.get("answer") == "deny")
+            result["out"] = _output("deny", DENIED_REASON if denied else PENDING_REASON)
             return r
         if answer is None:
             if error is not None:
@@ -1303,6 +1422,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             return r
         out = dict(r)
         out["pending_approval"] = None
+        out["last_decision"] = {"action": action, "answer": answer, "at": time.time()}
         if r.get("state") == "blocked" and str(r.get("reason") or "").startswith("awaiting approval"):
             out = runs._moved(out, time.time(), state="running", reason=None)
         if answer == "run":
@@ -1320,7 +1440,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
 
     store.update_run(run_id, settle)
     if result.get("answered") and sid:
-        _try("guard status", agterm.set_status, sid, "active")
+        _bounded("guard status", started, agterm.set_status, sid, "active")
     return result["out"]
 
 
@@ -1344,26 +1464,34 @@ def _decided_elsewhere(r: dict, rule_id: str, parts: list, action: str, control:
 
 
 def _wait_for_owner(run_id: str, sid: str, title: str, message: str, buttons: list,
-                    settled) -> tuple:
+                    settled, started: float) -> tuple:
     """Open the question without blocking, then poll it and the run record until one of them
     decides or the deadline passes. Returns (button id or None, error or None). The dialog
     is never left open."""
     ask_id = None
     error = None
+    deadline = started + _ask_timeout()  # measured from hook start
+
+    def call_timeout() -> float:
+        left = _time_left(started)
+        if left <= 0.2:
+            raise GuardError("the hook time limit was reached")
+        return min(5.0, left - 0.1)
+
     try:
-        ask_id = agterm.ask_open(sid, title, message, buttons, default="deny")
-    except agterm.AgtermError as exc:
+        ask_id = agterm.ask_open(sid, title, message, buttons, default="deny",
+                                 timeout=call_timeout())
+    except (agterm.AgtermError, GuardError) as exc:
         events.log_error("guard ask", exc)
         if "ask already pending" not in str(exc):
             return None, exc
-    deadline = time.monotonic() + _ask_timeout()
     interval = _poll_interval()
     answer = None
     still_open = ask_id is not None
     try:
         while True:
             if still_open:
-                state, button = agterm.ask_result(ask_id)
+                state, button = agterm.ask_result(ask_id, timeout=call_timeout())
                 if state == "answered":
                     answer, still_open = button, False
                     break
@@ -1372,15 +1500,16 @@ def _wait_for_owner(run_id: str, sid: str, title: str, message: str, buttons: li
                     break
             if settled(store.load_run(run_id)):
                 break
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if now >= deadline or _time_left(started) <= 0.5:
                 break
-            time.sleep(interval)
+            time.sleep(max(0.0, min(interval, deadline - now)))
     except Exception as exc:  # AGTerm or the record went away mid-wait
         events.log_error("guard wait", exc)
         error = exc
     finally:
         if still_open:
-            _try("guard ask cancel", agterm.ask_cancel, ask_id)
+            _bounded("guard ask cancel", started, agterm.ask_cancel, ask_id)
     return answer, error
 
 
@@ -1409,6 +1538,7 @@ def decide(payload: dict) -> Optional[dict]:
 def run_hook(stdin_text: str) -> Optional[dict]:
     """Everything `dw guard` does; never raises. Errors go to $DW_HOME/dw.log."""
     payload = None
+    _CLOCK["start"] = time.monotonic()
     try:
         payload = json.loads(stdin_text)
         return decide(payload)
@@ -1439,7 +1569,9 @@ def _resolve_pending(run_id: str, grant: bool) -> dict:
                 "%s changes the control point; it can be approved only in the run's own dialog"
                 % pending.get("describe"))
         seen["pending"] = pending
-        out = {**r, "pending_approval": None}
+        out = {**r, "pending_approval": None,
+               "last_decision": {"action": pending.get("action"),
+                                 "answer": "approve" if grant else "deny", "at": now}}
         if grant:
             out["grants"] = list(r.get("grants") or []) + [{
                 "rule": pending.get("rule"), "action": pending.get("action"),

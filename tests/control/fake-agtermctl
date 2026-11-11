@@ -12,6 +12,9 @@ State lives in $DW_HOME/fake-agterm/:
                 reports the dialog cancelled (the owner pressed escape).
   asks.json     questions opened with --no-block: {id: {state, polls}}
 FAKE_AGTERM_DOWN=1 makes every call exit 1 with a connection error.
+FAKE_AGTERM_DELAY=<seconds> delays every call (to exercise the guard's time limit).
+A second `ask open` on a session whose earlier question is still pending is refused with
+"ask already pending", as AGTerm does.
 """
 import json
 import os
@@ -81,6 +84,9 @@ def fail(message, code=1):
 def main(argv):
     with open(os.path.join(state_dir(), "calls.jsonl"), "a") as fh:
         fh.write(json.dumps({"argv": argv}) + "\n")
+    if os.environ.get("FAKE_AGTERM_DELAY"):
+        import time
+        time.sleep(float(os.environ["FAKE_AGTERM_DELAY"]))
     if os.environ.get("FAKE_AGTERM_DOWN") == "1":
         fail("cannot connect to socket: connection refused")
     if not argv:
@@ -198,8 +204,12 @@ def nonblocking_ask(pos, opts):
             return 1
         if not opts.get("--no-block"):
             fail("this fake only scripts blocking asks without the 'open' word", 2)
+        target = opts.get("--target")
+        if any(a.get("state") == "pending" and a.get("target") == target for a in asks.values()):
+            print(json.dumps({"ok": False, "error": "ask already pending"}))
+            return 1
         ask_id = str(uuid.uuid4()).upper()
-        asks[ask_id] = {"state": "pending", "polls": 0}
+        asks[ask_id] = {"state": "pending", "polls": 0, "target": target}
         save()
         print(json.dumps({"ok": True, "result": {"id": ask_id}}))
         return 0

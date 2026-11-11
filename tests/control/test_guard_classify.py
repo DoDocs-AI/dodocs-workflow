@@ -145,7 +145,7 @@ class ShellFormTests(GuardClassifyBase):
             ("git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\"", None),
             ("echo \"$(bash <<'EOF'\ngit push origin main\nEOF\n)\"", "merge"),
             ("git -c alias.p=push p origin main", "control"),
-            ("printf '%s\\n' main | xargs -I{} git push origin {}", "merge"),
+            ("printf '%s\\n' main | xargs -I{} git push origin {}", "control"),
             ("git push origin $BRANCH", "control"),
             ("f() { git push origin main; }; f", "merge"),
             ("(cd /x && git push origin main)", "merge"),
@@ -706,7 +706,7 @@ class CandidateAndStdinTests(GuardClassifyBase):
             ("bash script.sh \"don't stop\"", None),
             ("nohup sh -c 'git push origin \"$B\"'", "control"),
             ("env X='a b' npm test", None),
-            ("xargs -I{} sh -c 'echo {}'", None),
+            ("xargs -I{} sh -c 'echo {}'", "control"),
         ])
         self.assertIn("command cannot be read",
                       self.bash("bash -c 'git push origin \"$B\"'")["describe"])
@@ -745,6 +745,120 @@ class CandidateAndStdinTests(GuardClassifyBase):
         self.assertEqual(self.category(result), "control")
         self.assertEqual(result["describe"], "command cannot be read")
         self.assertIsNone(self.bash("sudo -u x timeout 5 nice -n 3 nohup npm test"))
+
+
+class ReviewFindingsTests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                if expected == "held":
+                    self.assertIsNotNone(result, command)
+                else:
+                    self.assertEqual(self.category(result), expected, result)
+
+    def test_c1_shell_strings_are_read_in_full(self):
+        self.check_rows([
+            ("bash -c 'cd ~/.claude && tee settings.json < /tmp/x'", "control"),
+            ("sh -c 'cd ~/.claude; cp /tmp/x settings.json'", "control"),
+            ("bash -c 'cd ~/.dodo* && echo x > registry.json'", "control"),
+            ("bash -c 'cd ~/.claude && sed -i \"\" s/guard/xx/ settings.json'", "control"),
+            ("nohup sh -c 'cd ~/.claude; cp /tmp/x settings.json'", "control"),
+        ])
+
+    def test_i1_xargs_and_parallel_arguments_from_stdin(self):
+        self.check_rows([
+            ("echo push | xargs -I{} git {} origin main", "control"),
+            ("echo push | xargs -I% git % origin main", "control"),
+            ("echo 'pr merge 41' | xargs gh", "control"),
+            ("echo 'repo delete me/x --yes' | xargs gh", "control"),
+            ("echo merge | xargs gh pr", "control"),
+            ("printf 'a\\n' | parallel -I@ git @ origin main", "control"),
+            ("echo x | xargs git", "control"),
+        ])
+
+    def test_i2_heredoc_reaches_interpreter_after_shell_starter(self):
+        self.check_rows([
+            ("sudo python3 <<'X'\nimport os\nos.system(\"gh repo delete me/x --yes\")\nX",
+             "destroy"),
+            ("sudo bash <<'X'\ngit push origin main\nX", "merge"),
+        ])
+
+    def test_i3_expect_spawn_anywhere(self):
+        self.check_rows([
+            ("expect -c 'spawn -noecho curl -X POST https://api.example.com/v1 -d x'", "publish"),
+            ("expect -c 'if {1} {spawn gh repo delete me/x --yes}'", "destroy"),
+            ("expect -c 'set c gh; spawn $c repo delete me/x'", "held"),
+        ])
+
+    def test_i4_explicit_source_follows_configured_push_and_git_internals_are_protected(self):
+        repo = self.make_repo(branch="feature")
+        run = lambda c: self.category(self.bash(c, cwd=str(repo), project=str(repo)))
+        self.assertIsNone(run("git push origin feature"))
+        _git(repo, "config", "remote.origin.push", "refs/heads/feature:refs/heads/main")
+        self.assertEqual(run("git push origin feature"), "merge")
+        self.assertEqual(run("git push origin refs/heads/feature"), "merge")
+        self.assertIsNone(run("git push origin other"))
+        self.assertIsNone(run("git push origin feature:feature"))
+        rows = [
+            ("echo '[remote \"origin\"]' >> .git/config", "control"),
+            ("cp /tmp/h .git/hooks/pre-push", "control"),
+            ("echo '* filter=x' > .git/info/attributes", "control"),
+            ("tee .git/modules/sub/config < /tmp/x", "control"),
+            ("cat > .git/worktrees/w/config.worktree < /tmp/x", "control"),
+        ]
+        for command, expected in rows:
+            with self.subTest(command=command):
+                self.assertEqual(run(command), expected)
+        for tool, inp in (("Write", {"file_path": str(repo / ".git" / "config"), "content": "x"}),
+                          ("Edit", {"file_path": str(repo / ".git" / "hooks" / "pre-push")})):
+            with self.subTest(tool=tool):
+                result = self.guard.classify(tool, inp, str(repo), str(repo), self.rules)
+                self.assertEqual(self.category(result), "control")
+
+    def test_i5_gh_aliases_and_unknown_commands(self):
+        self.check_rows([
+            ("gh alias set m 'pr merge'", "control"),
+            ("gh alias import aliases.yml", "control"),
+            ("gh m 41 --squash", "control"),
+            ("gh some-extension do-things", "control"),
+            ("gh alias list", None),
+            ("gh pr view 3", None),
+            ("gh pr list", None),
+            ("gh issue create --title t", None),
+            ("gh auth status", None),
+            ("gh --version", None),
+        ])
+
+    def test_i6_script_files_with_run_time_arguments_are_allowed(self):
+        self.check_rows([
+            ("python3 scripts/x.py \"$f\"", None),
+            ("node scripts/build.js $OUT", None),
+            ("bash scripts/x.sh \"$1\"", None),
+            ("for f in a b; do python3 tools/check.py --file \"$f\"; done", None),
+            ("python3 -u scripts/x.py \"$(date)\"", None),
+            ("bash scripts/x.sh \"don't stop\"", None),
+            ("python3 \"$SCRIPT\"", "control"),
+            ("bash \"$SCRIPT\" a", "control"),
+            ("python3 -c \"$CODE\"", "control"),
+            ("perl -pe \"$EXPR\" f", "control"),
+            ("node --eval=$JS", "control"),
+            ("bash -c \"$CMD\"", "control"),
+        ])
+
+    def test_must_stay_allowed(self):
+        self.check_rows([
+            ("bash -c 'cd src && ls'", None),
+            ("bash -c 'echo ok > out.txt'", None),
+            ("echo a b | xargs -n1 echo", None),
+            ("ls | xargs wc -l", None),
+            ("python3 scripts/x.py \"$f\"", None),
+            ("gh pr view 3", None),
+            ("gh pr list", None),
+            ("nohup git commit -m \"it's done\"", None),
+        ])
+        repo = self.make_repo(branch="feature/x")
+        self.assertIsNone(self.bash("git push origin feature/x", cwd=str(repo), project=str(repo)))
 
 
 class GuardEntryPresentTests(DwTestCase):

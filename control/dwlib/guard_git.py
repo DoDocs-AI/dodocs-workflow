@@ -176,7 +176,8 @@ def _git_head(repo: Optional[str], ctx: _Ctx) -> tuple:
             ctx.git_cache[key] = ("branch", out)
         elif code == 1:
             ctx.git_cache[key] = ("detached", None)
-        elif code == 128 and "not a git repository" in "".join(err).lower():
+        elif code == 128 and re.search(r"not a git repository|cannot change to",
+                                       "".join(err).lower()):
             ctx.git_cache[key] = ("norepo", None)
         else:
             ctx.git_cache[key] = ("unknown", None)
@@ -287,6 +288,13 @@ def _check_git_push_default_branch(tokens, seg, ctx) -> bool:
         return _implicit_push_reaches_default(repo, remote, ctx)
     for ref in refspecs:
         dst = _refspec_dst(ref, parts["delete"])
+        if ":" not in ref and not parts["delete"] and not dst.startswith("refs/tags/") \
+                and dst not in ("HEAD", "@", ""):
+            routed = _configured_destinations(repo, remote, dst, ctx)
+            if routed is None or routed & _protected_branches(repo, remote, ctx):
+                return True
+            if routed:
+                continue
         if dst.startswith("refs/tags/"):
             continue
         if dst in ("HEAD", "@") or dst == "":
@@ -298,6 +306,39 @@ def _check_git_push_default_branch(tokens, seg, ctx) -> bool:
         if dst in ("main", "master") or dst in _protected_branches(repo, remote, ctx):
             return True
     return False
+
+
+def _configured_destinations(repo: Optional[str], remote: Optional[str], source: str,
+                             ctx: _Ctx) -> Optional[set]:
+    """Where `git push <remote> <source>` sends `source` when `remote.<remote>.push` is set:
+    the destinations of the configured refspecs whose source matches. An empty set means no
+    configured refspec applies (the branch keeps its name). None: cannot be read."""
+    if repo is None:
+        return None
+    remote = remote or "origin"
+    if not re.match(r"^[A-Za-z0-9._-]+$", remote):
+        return set()  # a URL: no remote config applies
+    kind, current = _git_head(repo, ctx)
+    if kind == "norepo":
+        return set()
+    code, specs = _git_config_value(repo, "remote.%s.push" % remote, ctx, all_values=True)
+    if code not in (0, 1):
+        return None
+    name = source[len("refs/heads/"):] if source.startswith("refs/heads/") else source
+    out: set = set()
+    for spec in specs:
+        if spec.startswith("^"):
+            continue
+        src = spec.lstrip("+").partition(":")[0]
+        applies = src in (name, "refs/heads/" + name) or \
+            (src in ("HEAD", "@") and kind == "branch" and current == name) or "*" in src
+        if not applies:
+            continue
+        found = _push_refspec_destinations(spec, current if kind == "branch" else None, [name])
+        if found is None:
+            return None
+        out |= found
+    return out
 
 
 def _local_branches(repo: str, ctx: _Ctx) -> Optional[list]:

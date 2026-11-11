@@ -475,3 +475,37 @@ class GuardWaitTests(GuardHookBase):
         self.assertIsNone(self.finish_guard(proc))
         self.assertEqual([c for c in self.agterm_calls() if c[:2] == ["ask", "result"]], [])
         self.assertEqual(self.cancel_calls(), [])
+
+
+class GuardDeadlineAndSiblingTests(GuardHookBase):
+    def test_whole_hook_fits_the_limit_when_every_agterm_call_is_slow(self):
+        path, rid = self.start_run()
+        start = time.time()
+        out = self.guard(self.payload(path, "git push origin main"),
+                         env={"FAKE_AGTERM_DELAY": "1", "DW_GUARD_ASK_TIMEOUT": "2",
+                              "DW_GUARD_HOOK_LIMIT": "3"})
+        elapsed = time.time() - start
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertLess(elapsed, 3 + 1.5, "hook took %.1fs" % elapsed)
+
+    def test_sibling_waiting_on_the_same_pending_gets_pending_reason_after_once(self):
+        path, rid = self.start_run()
+        push = self.payload(path, "git push origin main")
+        first = self.start_guard(push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(lambda: len(self.ask_calls()) >= 1)
+        second = self.start_guard(push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(lambda: len(self.ask_calls()) >= 2)
+        self.script_ask("once")
+        self.assertIsNone(self.finish_guard(first))
+        out = self.finish_guard(second)
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+
+    def test_sibling_gets_denied_reason_after_dw_deny(self):
+        path, rid = self.start_run()
+        push = self.payload(path, "git push origin main")
+        first = self.start_guard(push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(lambda: len(self.ask_calls()) >= 1)
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        out = self.finish_guard(first)
+        self.assertEqual(out["permissionDecisionReason"], DENIED_REASON)

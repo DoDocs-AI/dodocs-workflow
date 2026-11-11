@@ -8,7 +8,7 @@ model `sonnet`, `--permission-mode bypassPermissions` for every spike session.
 The brief says to edit `~/.claude/settings.json`. The owner has about ten other live Claude
 sessions, so that file was **not touched** (no backup/restore needed). Every spike hook
 lived in the throwaway repos' own project-level `.claude/settings.json`. Team members
-(separate `claude` processes in tmux panes) and subagents load project settings exactly as
+(separate `claude` processes in tmux panes) and subagents are expected to load project settings the same way as
 they load user settings, so this is a valid proxy: the evidence below shows the project-level
 hook fired for all of them. The hook script exits 0 immediately unless the payload `cwd` is
 inside the spikes directory and the command contains `DW_SPIKE_`.
@@ -16,14 +16,22 @@ inside the spikes directory and the command contains `DW_SPIKE_`.
 Scratch location: `/private/tmp/claude-501/-Users-antonignasev-java-dodocs-projects-dodocs-workflow/93bc9a0c-9d31-4388-9c34-6f7180eb753b/scratchpad/spikes/`
 (`repoA`, `repoB`, `repoC`, `bin/spike-hook.sh`, `logs/`).
 
+## Residual risk: project-level hook as proxy
+
+The spike hook was project-level (`<repo>/.claude/settings.json`), but the final design
+installs the guard only in `~/.claude/settings.json` via `dw setup`. That project-level and
+user-level hooks load identically for teammates and subagents is **asserted, not shown**.
+Verify for real in the plan's Task 8 manual acceptance: user-level hook, env-marker and cwd
+gate, with teammates started from a different cwd than the lead.
+
 ## Summary of answers
 
 | Name | Value |
 |---|---|
-| GUARD_REACHES_TEAMMATES | **yes** |
+| GUARD_REACHES_TEAMMATES | **yes for tmux-mode teammates** (separate `claude` processes; `teammateMode: "tmux"` is the owner's own setting at `~/.claude/settings.json` line 108, not forced by the spike). In-process teammates: **unknown**, not tested; expected to behave like subagents, which were tested |
 | GUARD_REACHES_SUBAGENTS | **yes** |
 | ENV_MARKER_REACHES_HOOKS | **yes** (lead, teammates and subagents all saw it) |
-| STATUS_ATTRIBUTION_CORRECT | **yes** (two concurrent team runs, no cross-attribution) |
+| STATUS_ATTRIBUTION_CORRECT | **yes, session-level only** (two concurrent team runs, no cross-attribution between AGTerm sessions; per-member attribution not observable from events) |
 | ASK_VISIBLE_FROM_OTHER_SESSION | **partly**: status glyph, unseen badge and notification are visible; the `terminal`-style ask dialog is hidden until the session is visited. Ask style: see Spike F |
 | HOOK_MAX_WAIT_SECONDS | **>= 900 s** (hook entry `timeout: 3600`; probes 90, 300 and 900 s all passed, no failure seen; ceiling not found) |
 | SLASH_COMMAND_AS_FIRST_PROMPT | **yes**, launch line below |
@@ -71,7 +79,17 @@ Setup: `repoA` with project hook; session launched as
 Prompt: create a team of two members (t1, t2) each running `echo DW_SPIKE_DENY`, one
 ordinary subagent (bypassPermissions) running the same, and the lead running it too.
 
-Hook log (`jq` of `logs/hook.log`, trimmed):
+Hook log, key lines (`jq` of the spike's `hook.log`; `ts` epoch s, `ag` = hook-env
+`AGTERM_SESSION_ID` prefix, `sid` = payload `session_id` prefix):
+
+```
+{"ts":"1794387396","mark":"1","ag":"61707654","sid":"a9ab494a","agent":null,"cmd":"echo DW_SPIKE_DENY"}                 lead
+{"ts":"1794387397","mark":"1","ag":"61707654","sid":"a4c115b0","agent":null,"cmd":"echo DW_SPIKE_DENY"}                 teammate t1
+{"ts":"1794387398","mark":"1","ag":"61707654","sid":"80f56c29","agent":null,"cmd":"echo DW_SPIKE_DENY"}                 teammate t2
+{"ts":"1794387398","mark":"1","ag":"61707654","sid":"a9ab494a","agent":"ac0a2d2339e195839","cmd":"echo DW_SPIKE_DENY"}  subagent
+```
+
+Table:
 
 | who | hook fired | deny honoured | `session_id` | `agent_id` / `agent_type` | hook ppid | `DW_SPIKE_MARK` | `AGTERM_SESSION_ID` in hook env |
 |---|---|---|---|---|---|---|---|
@@ -221,8 +239,9 @@ tree --json node F: {"status":"blocked","unseen":1,"ask":{"id":"D4834226-..."},"
 tree top level:     {"askPending":null,"pickPending":null}
 ```
 
-What the owner sees without switching: the blocked status glyph (blinking), the unseen badge
-(`unseen: 1`) and a desktop notification attributed to the session. The default
+What the owner sees without switching: the blocked status glyph (blinking, read back from
+`tree`) and the unseen badge (`unseen: 1`). The `notify` call was accepted (`ok`); the
+displayed desktop notification was not observed. The default
 `--style terminal` ask is attached to the session and **stays hidden and pending** until the
 session is visited ("An explicit unselected session is accepted and keeps its ask hidden"),
 so it is not itself a prompt the owner can see; the glyph, badge and notification are the
@@ -247,7 +266,7 @@ Ask lifecycle observed:
 
 ## Consequences for later tasks
 
-- GUARD_REACHES_TEAMMATES = yes and GUARD_REACHES_SUBAGENTS = yes: team pipelines may ship
+- GUARD_REACHES_TEAMMATES = yes (tmux-mode teammates only; in-process unknown) and GUARD_REACHES_SUBAGENTS = yes: team pipelines may ship
   behind the guard, provided the guard is a hook (project- or user-level) that keys on an
   environment marker, not on `session_id`, and denies via the JSON above.
 - Hook may block for at least 900 s with `timeout: 3600` on the entry (see Spike B).

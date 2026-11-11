@@ -102,6 +102,10 @@ use, so the guard being wrong is not enough to cause harm.
 
 ### Known ways around the guard
 
+Both lists below describe the guard as of this release and are expected to shrink. The
+lists are the authority: do not infer from the examples that a similar form is caught or
+held.
+
 Things that pass although you might expect them to be held.
 
 **Code it cannot see**
@@ -118,8 +122,12 @@ Things that pass although you might expect them to be held.
 - A path with no protected name in its fixed text: `echo x > $D/settings.json`, `echo x > $F`,
   `echo x > $GIT_DIR/$X`, and a variable assigned earlier on the same line
   (`x=.git; echo x > $x/config`, `cd "$(git rev-parse --git-dir)" && echo x > config`).
+- A substitution that prints a protected name: `echo x > $(echo .git)/config`,
+  `echo x > $(basename .git)/config`.
 - Words that are run-time values outside a deciding position, such as the body of
   `curl -d "$DATA"` to a local host.
+- Names produced by an earlier command and piped into a writer are not checked:
+  `find . -name x | xargs chmod +x`, `ls | xargs touch`, `git ls-files | xargs sed -i ...`.
 - Names that reach a writer without being on the command line: `xargs chmod +x < list.txt`,
   `while read f; do cp x "$f"; done < list.txt`, `sort list.txt | xargs touch`, a bare `read`,
   here-strings, here-documents and process substitution; a compound substitution body that
@@ -129,8 +137,8 @@ Things that pass although you might expect them to be held.
 - A symlink to a protected directory made earlier in the same command line.
 
 **Protected directories named as a whole**
-- `rm -rf .claude`, `rm -rf .git`, `mv .claude c`, `cp -r /tmp/x .claude`,
-  `rsync -a --delete /tmp/x/ ./`, `tar -xzf o.tgz -C .claude`, `unzip x.zip -d .claude`,
+- `rm -rf .claude`, `rm -rf .git`, `rm -rf .*`, `mv .claude c`, `cp -r /tmp/x .claude`,
+  `rsync -a /tmp/x/.claude/ .claude/`, `rsync -a --delete /tmp/x/ ./`, `tar -xzf o.tgz -C .claude`, `unzip x.zip -d .claude`,
   `chmod -R 755 .claude`, `git checkout HEAD .claude/`, `git stash -- .claude`.
 - `git clean -fd[x]`, `git reset --hard`, `git checkout -f`, `git stash -u`, which can delete
   untracked or revert tracked settings files.
@@ -145,7 +153,8 @@ Things that pass although you might expect them to be held.
   `GEM_HOME`, `PERL5LIB`, `PATH` prefixes, `JAVA_TOOL_OPTIONS`, `LD_LIBRARY_PATH`,
   `DYLD_LIBRARY_PATH`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`, `PAGER`, `EDITOR`, `PROMPT_COMMAND`;
   a static `NODE_OPTIONS=--require ./x.js`; `ENV=file` with the shell started by another
-  program; variables given to a non-wrapper such as `docker run -e LD_PRELOAD=...`.
+  program; variables given to a non-wrapper such as `docker run -e LD_PRELOAD=...`;
+  python `-m` inside a longer option cluster (`python3 -um$MOD`).
 - `less +'!cmd' file` and `less -k`.
 - Hook-like files and tools: `.husky/pre-push`, `.githooks/pre-push`, `.claude/hooks/x.sh`,
   `.git/info/exclude`, `.git/HEAD`; `git lfs install`, `pre-commit install`, `npx husky install`,

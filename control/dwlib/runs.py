@@ -90,6 +90,11 @@ def project_trusted(project_path: str) -> bool:
 
 
 def _preflight(project: dict, command: str) -> None:
+    from . import guard  # guard imports this module
+
+    settings = guard.settings_path()
+    if not guard.guard_entry_present(settings):
+        raise RunRefused("the approval guard is not installed in %s; run `dw setup` first" % settings)
     harness = project.get("harness")
     if harness != "claude":
         raise RunRefused("project %s uses harness %r; only claude is supported" % (project["id"], harness))
@@ -245,7 +250,8 @@ def request_run(project: dict, command: str) -> dict:
     """Validate, record the run as queued, then start whatever the limits allow."""
     _preflight(project, command)
     record = {
-        "id": new_run_id(), "project_id": project["id"], "command": command,
+        "id": new_run_id(), "project_id": project["id"], "project_path": project["path"],
+        "command": command,
         "state": "queued", "reason": None, "agterm_session": None,
         "harness_session": None, "created_at": time.time(), "started_at": None,
         "ended_at": None, "approvals": [], "pending_approval": None, "grants": [],

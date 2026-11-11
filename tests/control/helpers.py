@@ -27,22 +27,32 @@ class DwTestCase(unittest.TestCase):
         self.env = dict(os.environ)
         self.env["DW_HOME"] = str(self.dw_home)
         self.env["DW_AGTERMCTL"] = str(FAKE_AGTERMCTL)
-        for var in ("AGT_SOCKET", "AGTERM_SOCKET", "DW_CLAUDE", "FAKE_AGTERM_DOWN"):
+        for var in ("AGT_SOCKET", "AGTERM_SOCKET", "DW_CLAUDE", "FAKE_AGTERM_DOWN", "DW_RUN_ID",
+                    "DW_GUARD_ASK_TIMEOUT"):
             self.env.pop(var, None)
         # Workspace trust is read from this file, never from the real ~/.claude.json.
         self.claude_state = self.tmp / "claude-state.json"
         self.claude_state.write_text(json.dumps({"projects": {}}))
         self.env["DW_CLAUDE_STATE"] = str(self.claude_state)
-        saved = os.environ.get("DW_HOME")
-        os.environ["DW_HOME"] = str(self.dw_home)
-        self.addCleanup(self._restore_home, saved)
+        # The guard hook counts as installed through this file, never the real settings.
+        self.claude_settings = self.tmp / "claude-settings.json"
+        self.claude_settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": "'%s' guard" % DW, "timeout": 900}]}]}}))
+        self.env["DW_CLAUDE_SETTINGS"] = str(self.claude_settings)
+        for var, value in (("DW_HOME", str(self.dw_home)),
+                           ("DW_CLAUDE_SETTINGS", str(self.claude_settings)), ("DW_RUN_ID", None)):
+            self.addCleanup(self._restore_env, var, os.environ.get(var))
+            if value is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = value
 
     @staticmethod
-    def _restore_home(saved) -> None:
+    def _restore_env(var, saved) -> None:
         if saved is None:
-            os.environ.pop("DW_HOME", None)
+            os.environ.pop(var, None)
         else:
-            os.environ["DW_HOME"] = saved
+            os.environ[var] = saved
 
     def dw(self, *args, stdin=None, env=None) -> subprocess.CompletedProcess:
         run_env = dict(self.env)

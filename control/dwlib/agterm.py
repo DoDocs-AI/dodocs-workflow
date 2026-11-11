@@ -127,13 +127,23 @@ def session_states() -> dict:
     return states
 
 
+def set_status(session_id: str, status: str) -> None:
+    """Set a session's agent status glyph (idle, active, completed, blocked)."""
+    options = ["--target", session_id] + (["--blink"] if status == "blocked" else [])
+    _run(["session", "status", status], options, timeout=_timeout(15))
+
+
 def notify(session_id: str, title: str, body: str) -> None:
     _run(["notify", body], ["--title", title, "--target", session_id], timeout=_timeout(15))
 
 
-def ask(session_id: str, title: str, message: str, buttons: list, timeout: int) -> Optional[str]:
-    """Ask the owner; returns the chosen button id, None on escape, cancel or timeout."""
+def ask(session_id: str, title: str, message: str, buttons: list, timeout: int,
+        default: Optional[str] = None) -> Optional[str]:
+    """Ask the owner; returns the chosen button id, None on escape, cancel or timeout.
+    `default` is the button highlighted at first (what a bare Enter picks)."""
     options = ["--message", message, "--target", session_id]
+    if default:
+        options += ["--default", default]
     for button_id, label in buttons:
         options += ["--button", "%s=%s" % (button_id, label)]
     try:

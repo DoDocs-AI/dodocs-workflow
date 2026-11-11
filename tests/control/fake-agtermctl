@@ -5,7 +5,8 @@ State lives in $DW_HOME/fake-agterm/:
   calls.jsonl   one JSON line per invocation: {"argv": [...]} (without the binary)
   sessions.json {session id: {name, cwd, command, workspace, context, restore,
                               status, statusChangedAt, text}} - tests may edit it
-  ask-answer    button id that `ask` answers with (missing file = timeout, exit 124)
+  ask-answer    button id that `ask` answers with (missing file = timeout, exit 124;
+                "@already-pending" = AGTerm's refusal of a second ask on a session)
 FAKE_AGTERM_DOWN=1 makes every call exit 1 with a connection error.
 """
 import json
@@ -126,7 +127,7 @@ def main(argv):
         }
         save_sessions(sessions)
         out({"id": sid}, opts, sid)
-    elif cmd == "session" and pos[:1] in (["restore"], ["context"], ["close"], ["text"]):
+    elif cmd == "session" and pos[:1] in (["restore"], ["context"], ["close"], ["text"], ["status"]):
         sub = pos[0]
         sessions = load_sessions()
         sid = opts.get("--target")
@@ -138,6 +139,8 @@ def main(argv):
             sessions[sid]["context"] = pos[1] if len(pos) > 1 else None
         elif sub == "close":
             del sessions[sid]
+        elif sub == "status":
+            sessions[sid]["status"] = pos[1] if len(pos) > 1 else None
         elif sub == "text":
             print(sessions[sid].get("text", ""))
             return 0
@@ -153,6 +156,9 @@ def main(argv):
         except (IOError, OSError):
             sys.stderr.write("agtermctl: timed out waiting for an answer\n")
             return 124
+        if answer == "@already-pending":
+            print(json.dumps({"ok": False, "error": "ask already pending"}))
+            return 1
         print(json.dumps({"result": "answered", "id": answer, "label": answer, "index": 0}))
     else:
         fail("unknown command: %s" % " ".join(argv[:2]), 2)

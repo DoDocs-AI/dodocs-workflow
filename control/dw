@@ -14,7 +14,7 @@ for _cand in (_here, os.path.join(_here, "..", "lib")):
         sys.path.insert(0, os.path.normpath(_cand))
         break
 
-from dwlib import agterm, events, runs, status, store  # noqa: E402
+from dwlib import agterm, events, guard, runs, status, store  # noqa: E402
 
 
 class UserError(Exception):
@@ -235,6 +235,36 @@ def cmd_dismiss(args) -> int:
     return 0
 
 
+def cmd_approve(args) -> int:
+    try:
+        run = guard.approve_pending(args.run_id)
+    except (guard.NothingPending, guard.ApprovalRefused) as exc:
+        raise UserError(str(exc))
+    print("%s approved once: %s" % (run["id"], run["resolved"].get("describe")))
+    return 0
+
+
+def cmd_deny(args) -> int:
+    try:
+        run = guard.deny_pending(args.run_id)
+    except guard.NothingPending as exc:
+        raise UserError(str(exc))
+    print("%s denied: %s" % (run["id"], run["resolved"].get("describe")))
+    return 0
+
+
+def run_guard() -> int:
+    """`dw guard`: the PreToolUse hook. Prints the decision object or nothing; exits 0."""
+    try:
+        decision = guard.run_hook(sys.stdin.read())
+    except BaseException as exc:  # noqa: B902 - run_hook does not raise; this is the last net
+        events.log_error("guard", exc)
+        decision = None
+    if decision:
+        sys.stdout.write(json.dumps(decision) + "\n")
+    return 0
+
+
 def run_hook(argv) -> int:
     """`dw hook status|session-closed`: called by the terminal app, unattended.
 
@@ -308,6 +338,12 @@ def build_parser() -> argparse.ArgumentParser:
     dismiss = sub.add_parser("dismiss", help="acknowledge a finished run")
     dismiss.add_argument("run_id")
     dismiss.set_defaults(func=cmd_dismiss)
+    approve = sub.add_parser("approve", help="let the pending action of a run through once")
+    approve.add_argument("run_id")
+    approve.set_defaults(func=cmd_approve)
+    deny = sub.add_parser("deny", help="refuse the pending action of a run")
+    deny.add_argument("run_id")
+    deny.set_defaults(func=cmd_deny)
     return parser
 
 
@@ -315,6 +351,8 @@ def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv[:1] == ["hook"]:
         return run_hook(argv[1:])
+    if argv == ["guard"]:
+        return run_guard()
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)

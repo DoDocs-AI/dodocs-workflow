@@ -110,5 +110,60 @@ class StoreTests(DwTestCase):
         self.assertEqual(reg["projects"], [])
 
 
+    def test_read_json_non_dict_raises_corrupt(self):
+        from dwlib import store
+
+        path = self.dw_home / "list.json"
+        path.parent.mkdir(parents=True)
+        for text in ("[1, 2]", "null", "3", '"s"'):
+            path.write_text(text)
+            with self.assertRaises(store.CorruptFile):
+                store.read_json(path, {})
+
+    def test_list_runs_skips_record_that_vanishes_before_reading(self):
+        from pathlib import Path
+        from unittest import mock
+        from dwlib import paths, store
+
+        paths.runs_dir().mkdir(parents=True)
+        paths.run_path("good").write_text(json.dumps({"id": "good", "state": "queued"}))
+        listing = [paths.run_path("gone"), paths.run_path("good")]
+        with mock.patch.object(Path, "glob", return_value=listing):
+            records, corrupt = store.list_runs()
+        self.assertEqual(records, [{"id": "good", "state": "queued"}])
+        self.assertEqual(corrupt, [])
+
+    def test_unknown_run_raises_and_creates_nothing(self):
+        from dwlib import paths, store
+
+        with self.assertRaises(store.RunNotFound):
+            store.load_run("r-missing")
+        with self.assertRaises(store.RunNotFound):
+            store.update_run("r-missing", lambda r: {**r, "state": "running"})
+        self.assertFalse(paths.run_path("r-missing").exists())
+        self.assertFalse(paths.runs_dir().exists() and list(paths.runs_dir().iterdir()))
+
+    def test_create_run_is_the_only_way_to_make_a_record(self):
+        from dwlib import store
+
+        store.create_run({"id": "r-1", "state": "queued"})
+        self.assertEqual(store.load_run("r-1")["state"], "queued")
+        with self.assertRaises(ValueError):
+            store.create_run({"id": "r-1", "state": "queued"})
+
+    def test_run_id_with_path_parts_is_rejected(self):
+        from dwlib import paths, store
+
+        for bad in ("../evil", "a/b", "..", "x..y", "", "a\\b"):
+            with self.assertRaises(store.RunNotFound):
+                store.load_run(bad)
+            with self.assertRaises(store.RunNotFound):
+                store.update_run(bad, lambda r: r)
+            with self.assertRaises(store.RunNotFound):
+                store.create_run({"id": bad})
+        self.assertFalse(paths.runs_dir().exists() and list(paths.runs_dir().iterdir()))
+        self.assertFalse((self.dw_home / "evil.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

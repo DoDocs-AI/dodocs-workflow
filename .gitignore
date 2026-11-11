@@ -5,3 +5,6 @@
 
 # Playwright CLI debug output (console logs, page snapshots)
 .playwright-cli/
+
+# Python bytecode
+__pycache__/

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -25,8 +27,12 @@ class DwTestCase(unittest.TestCase):
         self.env = dict(os.environ)
         self.env["DW_HOME"] = str(self.dw_home)
         self.env["DW_AGTERMCTL"] = str(FAKE_AGTERMCTL)
-        for var in ("AGT_SOCKET", "AGTERM_SOCKET"):
+        for var in ("AGT_SOCKET", "AGTERM_SOCKET", "DW_CLAUDE", "FAKE_AGTERM_DOWN"):
             self.env.pop(var, None)
+        # Workspace trust is read from this file, never from the real ~/.claude.json.
+        self.claude_state = self.tmp / "claude-state.json"
+        self.claude_state.write_text(json.dumps({"projects": {}}))
+        self.env["DW_CLAUDE_STATE"] = str(self.claude_state)
         saved = os.environ.get("DW_HOME")
         os.environ["DW_HOME"] = str(self.dw_home)
         self.addCleanup(self._restore_home, saved)
@@ -49,3 +55,51 @@ class DwTestCase(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+
+    # -- projects ---------------------------------------------------------
+
+    def trust_project(self, path) -> None:
+        """Mark a directory as already trusted in the fake Claude Code state file."""
+        state = json.loads(self.claude_state.read_text())
+        state["projects"][os.path.realpath(str(path))] = {"hasTrustDialogAccepted": True}
+        self.claude_state.write_text(json.dumps(state))
+
+    def add_project(self, name, group="ignashev_ai", trusted=True) -> Path:
+        """Register a project with its own directory under the temp dir; returns the path."""
+        path = self.tmp / "checkouts" / name
+        path.mkdir(parents=True, exist_ok=True)
+        r = self.dw("project", "add", "--name", name, "--path", str(path), "--group", group)
+        assert r.returncode == 0, r.stderr
+        if trusted:
+            self.trust_project(path)
+        return path
+
+    # -- fake agtermctl ---------------------------------------------------
+
+    @property
+    def fake_agterm_dir(self) -> Path:
+        return self.dw_home / "fake-agterm"
+
+    def agterm_calls(self) -> list:
+        """Every recorded agtermctl invocation, as an argv list (without the binary)."""
+        path = self.fake_agterm_dir / "calls.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(line)["argv"] for line in path.read_text().splitlines() if line]
+
+    def _sessions_file(self) -> Path:
+        return self.fake_agterm_dir / "sessions.json"
+
+    def set_session_status(self, sid, status, changed_at=None) -> None:
+        sessions = json.loads(self._sessions_file().read_text())
+        sessions[sid]["status"] = status
+        sessions[sid]["statusChangedAt"] = time.time() if changed_at is None else changed_at
+        self._sessions_file().write_text(json.dumps(sessions))
+
+    def fake_sessions(self) -> dict:
+        path = self._sessions_file()
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def script_ask(self, answer_id) -> None:
+        self.fake_agterm_dir.mkdir(parents=True, exist_ok=True)
+        (self.fake_agterm_dir / "ask-answer").write_text(answer_id)

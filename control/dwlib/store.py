@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import copy
 import fcntl
 import json
@@ -21,22 +22,46 @@ class ProjectNotFound(Exception):
     pass
 
 
+class RunNotFound(Exception):
+    pass
+
+
+class InvalidRunId(RunNotFound):
+    pass
+
+
 class AmbiguousProject(Exception):
     def __init__(self, candidates):
         super().__init__("ambiguous project: " + ", ".join(c["id"] for c in candidates))
         self.candidates = candidates
 
 
-def read_json(path: Path, default: dict) -> dict:
+def read_json(path: Path, default):
     path = Path(path)
     try:
         text = path.read_text()
     except FileNotFoundError:
         return copy.deepcopy(default)
     try:
-        return json.loads(text)
+        value = json.loads(text)
     except ValueError:
         raise CorruptFile(path)
+    if not isinstance(value, dict):
+        raise CorruptFile(path)
+    return value
+
+
+@contextlib.contextmanager
+def file_lock(path: Path):
+    """Exclusive advisory lock held for the duration of the with block."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(path), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def update_json(path: Path, fn: Callable[[dict], dict], default: dict) -> dict:
@@ -102,15 +127,44 @@ def list_runs() -> tuple[list[dict], list[Path]]:
         return records, corrupt
     for p in sorted(directory.glob("*.json")):
         try:
-            records.append(read_json(p, {}))
+            record = read_json(p, None)
         except CorruptFile:
             corrupt.append(p)
+            continue
+        if record is None:  # vanished between listing and reading
+            continue
+        records.append(record)
     return records, corrupt
 
 
+def _run_file(run_id: str) -> Path:
+    if not run_id or "/" in run_id or "\\" in run_id or ".." in run_id:
+        raise InvalidRunId("invalid run id: %r" % (run_id,))
+    return paths.run_path(run_id)
+
+
+def create_run(record: dict) -> dict:
+    """Create a run record. The only way a run record comes into being."""
+    path = _run_file(record["id"])
+
+    def create(existing):
+        if existing:
+            raise ValueError("run already exists: %s" % record["id"])
+        return record
+
+    return update_json(path, create, {})
+
+
 def load_run(run_id: str) -> dict:
-    return read_json(paths.run_path(run_id), {})
+    path = _run_file(run_id)
+    record = read_json(path, None)
+    if record is None:
+        raise RunNotFound(run_id)
+    return record
 
 
 def update_run(run_id: str, fn: Callable[[dict], dict]) -> dict:
-    return update_json(paths.run_path(run_id), fn, {})
+    path = _run_file(run_id)
+    if not path.exists():
+        raise RunNotFound(run_id)
+    return update_json(path, fn, {})

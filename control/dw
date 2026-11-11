@@ -13,7 +13,7 @@ for _cand in (_here, os.path.join(_here, "..", "lib")):
         sys.path.insert(0, os.path.normpath(_cand))
         break
 
-from dwlib import store  # noqa: E402
+from dwlib import agterm, runs, store  # noqa: E402
 
 
 class UserError(Exception):
@@ -74,6 +74,54 @@ def cmd_project_remove(args) -> int:
     return 0
 
 
+def _find_project(query: str) -> dict:
+    try:
+        return store.find_project(store.load_registry(), query)
+    except store.ProjectNotFound:
+        raise UserError("unknown project: %s" % query)
+    except store.AmbiguousProject as exc:
+        raise UserError("ambiguous project %s: %s" % (query, ", ".join(c["id"] for c in exc.candidates)))
+
+
+def cmd_run(args) -> int:
+    command = list(args.command)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        raise UserError("usage: dw run PROJECT COMMAND...")
+    project = _find_project(args.project)
+    try:
+        run = runs.request_run(project, " ".join(command))
+    except runs.RunRefused as exc:
+        raise UserError(str(exc))
+    if run["state"] == "queued":
+        print("%s queued (%s)" % (run["id"], run.get("reason") or "waiting"))
+    else:
+        print("%s started" % run["id"])
+    return 0
+
+
+def cmd_queue(args) -> int:
+    queued = [r for r in store.list_runs()[0] if r.get("state") == "queued"]
+    queued.sort(key=lambda r: (r.get("created_at") or 0, r["id"]))
+    if args.json:
+        print(json.dumps(queued, indent=2))
+    else:
+        for r in queued:
+            print("%s\t%s\t%s\t%s" % (r["id"], r["project_id"], r.get("reason") or "",
+                                       r["command"][:60].replace("\n", " ")))
+    return 0
+
+
+def cmd_cancel(args) -> int:
+    try:
+        run = runs.cancel_run(args.run_id)
+    except runs.RunError as exc:
+        raise UserError(str(exc))
+    print("%s cancelled" % run["id"])
+    return 0
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message):
         sys.stderr.write("dw: %s\n" % message.splitlines()[0])
@@ -99,6 +147,16 @@ def build_parser() -> argparse.ArgumentParser:
     rm = psub.add_parser("remove")
     rm.add_argument("id")
     rm.set_defaults(func=cmd_project_remove)
+    run = sub.add_parser("run", help="start a run in an AGTerm session")
+    run.add_argument("project")
+    run.add_argument("command", nargs=argparse.REMAINDER)
+    run.set_defaults(func=cmd_run)
+    queue = sub.add_parser("queue", help="list queued runs")
+    queue.add_argument("--json", action="store_true")
+    queue.set_defaults(func=cmd_queue)
+    cancel = sub.add_parser("cancel", help="cancel a queued or running run")
+    cancel.add_argument("run_id")
+    cancel.set_defaults(func=cmd_cancel)
     return parser
 
 
@@ -108,6 +166,9 @@ def main(argv=None) -> int:
         return args.func(args)
     except UserError as exc:
         sys.stderr.write("dw: %s\n" % exc)
+        return 2
+    except agterm.AgtermUnavailable as exc:
+        sys.stderr.write("dw: AGTerm is not reachable: %s\n" % exc)
         return 2
     except store.CorruptFile as exc:
         sys.stderr.write("dw: corrupt file: %s\n" % exc.path)

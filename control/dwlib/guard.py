@@ -20,19 +20,55 @@ a sandbox: a script the agent writes and then runs is not read.
 from __future__ import annotations
 
 import fnmatch
-import glob
 import hashlib
 import json
 import os
 import re
 import shlex
-import subprocess
 import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
 from . import agterm, events, paths, runs, store
+from .guard_shell import (  # noqa: F401
+    ANALYSIS_BUDGET,
+    MAX_DEPTH,
+    MAX_WRAPPER_TOKENS,
+    SHELLS,
+    WRAPPERS,
+    _INTERPRETER_RE,
+    _Lexer,
+    _REMOTE_PARALLEL,
+    _RUNNERS,
+    _SHELL_STARTERS,
+    _UNREADABLE_RULE,
+    _Unreadable,
+    _bounded_glob,
+    _command_strings,
+    _dynamic,
+    _expand,
+    _flags_values,
+    _home,
+    _inside,
+    _new_segment,
+    _resolve,
+    _run_time_text,
+    _short,
+    _starts_shell_without_command,
+    _strip_prefix,
+    _tokens,
+    _unquote,
+    _unreadable_match,
+    _word_dynamic,
+)
+from .guard_git import (  # noqa: F401
+    _GIT_ENV_RE,
+    _check_git_merge_default_branch,
+    _check_git_push_default_branch,
+    _check_git_push_tags,
+    _git_control_matches,
+)
 
 CATEGORIES = ("control", "destroy", "spend", "send", "deploy", "merge", "publish")
 # Spike B: a hook may wait at least this long (entry timeout 3600 s; 900 s was the longest probe).
@@ -42,7 +78,6 @@ ASK_TIMEOUT = min(HOOK_MAX_WAIT_SECONDS - 30, 3000)
 PENDING_REASON = ("Approval is pending with the owner. Do not work around it. "
                   "Continue other work, then retry this exact action later.")
 DENIED_REASON = "Denied by the owner. Do not attempt this action another way."
-UNREADABLE = "command cannot be read"
 DW_READ_ONLY = (["status"], ["queue"], ["tail"], ["project", "list"])
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 AGENT_HARNESSES = ("claude", "codex", "gemini", "aider", "opencode", "cursor-agent", "amp",
@@ -98,80 +133,9 @@ def run_context(run_id: str) -> dict:
     return {"run_id": run_id}
 
 
-# -- paths ----------------------------------------------------------------
-
-
-def _home() -> str:
-    return os.path.expanduser("~")
-
-
-def _expand(token: str) -> Optional[str]:
-    """`token` with ~ and $HOME expanded; None when it depends on anything else at run time."""
-    home = _home()
-    text = token.replace("${HOME}", home).replace("$HOME", home)
-    if "$" in text or "`" in text or "__dwsub" in text:
-        return None
-    if text == "~" or text.startswith("~/"):
-        text = home + text[1:]
-    elif text.startswith("~"):
-        text = os.path.expanduser(text)
-    return text
-
-
-def _resolve(token: str, cwd: Optional[str]) -> Optional[str]:
-    text = _expand(token)
-    if text is None or "\n" in text or "\0" in text or len(text) > 4096:
-        return None
-    if not os.path.isabs(text):
-        if cwd is None:
-            return None
-        text = os.path.join(cwd, text)
-    return os.path.realpath(text)
-
-
-def _inside(path: str, root: str) -> bool:
-    return path == root or path.startswith(root.rstrip("/") + "/")
-
-
 def settings_path() -> Path:
     override = os.environ.get("DW_CLAUDE_SETTINGS")
     return Path(override) if override else Path(_home()) / ".claude" / "settings.json"
-
-
-GLOB_MAX_ENTRIES = 5000
-GLOB_MAX_SECONDS = 0.5
-
-
-def _bounded_glob(pattern: str) -> tuple:
-    """(matching paths, complete). Bash-style: a component not starting with "." does not
-    match dot files. Stops after GLOB_MAX_ENTRIES directory entries or GLOB_MAX_SECONDS."""
-    started = time.monotonic()
-    parts = [p for p in pattern.split("/") if p]
-    current = ["/"] if pattern.startswith("/") else ["."]
-    listed = 0
-    for part in parts:
-        if not glob.has_magic(part):
-            current = [os.path.join(c, part) for c in current]
-            continue
-        found = []
-        for base in current:
-            try:
-                entries = os.scandir(base)
-            except OSError:
-                continue
-            with entries:
-                for entry in entries:
-                    listed += 1
-                    if listed > GLOB_MAX_ENTRIES or time.monotonic() - started > GLOB_MAX_SECONDS:
-                        return found, False
-                    if entry.name.startswith(".") and not part.startswith("."):
-                        continue
-                    if fnmatch.fnmatchcase(entry.name, part):
-                        found.append(os.path.join(base, entry.name))
-        current = found
-        if not current:
-            break
-    return [c for c in current if os.path.lexists(c)], True
 
 
 class _Protected:
@@ -274,453 +238,6 @@ class _Protected:
                 re.search(r"\.claude/settings(\.local)?\.json", text):
             return True
         return False
-
-
-# -- shell lexing ----------------------------------------------------------
-
-
-class _Unreadable(Exception):
-    pass
-
-
-def _new_segment(pipe_in: bool) -> dict:
-    return {"words": [], "redirects": [], "heredocs": [], "pipe_in": pipe_in,
-            "pipe_out": False, "keep": False}
-
-
-class _Lexer:
-    """Splits a shell command into simple-command segments.
-
-    Command and process substitutions are cut out (their bodies are classified as commands
-    of their own) and replaced by placeholder words. Redirections and here-documents are
-    taken out of the words. Anything this lexer cannot follow raises _Unreadable.
-    """
-
-    def __init__(self, text: str):
-        self.s = text
-        self.i = 0
-        self.n = len(text)
-        self.segments: list = []
-        self.subs: list = []
-        self.seg = _new_segment(False)
-        self.pending: list = []
-
-    def run(self) -> "_Lexer":
-        s = self.s
-        while self.i < self.n:
-            c = s[self.i]
-            nxt = s[self.i + 1:self.i + 2]
-            if c in " \t\r":
-                self.i += 1
-            elif c == "\\" and nxt == "\n":
-                self.i += 2
-            elif c == "\n":
-                self.end()
-                self.i += 1
-                self.heredoc_bodies()
-            elif c == ";":
-                self.end()
-                self.i += 1
-            elif c == "&" and nxt == "&":
-                self.end()
-                self.i += 2
-            elif c == "&" and nxt == ">":
-                self.redirect()
-            elif c == "&":
-                self.end()
-                self.i += 1
-            elif c == "|":
-                if nxt == "|":
-                    self.end()
-                    self.i += 2
-                else:
-                    self.end(pipe=True)
-                    self.i += 2 if nxt == "&" else 1
-            elif c in "<>" and nxt == "(":
-                self.seg["words"].append(self.substitution(self.i + 2))
-            elif c in "()":
-                self.end()
-                self.i += 1
-            elif c == "#":
-                while self.i < self.n and s[self.i] != "\n":
-                    self.i += 1
-            elif c in "<>" or re.match(r"\d+[<>]", s[self.i:self.i + 12]):
-                self.redirect()
-            else:
-                self.seg["words"].append(self.read_word())
-        self.end()
-        if self.pending:
-            for _delim, _strip, seg in self.pending:
-                seg["heredocs"].append("")
-        return self
-
-    def end(self, pipe: bool = False) -> None:
-        seg = self.seg
-        seg["pipe_out"] = pipe
-        if seg["words"] or seg["redirects"] or seg["heredocs"] or seg["keep"]:
-            self.segments.append(seg)
-        self.seg = _new_segment(pipe)
-
-    def heredoc_bodies(self) -> None:
-        for delim, strip, seg in self.pending:
-            lines = []
-            while self.i < self.n:
-                j = self.s.find("\n", self.i)
-                line = self.s[self.i:] if j < 0 else self.s[self.i:j]
-                self.i = self.n if j < 0 else j + 1
-                if (line.lstrip("\t") if strip else line) == delim:
-                    break
-                lines.append(line)
-            seg["heredocs"].append("\n".join(lines))
-        self.pending = []
-
-    def redirect(self) -> None:
-        m = re.match(r"(\d*|&)(>>|>&|>\||<<<|<<-|<<|<&|<>|>|<)", self.s[self.i:])
-        if not m:
-            raise _Unreadable("redirection")
-        op = m.group(2)
-        self.i += m.end()
-        while self.i < self.n and self.s[self.i] in " \t":
-            self.i += 1
-        word = self.read_word()
-        if not word:
-            raise _Unreadable("redirection without a target")
-        if op in ("<<", "<<-"):
-            try:
-                delim = "".join(shlex.split(word))
-            except ValueError:
-                raise _Unreadable("here-document delimiter")
-            self.seg["keep"] = True
-            self.pending.append((delim, op == "<<-", self.seg))
-        elif op == "<<<":
-            self.seg["heredocs"].append(_unquote(word))
-        elif op in (">&", "<&") and re.fullmatch(r"\d+-?|-", word):
-            return
-        else:
-            self.seg["redirects"].append(word)
-
-    def read_word(self) -> str:
-        s = self.s
-        out: list = []
-        while self.i < self.n:
-            c = s[self.i]
-            nxt = s[self.i + 1:self.i + 2]
-            if c in " \t\r\n;&|()<>":
-                break
-            if c == "\\":
-                if nxt == "\n":
-                    self.i += 2
-                    continue
-                out.append(s[self.i:self.i + 2])
-                self.i += 2
-            elif c == "'":
-                j = s.find("'", self.i + 1)
-                if j < 0:
-                    raise _Unreadable("unterminated quote")
-                out.append(s[self.i:j + 1])
-                self.i = j + 1
-            elif c == '"':
-                out.append(self.read_double())
-            elif c == "$" and nxt == "'":
-                out.append(self.ansi_c())
-            elif c == "$" and s.startswith("$((", self.i):
-                j = self.close_paren(self.i + 3, 2)
-                out.append(s[self.i:j + 1])
-                self.i = j + 1
-            elif c == "$" and nxt == "(":
-                out.append(self.substitution(self.i + 2))
-            elif c == "$" and nxt == "{":
-                j = self.close_brace(self.i + 2)
-                out.append(s[self.i:j + 1])
-                self.i = j + 1
-            elif c == "`":
-                out.append(self.backtick())
-            else:
-                out.append(c)
-                self.i += 1
-        return "".join(out)
-
-    def read_double(self) -> str:
-        s = self.s
-        out = ['"']
-        self.i += 1
-        while self.i < self.n:
-            c = s[self.i]
-            nxt = s[self.i + 1:self.i + 2]
-            if c == "\\":
-                out.append(s[self.i:self.i + 2])
-                self.i += 2
-            elif c == '"':
-                out.append(c)
-                self.i += 1
-                return "".join(out)
-            elif c == "$" and s.startswith("$((", self.i):
-                j = self.close_paren(self.i + 3, 2)
-                out.append(s[self.i:j + 1])
-                self.i = j + 1
-            elif c == "$" and nxt == "(":
-                out.append(self.substitution(self.i + 2))
-            elif c == "`":
-                out.append(self.backtick())
-            else:
-                out.append(c)
-                self.i += 1
-        raise _Unreadable("unterminated quote")
-
-    def ansi_c(self) -> str:
-        s = self.s
-        j = self.i + 2
-        while j < self.n and s[j] != "'":
-            j += 2 if s[j] == "\\" else 1
-        if j >= self.n:
-            raise _Unreadable("unterminated quote")
-        raw = s[self.i + 2:j]
-        self.i = j + 1
-        try:
-            decoded = raw.encode("latin-1", "backslashreplace").decode("unicode_escape")
-        except (UnicodeError, ValueError):
-            raise _Unreadable("ANSI-C quote")
-        return shlex.quote(decoded)
-
-    def close_paren(self, start: int, depth: int = 1) -> int:
-        """Index of the `)` closing a group opened before `start`, respecting quotes."""
-        s = self.s
-        j = start
-        heredocs: list = []
-        while j < self.n:
-            c = s[j]
-            if c == "\\":
-                j += 2
-                continue
-            if c == "\n" and heredocs:
-                j += 1
-                for delim, strip in heredocs:
-                    while j < self.n:
-                        k = s.find("\n", j)
-                        line = s[j:] if k < 0 else s[j:k]
-                        j = self.n if k < 0 else k + 1
-                        if (line.lstrip("\t") if strip else line) == delim:
-                            break
-                heredocs = []
-                continue
-            if c == "<" and s.startswith("<<", j) and not s.startswith("<<<", j):
-                m = re.match(r"<<(-?)[ \t]*(['\"]?)([A-Za-z0-9_.-]+)\2", s[j:])
-                if m:
-                    heredocs.append((m.group(3), m.group(1) == "-"))
-                    j += m.end()
-                    continue
-            if c == "'":
-                k = s.find("'", j + 1)
-                if k < 0:
-                    raise _Unreadable("unterminated quote")
-                j = k + 1
-                continue
-            if c == '"':
-                j = self.close_double(j + 1) + 1
-                continue
-            if c == "`":
-                k = s.find("`", j + 1)
-                if k < 0:
-                    raise _Unreadable("unterminated backtick")
-                j = k + 1
-                continue
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-                if depth == 0:
-                    return j
-            j += 1
-        raise _Unreadable("unterminated substitution")
-
-    def close_double(self, start: int) -> int:
-        s = self.s
-        j = start
-        while j < self.n:
-            c = s[j]
-            if c == "\\":
-                j += 2
-                continue
-            if c == '"':
-                return j
-            if c == "$" and s[j + 1:j + 2] == "(":
-                j = self.close_paren(j + 2) + 1
-                continue
-            j += 1
-        raise _Unreadable("unterminated quote")
-
-    def close_brace(self, start: int) -> int:
-        depth = 1
-        j = start
-        while j < self.n:
-            c = self.s[j]
-            if c == "\\":
-                j += 2
-                continue
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    return j
-            j += 1
-        raise _Unreadable("unterminated parameter expansion")
-
-    def placeholder(self, body: str) -> str:
-        self.subs.append(body)
-        return "__dwsub%d__" % (len(self.subs) - 1)
-
-    def substitution(self, start: int) -> str:
-        j = self.close_paren(start)
-        body = self.s[start:j]
-        self.i = j + 1
-        return self.placeholder(body)
-
-    def backtick(self) -> str:
-        s = self.s
-        j = self.i + 1
-        while j < self.n and s[j] != "`":
-            j += 2 if s[j] == "\\" else 1
-        if j >= self.n:
-            raise _Unreadable("unterminated backtick")
-        body = s[self.i + 1:j].replace("\\`", "`")
-        self.i = j + 1
-        return self.placeholder(body)
-
-
-def _unquote(word: str) -> str:
-    try:
-        parts = shlex.split(word)
-    except ValueError:
-        raise _Unreadable("quoting")
-    return " ".join(parts) if parts else ""
-
-
-BRACE_LIMIT = 64
-_SEQ_RE = re.compile(r"^(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(\.\.-?\d+)?$")
-
-
-class _TooMany(Exception):
-    pass
-
-
-def _brace_alternatives(inner: str) -> Optional[list]:
-    """Alternatives of an unquoted brace body: a,b,c or a sequence x..y; None if neither."""
-    parts, depth, quote, start, j = [], 0, None, 0, 0
-    while j < len(inner):
-        c = inner[j]
-        if quote:
-            if c == quote:
-                quote = None
-            elif c == "\\" and quote == '"':
-                j += 1
-        elif c in "'\"":
-            quote = c
-        elif c == "\\":
-            j += 1
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-        elif c == "," and depth == 0:
-            parts.append(inner[start:j])
-            start = j + 1
-        j += 1
-    if parts:
-        return parts + [inner[start:]]
-    m = _SEQ_RE.match(inner)
-    if not m:
-        return None
-    a, b = m.group(1), m.group(2)
-    step = abs(int(m.group(3)[2:])) if m.group(3) else 1
-    step = step or 1
-    if a.lstrip("-").isdigit() and b.lstrip("-").isdigit():
-        lo, hi = int(a), int(b)
-        if abs(hi - lo) // step + 1 > BRACE_LIMIT:
-            raise _TooMany()
-        values = [str(v) for v in (range(lo, hi + 1, step) if lo <= hi else range(lo, hi - 1, -step))]
-    elif a.isalpha() and b.isalpha():
-        lo, hi = ord(a), ord(b)
-        if abs(hi - lo) // step + 1 > BRACE_LIMIT:
-            raise _TooMany()
-        values = [chr(v) for v in (range(lo, hi + 1, step) if lo <= hi else range(lo, hi - 1, -step))]
-    else:
-        return None
-    if len(values) > BRACE_LIMIT:
-        raise _TooMany()
-    return values
-
-
-def _brace_expand(word: str) -> list:
-    """Bash brace expansion of one raw word (quotes kept). Raises _TooMany past the bound."""
-    quote = None
-    j = 0
-    while j < len(word):
-        c = word[j]
-        if quote:
-            if c == quote:
-                quote = None
-            elif c == "\\" and quote == '"':
-                j += 1
-        elif c in "'\"":
-            quote = c
-        elif c == "\\":
-            j += 1
-        elif c == "{" and (j == 0 or word[j - 1] != "$"):
-            depth, k, q = 1, j + 1, None
-            while k < len(word) and depth:
-                ch = word[k]
-                if q:
-                    if ch == q:
-                        q = None
-                elif ch in "'\"":
-                    q = ch
-                elif ch == "\\":
-                    k += 1
-                elif ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                k += 1
-            if depth == 0:
-                alternatives = _brace_alternatives(word[j + 1:k - 1])
-                if alternatives is not None:
-                    out: list = []
-                    for alt in alternatives:
-                        out += _brace_expand(word[:j] + alt + word[k:])
-                        if len(out) > BRACE_LIMIT:
-                            raise _TooMany()
-                    return out
-        j += 1
-    return [word]
-
-
-def _tokens(words: list) -> list:
-    out = []
-    for w in words:
-        try:
-            expanded = _brace_expand(w) if "{" in w else [w]
-        except _TooMany:
-            expanded = [w]  # left unexpanded: the braces make it dynamic, like a glob
-        for one in expanded:
-            try:
-                parts = shlex.split(one)
-            except ValueError:
-                raise _Unreadable("quoting")
-            if parts:  # an unquoted empty expansion is no word at all
-                out.append(" ".join(parts))
-    return out
-
-
-# -- shell analysis ----------------------------------------------------------
-
-SHELLS = ("sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh")
-_INTERPRETER_RE = re.compile(r"^(python[0-9.]*|pypy[0-9.]*|perl[0-9.]*|ruby[0-9.]*|node|nodejs|php[0-9.]*|"
-                             r"deno|bun|lua[0-9.]*|luajit|Rscript|julia|tclsh|wish|pwsh|powershell|"
-                             r"groovy|elixir|erl|escript|swift|expect)$")
-_KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{", "}",
-             "coproc"}
-_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 SQL_CLIENTS = {"psql", "mysql", "mariadb", "sqlite3", "sqlcmd", "clickhouse-client", "clickhouse",
                "cockroach", "mongosh", "mongo", "redis-cli", "duckdb", "pgcli", "mycli", "usql",
                "litecli"}
@@ -749,112 +266,6 @@ class _Ctx:
         other.__dict__.update(self.__dict__)
         other.incomplete = False
         return other
-
-
-_UNREADABLE_RULE = {"id": "control-unreadable", "category": "control", "describe": UNREADABLE,
-                    "tool": "Bash"}
-
-
-def _unreadable_match() -> dict:
-    return {"id": "control-unreadable", "category": "control", "describe": UNREADABLE}
-
-
-def _dynamic(token: str) -> bool:
-    if token in ("[", "[[", "{", "}", "{}"):
-        return False
-    return _expand(token) is None or any(ch in token for ch in "*?[{")
-
-
-def _flags_values(tokens, value_flags):
-    """Positional arguments, skipping options and the values of options that take one."""
-    out = []
-    i = 0
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--":
-            out.extend(tokens[i + 1:])
-            break
-        if t.startswith("-") and len(t) > 1:
-            if t in value_flags:
-                i += 2
-                continue
-            if not t.startswith("--") and len(t) > 2:
-                for k, ch in enumerate(t[1:], 1):
-                    if "-" + ch in value_flags:
-                        if k == len(t) - 1:
-                            i += 1
-                        break
-            i += 1
-            continue
-        out.append(t)
-        i += 1
-    return out
-
-
-def _strip_prefix(tokens: list) -> list:
-    while tokens:
-        t = tokens[0]
-        if t in ("for", "case", "select"):
-            return []
-        if t in _KEYWORDS or t.endswith("()"):
-            tokens = tokens[1:]
-        elif t == "function":
-            tokens = tokens[2:]
-        elif _ASSIGNMENT_RE.match(t):
-            tokens = tokens[1:]
-        else:
-            break
-    return tokens
-
-
-def _skip_options(tokens: list, start: int, value_opts=(), stop_at_positional=True) -> int:
-    i = start
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--":
-            return i + 1
-        if t in value_opts:
-            i += 2
-        elif t.startswith("-") and len(t) > 1:
-            i += 1
-        elif _ASSIGNMENT_RE.match(t):
-            i += 1
-        else:
-            break
-    return i
-
-
-# Wrappers run another command given in their arguments. Their options are not parsed:
-# every suffix of the arguments is classified as a command, and so is every argument that
-# holds a command string (see _command_strings).
-WRAPPERS = {"env", "sudo", "doas", "command", "builtin", "nohup", "chronic", "unbuffer", "time",
-            "exec", "nice", "ionice", "caffeinate", "stdbuf", "watch", "dotenv", "timeout",
-            "gtimeout", "xargs", "npx", "bunx", "pnpx", "flock", "setsid", "chroot", "script",
-            "parallel", "taskset", "cgexec", "systemd-run", "runuser", "su", "nsenter", "unshare",
-            "firejail", "proxychains", "proxychains4", "tsocks", "torsocks", "strace", "ltrace",
-            "dtruss", "valgrind", "entr", "nodemon"}
-_RUNNERS = {"pnpm": ("dlx", "exec"), "yarn": ("dlx", "exec"), "npm": ("exec", "x"),
-            "uv": ("run", "tool"), "uvx": (), "poetry": ("run",), "pipenv": ("run",),
-            "bundle": ("exec",), "op": ("run",), "rye": ("run",), "pdm": ("run",),
-            "hatch": ("run",), "pipx": ("run",)}
-_REMOTE_PARALLEL = re.compile(r"^(-S.*|--sshlogin(=.*)?|--sshloginfile(=.*)?|--slf(=.*)?)$")
-MAX_WRAPPER_TOKENS = 200
-ANALYSIS_BUDGET = 400  # command analyses per tool call; past it the command is unreadable
-MAX_DEPTH = 12
-# Programs that read their commands from standard input, or start a shell, when no command
-# is given in their arguments.
-_SHELL_STARTERS = {"su", "runuser", "nsenter", "unshare", "firejail", "chroot", "sudo", "doas"}
-
-
-def _command_strings(token: str) -> list:
-    """Parts of one argument that may be a command given as a string: the argument, the part
-    after its first "=", and an attached short option's value (-c'cmd', -qccmd)."""
-    out = [token]
-    if "=" in token:
-        out.append(token.split("=", 1)[1])
-    if token.startswith("-") and not token.startswith("--"):
-        out += [token[k:] for k in range(2, min(len(token), 6))]
-    return [c for c in out if re.search(r"\s", c)]
 
 
 def _plausible_word(word: str, ctx: _Ctx) -> bool:
@@ -893,30 +304,6 @@ def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
         if _plausible_command(text, ctx):
             out += _shell_matches(text, ctx.fork(), depth + 1)
     return out
-
-
-def _has_command_string(tokens: list) -> bool:
-    return any(t in ("-c", "--command") or t.startswith("--command=") or
-               (t.startswith("-") and not t.startswith("--") and "c" in t[1:]) for t in tokens)
-
-
-def _starts_shell_without_command(name: str, tokens: list) -> bool:
-    """For a program that may start a shell: is no command given in its arguments?"""
-    args = tokens[1:]
-    if name in ("su",):
-        return not _has_command_string(args)
-    if name == "runuser":
-        if _has_command_string(args):
-            return False
-        return not ("-u" in args and len(args) > args.index("-u") + 2)
-    if name in ("sudo", "doas"):
-        for i, t in enumerate(args):
-            if t in ("--shell", "--login") or (t.startswith("-") and not t.startswith("--")
-                                               and any(c in t[1:] for c in "si")):
-                return not any(not a.startswith("-") for a in args[i + 1:])
-        return False
-    operands = [t for t in args if not t.startswith("-")]
-    return len(operands) <= (1 if name == "chroot" else 0)
 
 
 def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int = 1) -> list:
@@ -979,20 +366,6 @@ def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
     except _Unreadable:
         return [_unreadable_match()]
     return _analyze(original, redirects, seg, ctx, depth)
-
-
-# Interpreter switches: (inline-code letters, plain flag letters, letters taking a value
-# (attached, or the next token), letters whose value may only be attached).
-_GIT_ENV_RE = re.compile(
-    r"^(GIT_CONFIG(_GLOBAL|_SYSTEM|_COUNT|_PARAMETERS|_NOSYSTEM|_KEY_\w+|_VALUE_\w+)?|GIT_DIR|"
-    r"GIT_WORK_TREE|GIT_COMMON_DIR|GIT_SSH|GIT_SSH_COMMAND|GIT_SSH_VARIANT|GIT_EXEC_PATH|"
-    r"GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_NAMESPACE|GIT_PROXY_COMMAND|GIT_ASKPASS)=")
-_EXACT_VARIABLE_RE = re.compile(r"\s*\$\{?\w+\}?\s*")
-
-
-def _run_time_text(token: str) -> bool:
-    """An argument whose whole text is only known at run time."""
-    return "__dwsub" in token or bool(_EXACT_VARIABLE_RE.fullmatch(token))
 
 
 def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
@@ -1210,126 +583,6 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
     return out
 
 
-# -- git -----------------------------------------------------------------------------
-
-_GIT_BUILTINS = set("""
-add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore
-check-mailmap check-ref-format checkout checkout-index cherry cherry-pick citool clean clone
-column commit commit-graph commit-tree config count-objects credential describe diff diff-files
-diff-index diff-tree difftool fast-export fast-import fetch fetch-pack filter-branch
-fmt-merge-msg for-each-ref for-each-repo format-patch fsck gc get-tar-commit-id grep gui
-hash-object help hook index-pack init instaweb interpret-trailers log ls-files ls-remote ls-tree
-mailinfo mailsplit maintenance merge merge-base merge-file merge-index merge-tree mergetool mktag
-mktree multi-pack-index mv name-rev notes pack-objects pack-refs patch-id prune prune-packed pull
-push range-diff read-tree rebase reflog remote repack replace request-pull rerere reset restore
-rev-list rev-parse revert rm send-email shortlog show show-branch show-index show-ref
-sparse-checkout stash status stripspace submodule switch symbolic-ref tag unpack-file
-unpack-objects update-index update-ref update-server-info var verify-commit verify-pack
-verify-tag version whatchanged worktree write-tree
-""".split())
-_GIT_ROUTING_KEY_RE = re.compile(
-    r"^(alias\..+|remote\..+\.(push|url|pushurl)|remote\.pushdefault|push\..+|"
-    r"url\..+\.(insteadof|pushinsteadof)|core\.sshcommand|core\.hookspath|"
-    r"branch\..+\.(merge|remote|pushremote))$", re.I)
-# The only keys `git -c` may set without a question; any other key can run commands or
-# change where pushes go.
-_GIT_HARMLESS_KEY_RE = re.compile(
-    r"^(user\.(name|email)|color\.[A-Za-z0-9.-]+|core\.quotepath|advice\.[A-Za-z0-9]+|"
-    r"init\.defaultbranch|core\.autocrlf)$", re.I)
-_GIT_ROUTING_SECTION_RE = re.compile(r"^(alias|remote|push|url|branch)(\..*)?$|^core$", re.I)
-
-
-def _git_config_value(repo: Optional[str], key: str, ctx: _Ctx, all_values: bool = False):
-    """Local config read; (exit code, values). Code None when git could not run."""
-    cache_key = ("config", repo, key, all_values)
-    if cache_key not in ctx.git_cache:
-        if repo is None:
-            ctx.git_cache[cache_key] = (None, [])
-        else:
-            code, out = _git_call(repo, "config", "--get-all" if all_values else "--get", key)
-            ctx.git_cache[cache_key] = (code, out.splitlines() if code == 0 else [])
-    return ctx.git_cache[cache_key]
-
-
-def _git_config_writes_routing(args: list) -> bool:
-    value_opts = {"--file", "-f", "--blob", "--type", "--default", "--comment", "--value"}
-    read_flags = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l",
-                  "--get-color", "--get-colorbool", "--show-origin", "--show-scope"}
-    write_flags = {"--add", "--unset", "--unset-all", "--replace-all"}
-    positional, flags = [], []
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a in value_opts:
-            i += 2
-            continue
-        if a.startswith("-"):
-            flags.append(a.split("=", 1)[0])
-        else:
-            positional.append(a)
-        i += 1
-    if any(f in ("--edit", "-e") for f in flags) or positional[:1] == ["edit"]:
-        return True
-    if any(f in ("--rename-section", "--remove-section") for f in flags) or \
-            positional[:1] in (["rename-section"], ["remove-section"]):
-        names = positional[1:] if positional[:1] in (["rename-section"], ["remove-section"]) \
-            else positional
-        return any(_GIT_ROUTING_SECTION_RE.match(n) for n in names)
-    if positional[:1] in (["set"], ["unset"]):
-        return len(positional) > 1 and bool(_GIT_ROUTING_KEY_RE.match(positional[1]))
-    if positional[:1] in (["get"], ["list"]) or any(f in read_flags for f in flags):
-        return False
-    writing = any(f in write_flags for f in flags) or len(positional) >= 2
-    return writing and bool(positional) and bool(_GIT_ROUTING_KEY_RE.match(positional[0]))
-
-
-def _git_control_matches(tokens: list, ctx: _Ctx) -> list:
-    """git forms that change where pushes go, or hide what runs."""
-    i = 1
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "-c" and i + 1 < len(tokens):
-            key = tokens[i + 1].split("=", 1)[0]
-            if not _GIT_HARMLESS_KEY_RE.match(key):
-                return [_unreadable_match()]
-            i += 2
-        elif t.startswith("--config-env"):
-            return [_unreadable_match()]
-        elif t in ("-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"):
-            i += 2
-        elif t.startswith("-"):
-            i += 1
-        else:
-            break
-    sub, args, repo, _unreadable = _git_parts(tokens, ctx)
-    if sub is None:
-        return []
-    if _word_dynamic(sub):
-        return [_unreadable_match()]
-    if sub == "push" and any(_word_dynamic(a) for a in _push_parts(args)["positional"]):
-        return [_unreadable_match()]
-    if sub in ("config", "remote", "branch") and any(_word_dynamic(a) for a in args[:3]):
-        return [_unreadable_match()]
-    detail = " ".join(tokens)
-    routing = {"id": "control-git-config", "category": "control",
-               "describe": "change where git pushes go: %s" % _short(detail)}
-    if sub == "config":
-        return [routing] if _git_config_writes_routing(args) else []
-    if sub == "remote":
-        nonflags = [a for a in args if not a.startswith("-")]
-        return [routing] if nonflags[:1] in (["set-url"], ["add"], ["rename"]) else []
-    if sub == "branch":
-        if any(a in ("-u", "--set-upstream-to", "--set-upstream") or
-               a.startswith("--set-upstream-to=") for a in args):
-            return [routing]
-        return []
-    if sub not in _GIT_BUILTINS:
-        code, values = _git_config_value(repo, "alias." + sub, ctx)
-        if code is None or code == 0:
-            return [_unreadable_match()]
-    return []
-
-
 def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx) -> list:
     out = []
     skip = None
@@ -1371,11 +624,6 @@ def _state_match(detail: str) -> dict:
             "describe": "change the control point's files: %s" % _short(detail)}
 
 
-def _short(text: str, limit: int = 160) -> str:
-    text = " ".join(str(text).split())
-    return text if len(text) <= limit else text[:limit - 1] + "…"
-
-
 def _render(rule: dict, detail: str) -> dict:
     if rule["id"] == "control-unreadable":
         return _unreadable_match()
@@ -1394,13 +642,6 @@ def sensitive_programs(rules: list) -> set:
     for rule in rules:
         names |= set(rule.get("program") or ())
     return names
-
-
-def _word_dynamic(word: str) -> bool:
-    """A word whose value is only known when the command runs, or a pattern."""
-    if word in ("[", "[[", "{", "}", "{}"):
-        return False
-    return _expand(word) is None or any(ch in word for ch in "*?[{")
 
 
 def _unreadable_deciding_word(rule: dict, nonflags: list) -> bool:
@@ -1470,291 +711,6 @@ def _bash_rule_matches(rule: dict, tokens: list, seg: dict, ctx: _Ctx) -> bool:
             raise GuardError("unknown guard check: %s" % check)
         return bool(fn(tokens, seg, ctx))
     return bool(programs)
-
-
-# -- checks used by the rules file -------------------------------------------
-
-
-def _git_call(repo: str, *args, stderr: Optional[list] = None) -> tuple:
-    """(exit code or None, stdout). Pass a list as `stderr` to receive git's error text."""
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0")
-    try:
-        proc = subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True,
-                              timeout=10, env=env)
-    except (OSError, subprocess.SubprocessError):
-        return None, ""
-    if stderr is not None:
-        stderr.append(proc.stderr)
-    return proc.returncode, proc.stdout.strip()
-
-
-def _git_head(repo: Optional[str], ctx: _Ctx) -> tuple:
-    """('branch', name) | ('detached', None) | ('norepo', None) | ('unknown', None)."""
-    if repo is None:
-        return "unknown", None
-    key = ("head", repo)
-    if key not in ctx.git_cache:
-        err: list = []
-        code, out = _git_call(repo, "symbolic-ref", "--short", "-q", "HEAD", stderr=err)
-        if code == 0 and out:
-            ctx.git_cache[key] = ("branch", out)
-        elif code == 1:
-            ctx.git_cache[key] = ("detached", None)
-        elif code == 128 and "not a git repository" in "".join(err).lower():
-            ctx.git_cache[key] = ("norepo", None)
-        else:
-            ctx.git_cache[key] = ("unknown", None)
-    return ctx.git_cache[key]
-
-
-def _protected_branches(repo: Optional[str], remote: Optional[str], ctx: _Ctx) -> set:
-    names = {"main", "master"}
-    if repo is None:
-        return names
-    remote = remote or "origin"
-    key = ("default", repo, remote)
-    if key not in ctx.git_cache:
-        ctx.git_cache[key] = None
-        if re.match(r"^[A-Za-z0-9._-]+$", remote):
-            code, out = _git_call(repo, "symbolic-ref", "--short", "-q",
-                                  "refs/remotes/%s/HEAD" % remote)
-            if code == 0 and out.startswith(remote + "/"):
-                ctx.git_cache[key] = out[len(remote) + 1:]
-    if ctx.git_cache[key]:
-        names.add(ctx.git_cache[key])
-    return names
-
-
-def _git_parts(tokens: list, ctx: _Ctx):
-    """(subcommand, args, repo dir or None, unreadable)."""
-    repo = ctx.cwd
-    i = 1
-    unreadable = False
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "-C" and i + 1 < len(tokens):
-            repo = _resolve(tokens[i + 1], repo)
-            i += 2
-        elif t == "-c" and i + 1 < len(tokens):
-            if tokens[i + 1].lower().startswith("alias."):
-                unreadable = True
-            i += 2
-        elif t in ("--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"):
-            repo = None
-            i += 2
-        elif t.startswith("--git-dir=") or t.startswith("--work-tree="):
-            repo = None
-            i += 1
-        elif t.startswith("-"):
-            i += 1
-        else:
-            break
-    if i >= len(tokens):
-        return None, [], repo, unreadable
-    sub = tokens[i]
-    if _dynamic(sub):
-        unreadable = True
-    return sub, tokens[i + 1:], repo, unreadable
-
-
-def _push_parts(args: list) -> dict:
-    value = {"--repo", "-o", "--push-option", "--receive-pack", "--exec"}
-    out = {"all": False, "tags": False, "delete": False, "positional": []}
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--":
-            out["positional"].extend(args[i + 1:])
-            break
-        if a in ("--all", "--mirror", "--branches"):
-            out["all"] = True
-        elif a in ("--tags", "--follow-tags"):
-            out["tags"] = True
-        elif a in ("-d", "--delete"):
-            out["delete"] = True
-        elif a in value:
-            i += 1
-        elif a.startswith("-"):
-            pass
-        else:
-            out["positional"].append(a)
-        i += 1
-    return out
-
-
-def _refspec_dst(ref: str, delete: bool) -> str:
-    ref = ref.lstrip("+")
-    if ":" in ref and not delete:
-        src, dst = ref.split(":", 1)
-        ref = dst or src
-    elif ref.startswith(":"):
-        ref = ref[1:]
-    if ref.startswith("refs/heads/"):
-        ref = ref[len("refs/heads/"):]
-    return ref
-
-
-def _check_git_push_default_branch(tokens, seg, ctx) -> bool:
-    sub, args, repo, unreadable = _git_parts(tokens, ctx)
-    if unreadable:
-        return True  # an alias or a computed subcommand may well be a push
-    if sub != "push":
-        return False
-    parts = _push_parts(args)
-    if parts["all"] or ctx.incomplete:
-        return True
-    remote = parts["positional"][0] if parts["positional"] else None
-    refspecs = parts["positional"][1:]
-    if not refspecs:
-        if parts["delete"]:
-            return False
-        return _implicit_push_reaches_default(repo, remote, ctx)
-    for ref in refspecs:
-        dst = _refspec_dst(ref, parts["delete"])
-        if dst.startswith("refs/tags/"):
-            continue
-        if dst in ("HEAD", "@") or dst == "":
-            if _implicit_push_reaches_default(repo, remote, ctx):
-                return True
-            continue
-        if _dynamic(dst):
-            return True
-        if dst in ("main", "master") or dst in _protected_branches(repo, remote, ctx):
-            return True
-    return False
-
-
-def _local_branches(repo: str, ctx: _Ctx) -> Optional[list]:
-    key = ("branches", repo)
-    if key not in ctx.git_cache:
-        code, out = _git_call(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-        ctx.git_cache[key] = out.splitlines() if code == 0 else None
-    return ctx.git_cache[key]
-
-
-def _push_refspec_destinations(spec: str, current: Optional[str],
-                               branches: list) -> Optional[set]:
-    """Every branch a configured `remote.<name>.push` refspec would update; None when the
-    refspec cannot be read."""
-    spec = spec.lstrip("+")
-    src, colon, dst = spec.partition(":")
-    if not colon:
-        dst = src
-    out: set = set()
-
-    def short(ref: str) -> Optional[str]:
-        if ref.startswith("refs/tags/"):
-            return None
-        return ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
-
-    if "*" in src or "*" in dst:
-        if src.count("*") != 1 or dst.count("*") != 1:
-            return None
-        head, tail = src.split("*")
-        for branch in branches:
-            for name in ("refs/heads/" + branch, branch):
-                if name.startswith(head) and name.endswith(tail) and \
-                        len(name) >= len(head) + len(tail):
-                    target = short(dst.replace("*", name[len(head):len(name) - len(tail)]))
-                    if target:
-                        out.add(target)
-                    break
-        return out
-    if src in ("HEAD", "@"):
-        if current is None:
-            return None
-        if not colon:
-            dst = current
-    target = short(dst)
-    if target in ("HEAD", "@"):
-        if current is None:
-            return None
-        target = current
-    if target:
-        out.add(target)
-    return out
-
-
-def _implicit_push_reaches_default(repo: Optional[str], remote: Optional[str], ctx: _Ctx) -> bool:
-    """For a push without a destination branch: may it update the default branch, as far as
-    the local git config shows? Unknown means yes. Never contacts the remote."""
-    kind, branch = _git_head(repo, ctx)
-    if kind == "norepo":
-        return False
-    if kind not in ("branch", "detached"):
-        return True
-    detached = kind == "detached"
-
-    def get(key):
-        code, values = _git_config_value(repo, key, ctx)
-        if code not in (0, 1):
-            raise LookupError(key)
-        return values[0] if values else None
-
-    try:
-        upstream = None if detached else get("branch.%s.merge" % branch)
-        if not remote:
-            remote = (None if detached else get("branch.%s.pushRemote" % branch)) \
-                or get("remote.pushDefault") \
-                or (None if detached else get("branch.%s.remote" % branch)) or "origin"
-        targets = set()
-        if upstream:
-            targets.add(upstream[len("refs/heads/"):] if upstream.startswith("refs/heads/")
-                        else upstream)
-        code, specs = _git_config_value(repo, "remote.%s.push" % remote, ctx, all_values=True)
-        if code not in (0, 1):
-            return True
-        if specs:
-            if detached:
-                return True
-            branches = _local_branches(repo, ctx)
-            if branches is None:
-                return True
-            for spec in specs:
-                if spec.startswith("^"):
-                    continue
-                found = _push_refspec_destinations(spec, branch, branches)
-                if found is None:
-                    return True
-                targets |= found
-        elif detached:
-            mode = (get("push.default") or "simple").lower()
-            return mode not in ("simple", "current", "upstream", "tracking", "nothing")
-        else:
-            mode = (get("push.default") or "simple").lower()
-            if mode in ("current", "simple"):
-                targets.add(branch)
-            elif mode in ("upstream", "tracking"):
-                if not upstream:
-                    return False  # git refuses to push without an upstream
-            elif mode != "nothing":
-                return True  # matching, or a value this guard does not know
-    except LookupError:
-        return True
-    return bool(targets & _protected_branches(repo, remote, ctx))
-
-
-def _check_git_push_tags(tokens, seg, ctx) -> bool:
-    sub, args, _repo, _u = _git_parts(tokens, ctx)
-    if sub != "push":
-        return False
-    parts = _push_parts(args)
-    return parts["tags"] or any(_refspec_dst(r, parts["delete"]).startswith("refs/tags/")
-                                for r in parts["positional"][1:])
-
-
-def _check_git_merge_default_branch(tokens, seg, ctx) -> bool:
-    sub, args, repo, unreadable = _git_parts(tokens, ctx)
-    if sub != "merge":
-        return False
-    if unreadable:
-        return True
-    if any(a in ("--abort", "--continue", "--quit", "--skip") for a in args):
-        return False
-    kind, branch = _git_head(repo, ctx)
-    if kind == "branch":
-        return branch in _protected_branches(repo, None, ctx)
-    return kind == "unknown"
 
 
 def _is_local_host(host: Optional[str]) -> bool:

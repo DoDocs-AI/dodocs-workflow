@@ -46,7 +46,9 @@
 
     {"id": "shell-mail", "category": "send", "describe": "send email", "tool": "Bash", "program": ["sendmail", "mail", "mailx", "mutt", "neomutt", "msmtp", "swaks", "ssmtp"]},
     {"id": "curl-mail", "category": "send", "describe": "send email", "tool": "Bash", "program": ["curl"], "check": "curl_mail"},
-    {"id": "osascript", "category": "send", "describe": "run AppleScript (can send messages or mail)", "tool": "Bash", "program": ["osascript"]},
+    {"id": "osascript", "category": "send", "describe": "run AppleScript (can send messages or mail)", "tool": "Bash", "program": ["osascript"], "check": "osascript_beyond_notification"},
+    {"id": "open-mail-app", "category": "send", "describe": "open a mail or messaging app", "tool": "Bash", "program": ["open"], "check": "open_mail_app"},
+    {"id": "git-send-email", "category": "send", "describe": "send email", "tool": "Bash", "program": ["git"], "subcommand": ["send-email", "imap-send"], "within": 1},
     {"id": "stripe-cli-write", "category": "spend", "describe": "write to Stripe", "tool": "Bash", "program": ["stripe"], "subcommand": ["create", "update", "delete", "post", "capture", "pay", "refund", "cancel", "void", "finalize", "send", "trigger", "fixtures"]},
 
     {"id": "sql-destructive", "category": "destroy", "describe": "destructive database command", "tool": "Bash", "check": "sql_destructive"},

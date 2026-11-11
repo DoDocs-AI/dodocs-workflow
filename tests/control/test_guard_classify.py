@@ -143,7 +143,7 @@ class ShellFormTests(GuardClassifyBase):
             ("gh pr create --title t --body \"$(cat <<'EOF'\n## Summary\n- don't push\nEOF\n)\"", None),
             ("git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\"", None),
             ("echo \"$(bash <<'EOF'\ngit push origin main\nEOF\n)\"", "merge"),
-            ("git -c alias.p=push p origin main", "merge"),
+            ("git -c alias.p=push p origin main", "control"),
             ("printf '%s\\n' main | xargs -I{} git push origin {}", "merge"),
             ("git push origin $BRANCH", "merge"),
             ("f() { git push origin main; }; f", "merge"),
@@ -255,6 +255,228 @@ class ShellFormTests(GuardClassifyBase):
         self.assertEqual(self.guard.classify("Bash", {"command": "make seed"}, "/p", "/p", rules)["id"],
                          "p-seed")
         self.assertIsNone(self.guard.classify("Bash", {"command": "make test"}, "/p", "/p", rules))
+
+
+class InlineCodeAndWrapperTests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_inline_interpreter_code(self):
+        self.check_rows([
+            ("python3 -c \"import os; os.system('git push origin main')\"", "merge"),
+            ("python -c \"import subprocess; subprocess.run(['git', 'push', 'origin', 'main'])\"",
+             "control"),
+            ("node -e \"require('child_process').execSync('kubectl apply -f x')\"", "deploy"),
+            ("node -p \"require('child_process').execSync('docker push a/b:1')\"", "deploy"),
+            ("ruby -e 'system(\"docker push a/b:1\")'", "deploy"),
+            ("perl -e 'system(\"helm upgrade a ./c\")'", "deploy"),
+            ("php -r 'shell_exec(\"vercel deploy --prod\");'", "deploy"),
+            ("python3 -c \"c.execute('DROP TABLE users')\"", "destroy"),
+            ("python3 -c \"open('/x/.dodocs-workflow/registry.json', 'w')\"", "control"),
+            ("python3 -c \"open(__import__('os').path.expanduser('~/.claude/settings.json'), 'w')\"",
+             "control"),
+            ("python3 -c \"import subprocess; subprocess.run(['dw', 'approve', 'r-1'])\"", "control"),
+            ("python3 -c \"import subprocess; subprocess.run(['curl', '-d', 'x', 'https://api.example.com'])\"",
+             "control"),
+            ("python3 - <<'EOF'\nimport os\nos.system('gh pr merge 3')\nEOF", "merge"),
+            ("osascript -e 'tell application \"Messages\" to send \"hi\" to buddy \"x\"'", "send"),
+            ("awk 'BEGIN { system(\"git push origin main\") }'", "merge"),
+            ("script -q /dev/null -c 'git push origin main'", "merge"),
+            ("python3 -c \"print(1)\"", None),
+            ("node -e \"console.log(1)\"", None),
+            ("python3 -c \"import subprocess; subprocess.run(['ls', '-la'])\"", None),
+            ("python3 -c \"import json,sys; print(json.load(sys.stdin))\"", None),
+            ("python3 - <<'EOF'\nimport os\nprint(os.getcwd())\nEOF", None),
+            ("osascript -e 'display notification \"done\"'", None),
+            ("osascript -e 'display notification \"done\" with title \"dw\"'", None),
+            ("osascript -e 'tell application \"Mail\" to send (make new outgoing message)'", "send"),
+            ("osascript script.scpt", "send"),
+            ("open mailto:a@b.c?subject=x", "send"),
+            ("open -a Mail", "send"),
+            ("open -a Messages", "send"),
+            ("open http://localhost:3000", None),
+            ("open -a Safari index.html", None),
+            ("osascript -l JavaScript -e 'Application(\"Mail\")'", "send"),
+            ("echo 'display notification \"x\"' | osascript", "send"),
+            ("osascript -e 'display notification \"x\"' -e 'tell application \"Finder\" to quit'", "send"),
+            ("osascript -e 'display notification \"x\" & (do shell script \"id\")'", "send"),
+            ("awk '{print $1}' file.txt", None),
+            ("python -m pytest", None),
+            ("python3 deploy.py", None),
+            ("./release.sh", None),
+            ("make deploy", None),
+            ("npm run deploy", None),
+            ("npm test", None),
+            ("make build", None),
+        ])
+
+    def test_inner_commands_of_wrappers(self):
+        self.check_rows([
+            ("find . -name x -exec git push origin main \\;", "merge"),
+            ("find . -name x -execdir kubectl apply -f {} +", "deploy"),
+            ("find . -name x -ok docker push a/b:1 \\;", "deploy"),
+            ("find . -name '*.tmp' -exec rm {} +", None),
+            ("find . -name '*.py' -exec wc -l {} \\;", None),
+            ("ls | xargs kubectl apply -f", "deploy"),
+            ("ls | xargs wc -l", None),
+            ("parallel docker push ::: a/b:1 a/c:1", "deploy"),
+            ("parallel gzip ::: a b", None),
+            ("watch -n 5 kubectl apply -f x", "deploy"),
+            ("watch -n 1 kubectl get pods", None),
+            ("timeout 30 git push origin main", "merge"),
+            ("timeout 30 npm test", None),
+            ("flock /tmp/l git push origin main", "merge"),
+            ("flock -c 'git push origin main' /tmp/l", "merge"),
+            ("flock /tmp/l npm test", None),
+            ("setsid git push origin main", "merge"),
+            ("setsid npm test", None),
+            ("chroot /srv/root git push origin main", "merge"),
+            ("nice -n 5 docker push a/b:1", "deploy"),
+            ("ionice -c 3 docker push a/b:1", "deploy"),
+            ("stdbuf -oL git push origin main", "merge"),
+            ("stdbuf -o L npm test", None),
+            ("script -q /dev/null git push origin main", "merge"),
+            ("script -q /dev/null npm test", None),
+        ])
+
+    def test_git_ssh_and_alias_overrides_are_unreadable(self):
+        self.check_rows([
+            ("git -c core.sshCommand='ssh -i k' push origin feature/x", "control"),
+            ("git -c alias.p=push p origin feature/x", "control"),
+            ("GIT_SSH_COMMAND='ssh -i k' git fetch", "control"),
+            ("env GIT_SSH_COMMAND='ssh -i k' git push origin feature/x", "control"),
+            ("git -c user.name=x commit -m y", None),
+            ("git -c color.ui=never log", None),
+        ])
+        for command in ("git -c core.sshCommand=x fetch", "GIT_SSH_COMMAND=x git fetch"):
+            self.assertEqual(self.bash(command)["describe"], "command cannot be read")
+
+    def test_brace_expansion(self):
+        self.check_rows([
+            ("git push origin {feature,main}", "merge"),
+            ("git push origin feature/{a,b}", None),
+            ("echo x > ~/.{claude/settings.json,zshrc}", "control"),
+            ("cat ~/.dodocs-workflow/{registry,x}.json", "control"),
+            ("rm -rf /Users/me/{a,b}", "destroy"),
+            ("rm -rf build/{a,b}", None),
+            ("touch file{1..3}.txt", None),
+            ("rm -rf ./{a..c}", None),
+            ("{git,} push origin main", "merge"),
+            ("{git,true} push origin main", None),
+            ("echo {a,b}{c,d}{e,f}{g,h}{i,j}{k,l}{m,n} > ~/.claude/settings.json", "control"),
+            ("echo '{a,b}' \"{c,d}\" ${HOME}", None),
+        ])
+        # Too many expansions: the word is dynamic, like a glob.
+        self.assertEqual(self.category(self.bash("git push origin x{1..999}{a,b}")), "merge")
+
+    def test_globs_in_protected_paths(self):
+        claude = self.home / ".claude"
+        claude.mkdir()
+        (claude / "settings.json").write_text("{}")
+        self.check_rows([
+            ("rm ~/.clau*/settings.json", "control"),
+            ("cat ~/.dodocs-w*/reg*", "control"),
+            ("echo x > ~/.claude/sett*", "control"),
+            ("cp x ~/.claude/s?ttings.json", "control"),
+            ("cat ~/.*/settings.json", "control"),
+            ("cat ~/.config/agterm/hook*", "control"),
+            ("rm ~/.claude/$NAME", "control"),
+            ("ls ~/*.txt", None),
+            ("ls src/*.py", None),
+            ("cat /tmp/x*", None),
+        ])
+
+
+class GitRulingTests(GuardClassifyBase):
+    def repo_cmd(self, repo, command):
+        return self.category(self.bash(command, cwd=str(repo), project=str(repo)))
+
+    def test_unknown_subcommand_is_resolved_as_alias(self):
+        repo = self.make_repo(branch="feature/a")
+        _git(repo, "config", "alias.ship", "push origin main")
+        self.assertEqual(self.repo_cmd(repo, "git ship"), "control")
+        self.assertEqual(self.bash("git ship", cwd=str(repo), project=str(repo))["describe"],
+                         "command cannot be read")
+        self.assertIsNone(self.repo_cmd(repo, "git status"))
+        self.assertIsNone(self.repo_cmd(repo, "git log --oneline"))
+        self.assertIsNone(self.repo_cmd(repo, "git frobnicate"))
+
+    def test_git_config_writes_of_push_routing_are_control(self):
+        repo = self.make_repo(branch="feature/a")
+        rows = [
+            ("git config alias.p push", "control"),
+            ("git config --global alias.p 'push origin main'", "control"),
+            ("git config remote.origin.push HEAD:refs/heads/main", "control"),
+            ("git config remote.origin.url git@x:y.git", "control"),
+            ("git config remote.origin.pushurl git@x:y.git", "control"),
+            ("git config push.default matching", "control"),
+            ("git config url.git@evil:.insteadOf https://github.com/", "control"),
+            ("git config url.x.pushInsteadOf y", "control"),
+            ("git config core.sshCommand 'ssh -i k'", "control"),
+            ("git config branch.feature/a.merge refs/heads/main", "control"),
+            ("git config branch.feature/a.remote origin", "control"),
+            ("git config --unset alias.p", "control"),
+            ("git config set alias.p push", "control"),
+            ("git remote set-url origin git@x:y.git", "control"),
+            ("git remote add other git@x:y.git", "control"),
+            ("git branch --set-upstream-to=origin/main", "control"),
+            ("git branch -u origin/main", "control"),
+            ("git config --get alias.p", None),
+            ("git config alias.p", None),
+            ("git config --get-regexp '^remote\\.'", None),
+            ("git config user.name x", None),
+            ("git config core.autocrlf false", None),
+            ("git remote -v", None),
+            ("git remote get-url origin", None),
+            ("git branch -d old", None),
+            ("git branch new-feature", None),
+        ]
+        for command, expected in rows:
+            with self.subTest(command=command):
+                self.assertEqual(self.repo_cmd(repo, command), expected)
+
+    def test_push_without_destination_follows_local_config(self):
+        repo = self.make_repo(branch="feature/a")
+        self.assertIsNone(self.repo_cmd(repo, "git push"))
+        _git(repo, "config", "branch.feature/a.remote", "origin")
+        _git(repo, "config", "branch.feature/a.merge", "refs/heads/main")
+        for command in ("git push", "git push origin", "git push origin HEAD", "git push -f"):
+            with self.subTest(command=command):
+                self.assertEqual(self.repo_cmd(repo, command), "merge")
+        _git(repo, "config", "branch.feature/a.merge", "refs/heads/feature/a")
+        self.assertIsNone(self.repo_cmd(repo, "git push"))
+        _git(repo, "config", "remote.origin.push", "HEAD:refs/heads/main")
+        self.assertEqual(self.repo_cmd(repo, "git push"), "merge")
+        _git(repo, "config", "--unset", "remote.origin.push")
+        _git(repo, "config", "push.default", "matching")
+        self.assertEqual(self.repo_cmd(repo, "git push"), "merge")
+        _git(repo, "config", "push.default", "current")
+        self.assertIsNone(self.repo_cmd(repo, "git push"))
+        _git(repo, "config", "push.default", "upstream")
+        _git(repo, "config", "branch.feature/a.merge", "refs/heads/master")
+        self.assertEqual(self.repo_cmd(repo, "git push"), "merge")
+
+    def test_explicit_refspecs(self):
+        repo = self.make_repo(branch="feature/a")
+        rows = [
+            ("git push origin HEAD:main", "merge"),
+            ("git push origin feature/a:main", "merge"),
+            ("git push origin +x:refs/heads/main", "merge"),
+            ("git push --all origin", "merge"),
+            ("git push --mirror origin", "merge"),
+            ("git push origin --delete main", "merge"),
+            ("git push origin :main", "merge"),
+            ("git push --force origin feature/a", None),
+            ("git push -f origin feature/a", None),
+            ("git push --force-with-lease origin feature/a", None),
+            ("git push origin --delete feature/old", None),
+        ]
+        for command, expected in rows:
+            with self.subTest(command=command):
+                self.assertEqual(self.repo_cmd(repo, command), expected)
 
 
 class GuardEntryPresentTests(DwTestCase):

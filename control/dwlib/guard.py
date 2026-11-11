@@ -7,6 +7,7 @@ is asked through AGTerm, and the answer allows or denies the tool call.
 from __future__ import annotations
 
 import fnmatch
+import glob
 import hashlib
 import json
 import os
@@ -150,12 +151,70 @@ class _Protected:
             return any(_inside(t, path) for t in list(self.files) + self.dirs)
         return False
 
+    def pattern_hit(self, text: str, cwd: Optional[str]) -> bool:
+        """For a path with glob characters, braces or run-time parts: may it name a protected path?"""
+        home = _home()
+        text = text.replace("${HOME}", home).replace("$HOME", home)
+        if text == "~" or text.startswith("~/"):
+            text = home + text[1:]
+        cuts = [text.find(ch) for ch in ("*", "?", "[", "{", "$", "`", "__dwsub") if ch in text]
+        if not cuts:
+            resolved = _resolve(text, cwd)
+            return resolved is not None and self.hit(resolved)
+        cut = min(cuts)
+        dynamic = any(ch in text for ch in ("$", "`", "__dwsub")) or "{" in text
+        prefix = text[:cut]
+        if not os.path.isabs(prefix):
+            if cwd is None:
+                return False
+            prefix = os.path.join(cwd, prefix)
+        head, base = os.path.split(prefix)
+        rdir = os.path.realpath(head or "/")
+        rprefix = rdir.rstrip("/") + "/" + base
+        targets = self.dirs + sorted(self.files)
+        if any(_inside(rdir, d) for d in self.dirs):
+            return True
+        if base and any(t.startswith(rprefix) for t in targets):
+            return True
+        def undecided() -> bool:  # fail closed next to the control point's own files
+            claude = os.path.realpath(os.path.join(home, ".claude"))
+            if _inside(rdir, claude):
+                return True
+            for d in self.dirs:
+                parent, name = os.path.split(d)
+                if rdir == parent and name.startswith(base):
+                    return True
+            return False
+
+        if dynamic:
+            return undecided()
+        pattern = text if os.path.isabs(text) else os.path.join(cwd or "/", text)
+        try:
+            for k, found in enumerate(glob.iglob(pattern)):
+                if k > 2000:
+                    return True
+                if self.hit(os.path.realpath(found)):
+                    return True
+        except (re.error, OSError, ValueError):
+            return undecided()
+        return False
+
+    def text_hit(self, text: str) -> bool:
+        clean = text.replace("\\", "")
+        return any(m in clean for m in self.markers) or \
+            bool(re.search(r"\.claude/settings(\.local)?\.json", clean))
+
     def token_hit(self, token: str, cwd: Optional[str]) -> bool:
         candidates = [token]
         if "=" in token:
             candidates.append(token.split("=", 1)[1])
         for cand in candidates:
             if not cand or len(cand) > 4096:
+                continue
+            plain = cand.replace("${HOME}", "").replace("$HOME", "")
+            if any(ch in plain for ch in "*?[{") or _expand(cand) is None:
+                if cand not in ("[", "[[", "{", "}") and self.pattern_hit(cand, cwd):
+                    return True
                 continue
             resolved = _resolve(cand, cwd)
             if resolved is not None:
@@ -490,14 +549,115 @@ def _unquote(word: str) -> str:
     return " ".join(parts) if parts else ""
 
 
+BRACE_LIMIT = 64
+_SEQ_RE = re.compile(r"^(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(\.\.-?\d+)?$")
+
+
+class _TooMany(Exception):
+    pass
+
+
+def _brace_alternatives(inner: str) -> Optional[list]:
+    """Alternatives of an unquoted brace body: a,b,c or a sequence x..y; None if neither."""
+    parts, depth, quote, start, j = [], 0, None, 0, 0
+    while j < len(inner):
+        c = inner[j]
+        if quote:
+            if c == quote:
+                quote = None
+            elif c == "\\" and quote == '"':
+                j += 1
+        elif c in "'\"":
+            quote = c
+        elif c == "\\":
+            j += 1
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            parts.append(inner[start:j])
+            start = j + 1
+        j += 1
+    if parts:
+        return parts + [inner[start:]]
+    m = _SEQ_RE.match(inner)
+    if not m:
+        return None
+    a, b = m.group(1), m.group(2)
+    step = abs(int(m.group(3)[2:])) if m.group(3) else 1
+    step = step or 1
+    if a.lstrip("-").isdigit() and b.lstrip("-").isdigit():
+        lo, hi = int(a), int(b)
+        values = [str(v) for v in (range(lo, hi + 1, step) if lo <= hi else range(lo, hi - 1, -step))]
+    elif a.isalpha() and b.isalpha():
+        lo, hi = ord(a), ord(b)
+        values = [chr(v) for v in (range(lo, hi + 1, step) if lo <= hi else range(lo, hi - 1, -step))]
+    else:
+        return None
+    if len(values) > BRACE_LIMIT:
+        raise _TooMany()
+    return values
+
+
+def _brace_expand(word: str) -> list:
+    """Bash brace expansion of one raw word (quotes kept). Raises _TooMany past the bound."""
+    quote = None
+    j = 0
+    while j < len(word):
+        c = word[j]
+        if quote:
+            if c == quote:
+                quote = None
+            elif c == "\\" and quote == '"':
+                j += 1
+        elif c in "'\"":
+            quote = c
+        elif c == "\\":
+            j += 1
+        elif c == "{" and (j == 0 or word[j - 1] != "$"):
+            depth, k, q = 1, j + 1, None
+            while k < len(word) and depth:
+                ch = word[k]
+                if q:
+                    if ch == q:
+                        q = None
+                elif ch in "'\"":
+                    q = ch
+                elif ch == "\\":
+                    k += 1
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                k += 1
+            if depth == 0:
+                alternatives = _brace_alternatives(word[j + 1:k - 1])
+                if alternatives is not None:
+                    out: list = []
+                    for alt in alternatives:
+                        out += _brace_expand(word[:j] + alt + word[k:])
+                        if len(out) > BRACE_LIMIT:
+                            raise _TooMany()
+                    return out
+        j += 1
+    return [word]
+
+
 def _tokens(words: list) -> list:
     out = []
     for w in words:
         try:
-            parts = shlex.split(w)
-        except ValueError:
-            raise _Unreadable("quoting")
-        out.append(" ".join(parts) if parts else "")
+            expanded = _brace_expand(w) if "{" in w else [w]
+        except _TooMany:
+            expanded = [w]  # left unexpanded: the braces make it dynamic, like a glob
+        for one in expanded:
+            try:
+                parts = shlex.split(one)
+            except ValueError:
+                raise _Unreadable("quoting")
+            if parts:  # an unquoted empty expansion is no word at all
+                out.append(" ".join(parts))
     return out
 
 
@@ -541,9 +701,9 @@ def _unreadable_match() -> dict:
 
 
 def _dynamic(token: str) -> bool:
-    if token in ("[", "[["):
+    if token in ("[", "[[", "{", "}"):
         return False
-    return _expand(token) is None or any(ch in token for ch in "*?[")
+    return _expand(token) is None or any(ch in token for ch in "*?[{")
 
 
 def _flags_values(tokens, value_flags):
@@ -663,6 +823,37 @@ def _unwrap(tokens: list, ctx: _Ctx):
         return tokens[_skip_options(tokens, 1):]
     if name in _WRAPPER_VALUE_OPTS:
         return tokens[_skip_options(tokens, 1, _WRAPPER_VALUE_OPTS[name]):]
+    if name == "flock":
+        for i, t in enumerate(tokens):
+            if t in ("-c", "--command") and i + 1 < len(tokens):
+                return ("script", tokens[i + 1])
+        i = _skip_options(tokens, 1, {"-w", "--timeout", "-E", "--conflict-exit-code"})
+        return tokens[i + 1:]
+    if name == "setsid":
+        return tokens[_skip_options(tokens, 1):]
+    if name == "chroot":
+        i = _skip_options(tokens, 1, {"--userspec", "--groups"})
+        return tokens[i + 1:]
+    if name == "script":
+        for i, t in enumerate(tokens):
+            if t in ("-c", "--command") and i + 1 < len(tokens):
+                return ("script", tokens[i + 1])
+        i = _skip_options(tokens, 1, {"-F", "-t", "-T", "-I", "-O", "-B", "-E", "-o", "--log-io",
+                                      "--log-in", "--log-out", "--log-timing", "--echo"})
+        return tokens[i + 1:]
+    if name == "parallel":
+        value = {"-j", "--jobs", "-S", "--sshlogin", "-a", "--arg-file", "-N", "-n", "-L", "-d",
+                 "--delimiter", "-I", "--colsep", "--joblog", "--results", "--tmpdir", "-P",
+                 "--max-procs", "--timeout", "--retries", "--memfree", "--load"}
+        if any(t in ("-S", "--sshlogin") or t.startswith("--sshlogin=") for t in tokens):
+            return ["ssh"] + tokens[1:]
+        ctx.incomplete = True
+        inner = tokens[_skip_options(tokens, 1, value):]
+        for k, t in enumerate(inner):
+            if t.startswith(":::"):
+                inner = inner[:k]
+                break
+        return inner if inner else ("unreadable",)
     if name in ("timeout", "gtimeout"):
         i = _skip_options(tokens, 1, {"-s", "-k", "--signal", "--kill-after"})
         return tokens[i + 1:]
@@ -726,9 +917,36 @@ def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
         redirects = [_unquote(w) for w in seg["redirects"]]
     except _Unreadable:
         return [_unreadable_match()]
+    return _analyze(original, redirects, seg, ctx, depth)
+
+
+_INLINE_FLAGS = {"python": ("-c",), "pypy": ("-c",), "node": ("-e", "-p", "--eval", "--print"),
+                 "nodejs": ("-e", "-p", "--eval", "--print"), "deno": ("eval",),
+                 "bun": ("-e", "--eval", "-p", "--print"), "ruby": ("-e",), "perl": ("-e", "-E"),
+                 "php": ("-r",)}
+
+
+def _inline_codes(name: str, rest: list) -> tuple:
+    """(inline code strings, whether any inline flag was given) for an interpreter call."""
+    family = re.sub(r"[0-9.]+$", "", name)
+    flags = _INLINE_FLAGS.get(family, ())
+    codes = []
+    for i, t in enumerate(rest):
+        if t in flags and i + 1 < len(rest):
+            codes.append(rest[i + 1])
+        elif family in ("python", "pypy") and t.startswith("-c") and len(t) > 2:
+            codes.append(t[2:])
+    return codes, bool(codes) or any(t in flags for t in rest)
+
+
+def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int) -> list:
+    """Matches for one simple command, given as tokens."""
     ctx.incomplete = False
     matches: list = []
     tokens = original
+    if any(re.match(r"^(GIT_SSH_COMMAND|GIT_SSH|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT)=", t)
+           for t in original):
+        matches.append(_unreadable_match())
     for _ in range(16):
         tokens = _strip_prefix(tokens)
         if not tokens:
@@ -760,16 +978,31 @@ def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
                 if k + 1 < len(rest):
                     tokens = rest[k + 1:]
                     continue
-            inline = any(t in ("-c", "-e", "-E", "--eval", "-p", "--print") for t in rest)
+            codes, inline = _inline_codes(name, rest)
+            for code in codes:
+                matches += _inline_matches(code, ctx, depth)
             positional = _flags_values(rest, value)
             if not inline:
                 stdin_program = not positional or positional[0] in ("-", "/dev/stdin")
                 if (positional and "__dwsub" in positional[0]) or \
                         (stdin_program and seg["pipe_in"]):
                     matches.append(_unreadable_match())
+                elif stdin_program:
+                    for body in seg["heredocs"]:
+                        matches += _inline_matches(body, ctx, depth)
             if positional and os.path.basename(positional[0]) == "dw":
                 tokens = rest[rest.index(positional[0]):]
                 continue
+            break
+        if name == "osascript":
+            codes = [tokens[i + 1] for i, t in enumerate(tokens[:-1]) if t == "-e"]
+            for code in codes + list(seg["heredocs"]):
+                matches += _inline_matches(code, ctx, depth)
+            break
+        if name in ("awk", "gawk", "mawk", "nawk"):
+            program = next(iter(_flags_values(tokens[1:], {"-F", "-v", "-f"})), "")
+            if "-f" not in tokens and re.search(r"system\s*\(|\|\s*\"|\|&|getline", program):
+                matches += _inline_matches(program, ctx, depth, spawn=True)
             break
         if name == "eval":
             body = " ".join(tokens[1:])
@@ -789,7 +1022,10 @@ def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
         if unwrapped is None:
             break
         if isinstance(unwrapped, tuple):
-            matches += _shell_matches(unwrapped[1], ctx.fork(), depth + 1)
+            if unwrapped[0] == "unreadable":
+                matches.append(_unreadable_match())
+            else:
+                matches += _shell_matches(unwrapped[1], ctx.fork(), depth + 1)
             tokens = []
             break
         tokens = unwrapped
@@ -801,12 +1037,221 @@ def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
             ctx.cwd = None
         else:
             ctx.cwd = _resolve(target, ctx.cwd)
+    if tokens and os.path.basename(tokens[0]) == "find":
+        matches += _find_exec_matches(tokens, ctx, depth)
     matches += _control_matches(original, tokens, redirects, ctx)
+    if tokens and os.path.basename(tokens[0]) == "git":
+        matches += _git_control_matches(tokens, ctx)
     if tokens:
         rule = _first_rule(tokens, seg, ctx)
         if rule is not None:
             matches.append(_render(rule, " ".join(original)))
     return matches
+
+
+def _find_exec_matches(tokens: list, ctx: _Ctx, depth: int) -> list:
+    """Classify the commands that `find -exec/-execdir/-ok/-okdir` runs."""
+    starts = []
+    for t in tokens[1:]:
+        if t.startswith("-") or t in ("(", "!", ")"):
+            break
+        starts.append(t)
+    sample = (starts[0] if starts else ".").rstrip("/") + "/x"
+    out = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] in ("-exec", "-execdir", "-ok", "-okdir"):
+            j = i + 1
+            while j < len(tokens) and tokens[j] not in (";", "+"):
+                j += 1
+            inner = [sample if t == "{}" else t for t in tokens[i + 1:j]]
+            if inner:
+                out += _analyze(inner, [], _new_segment(False), ctx.fork(), depth + 1)
+            i = j
+        i += 1
+    return out
+
+
+# -- inline interpreter code ------------------------------------------------------
+
+_INLINE_PATTERNS = [
+    (re.compile(r"\bgit\s+push\b"), "inline-git-push", "merge", "push from inline code"),
+    (re.compile(r"\b(gh\s+pr|glab\s+mr)\s+merge\b"), "inline-pr-merge", "merge",
+     "merge a pull request from inline code"),
+    (re.compile(r"\b(kubectl|oc)\b[^\n'\"]*\b(apply|create|replace|patch|delete|rollout|scale|"
+                r"set|edit|drain)\b"), "inline-kubectl", "deploy", "change a cluster from inline code"),
+    (re.compile(r"\bhelm\s+(install|upgrade|uninstall|delete|rollback|push)\b"), "inline-helm",
+     "deploy", "change a Helm release from inline code"),
+    (re.compile(r"\b(docker|podman)\s+((image|manifest|compose)\s+)?push\b"), "inline-docker-push",
+     "deploy", "push an image from inline code"),
+    (re.compile(r"\bvercel\b[^\n'\"]*(\bdeploy\b|--prod\b)"), "inline-vercel", "deploy",
+     "deploy from inline code"),
+    (re.compile(r"\b(netlify|firebase|wrangler|flyctl|fly|railway|serverless|sls)\s+(deploy|up)\b"),
+     "inline-deploy", "deploy", "deploy from inline code"),
+    (re.compile(r"\b(terraform|tofu|pulumi)\s+(apply|destroy|up)\b"), "inline-infra", "deploy",
+     "change infrastructure from inline code"),
+    (re.compile(r"\b(npm|pnpm|yarn|twine|cargo|gem|poetry|uv)\s+(publish|upload|push)\b"),
+     "inline-publish", "publish", "publish a package from inline code"),
+    (re.compile(r"\bgh\s+release\s+create\b"), "inline-release", "publish",
+     "publish a release from inline code"),
+    (_SQL_DESTRUCTIVE_RE, "inline-sql", "destroy", "destructive database command in inline code"),
+    (re.compile(r"\b(sendmail|mailx|msmtp|swaks)\b|\bsmtplib\b|\bnodemailer\b|Net::SMTP"),
+     "inline-mail", "send", "send email from inline code"),
+    (re.compile(r"tell\s+application\s+\"(Messages|Mail|Microsoft Outlook|Slack|System Events)\"|"
+                r"\bkeystroke\b", re.I), "inline-applescript-send", "send",
+     "send a message or keystrokes from AppleScript"),
+]
+_SPAWN_RE = re.compile(
+    r"subprocess|os\.system|os\.popen|os\.exec|os\.spawn|pty\.spawn|child_process|execSync|"
+    r"spawnSync|\bexec(File)?\s*\(|\bspawn\s*\(|\bsystem\s*\(|`|\bpopen\s*\(|Popen|IO\.popen|"
+    r"%x\{|shell_exec|passthru|proc_open|do shell script|Runtime\.getRuntime|Deno\.(run|Command)|"
+    r"Bun\.spawn|commands\.getoutput|\$\(")
+_GUARDED_NAME_RE = re.compile(
+    r"(?<![\w.-])(git|gh|glab|kubectl|oc|helm|docker|podman|vercel|netlify|flyctl|wrangler|gcloud|"
+    r"gsutil|aws|az|terraform|tofu|pulumi|twine|ssh|scp|rsync|psql|mysql|dropdb|sendmail|stripe|dw|"
+    r"claude|agtermctl|curl|wget|nc)(?![\w.-])")
+_DW_REF_RE = re.compile(
+    r"(?<![\w.-])dw['\"]?\s*,?\s*['\"]?\s*(approve|deny|run|resume|cancel|dismiss|setup|hook|guard|"
+    r"project['\"]?\s*,?\s*['\"]?\s*(add|remove))\b|(bin|control)/dw\b")
+_LITERAL_RE = re.compile(r"'([^'\n]{1,2000})'|\"([^\"\n]{1,2000})\"")
+_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+")
+
+
+def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> list:
+    """Matches for code given inline to an interpreter (python -c, node -e, a here-document...)."""
+    out: list = []
+    if depth > 6:
+        return [_unreadable_match()]
+    for m in _LITERAL_RE.finditer(text):
+        literal = m.group(1) if m.group(1) is not None else m.group(2)
+        if len(literal.split()) >= 2:
+            out += [x for x in _shell_matches(literal, ctx.fork(), depth + 1)
+                    if x["id"] != "control-unreadable"]
+    found = {x["category"] for x in out}
+    for rx, rid, category, describe in _INLINE_PATTERNS:
+        if category not in found and rx.search(text):
+            out.append({"id": rid, "category": category, "describe": "%s: %s" % (describe, _short(text))})
+            found.add(category)
+    if _DW_REF_RE.search(text):
+        out.append({"id": "control-dw", "category": "control",
+                    "describe": "change the control point: %s" % _short(text)})
+    elif ctx.protected.text_hit(text):
+        out.append(_state_match(text))
+    if not out and (spawn or _SPAWN_RE.search(text)):
+        remote = any(not _is_local_host(_url_host(u)) for u in _URL_RE.findall(text))
+        if remote or _GUARDED_NAME_RE.search(text):
+            out.append(_unreadable_match())
+    return out
+
+
+# -- git -----------------------------------------------------------------------------
+
+_GIT_BUILTINS = set("""
+add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore
+check-mailmap check-ref-format checkout checkout-index cherry cherry-pick citool clean clone
+column commit commit-graph commit-tree config count-objects credential describe diff diff-files
+diff-index diff-tree difftool fast-export fast-import fetch fetch-pack filter-branch
+fmt-merge-msg for-each-ref for-each-repo format-patch fsck gc get-tar-commit-id grep gui
+hash-object help hook index-pack init instaweb interpret-trailers log ls-files ls-remote ls-tree
+mailinfo mailsplit maintenance merge merge-base merge-file merge-index merge-tree mergetool mktag
+mktree multi-pack-index mv name-rev notes pack-objects pack-refs patch-id prune prune-packed pull
+push range-diff read-tree rebase reflog remote repack replace request-pull rerere reset restore
+rev-list rev-parse revert rm send-email shortlog show show-branch show-index show-ref
+sparse-checkout stash status stripspace submodule switch symbolic-ref tag unpack-file
+unpack-objects update-index update-ref update-server-info var verify-commit verify-pack
+verify-tag version whatchanged worktree write-tree
+""".split())
+_GIT_ROUTING_KEY_RE = re.compile(
+    r"^(alias\..+|remote\..+\.(push|url|pushurl)|remote\.pushdefault|push\..+|"
+    r"url\..+\.(insteadof|pushinsteadof)|core\.sshcommand|core\.hookspath|"
+    r"branch\..+\.(merge|remote|pushremote))$", re.I)
+_GIT_ROUTING_SECTION_RE = re.compile(r"^(alias|remote|push|url|branch)(\..*)?$|^core$", re.I)
+
+
+def _git_config_value(repo: Optional[str], key: str, ctx: _Ctx, all_values: bool = False):
+    """Local config read; (exit code, values). Code None when git could not run."""
+    cache_key = ("config", repo, key, all_values)
+    if cache_key not in ctx.git_cache:
+        if repo is None:
+            ctx.git_cache[cache_key] = (None, [])
+        else:
+            code, out = _git_call(repo, "config", "--get-all" if all_values else "--get", key)
+            ctx.git_cache[cache_key] = (code, out.splitlines() if code == 0 else [])
+    return ctx.git_cache[cache_key]
+
+
+def _git_config_writes_routing(args: list) -> bool:
+    value_opts = {"--file", "-f", "--blob", "--type", "--default", "--comment", "--value"}
+    read_flags = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l",
+                  "--get-color", "--get-colorbool", "--show-origin", "--show-scope"}
+    write_flags = {"--add", "--unset", "--unset-all", "--replace-all"}
+    positional, flags = [], []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in value_opts:
+            i += 2
+            continue
+        if a.startswith("-"):
+            flags.append(a.split("=", 1)[0])
+        else:
+            positional.append(a)
+        i += 1
+    if any(f in ("--edit", "-e") for f in flags) or positional[:1] == ["edit"]:
+        return True
+    if any(f in ("--rename-section", "--remove-section") for f in flags) or \
+            positional[:1] in (["rename-section"], ["remove-section"]):
+        names = positional[1:] if positional[:1] in (["rename-section"], ["remove-section"]) \
+            else positional
+        return any(_GIT_ROUTING_SECTION_RE.match(n) for n in names)
+    if positional[:1] in (["set"], ["unset"]):
+        return len(positional) > 1 and bool(_GIT_ROUTING_KEY_RE.match(positional[1]))
+    if positional[:1] in (["get"], ["list"]) or any(f in read_flags for f in flags):
+        return False
+    writing = any(f in write_flags for f in flags) or len(positional) >= 2
+    return writing and bool(positional) and bool(_GIT_ROUTING_KEY_RE.match(positional[0]))
+
+
+def _git_control_matches(tokens: list, ctx: _Ctx) -> list:
+    """git forms that change where pushes go, or hide what runs."""
+    i = 1
+    while i < len(tokens):
+        t = tokens[i]
+        if t == "-c" and i + 1 < len(tokens):
+            key = tokens[i + 1].split("=", 1)[0].lower()
+            if key.startswith("alias.") or key in ("core.sshcommand", "core.hookspath"):
+                return [_unreadable_match()]
+            i += 2
+        elif t in ("-C", "--git-dir", "--work-tree", "--namespace", "--exec-path",
+                   "--config-env"):
+            if t == "--config-env":
+                return [_unreadable_match()]
+            i += 2
+        elif t.startswith("-"):
+            i += 1
+        else:
+            break
+    sub, args, repo, _unreadable = _git_parts(tokens, ctx)
+    if sub is None or _dynamic(sub):
+        return []
+    detail = " ".join(tokens)
+    routing = {"id": "control-git-config", "category": "control",
+               "describe": "change where git pushes go: %s" % _short(detail)}
+    if sub == "config":
+        return [routing] if _git_config_writes_routing(args) else []
+    if sub == "remote":
+        nonflags = [a for a in args if not a.startswith("-")]
+        return [routing] if nonflags[:1] in (["set-url"], ["add"], ["rename"]) else []
+    if sub == "branch":
+        if any(a in ("-u", "--set-upstream-to", "--set-upstream") or
+               a.startswith("--set-upstream-to=") for a in args):
+            return [routing]
+        return []
+    if sub not in _GIT_BUILTINS:
+        code, values = _git_config_value(repo, "alias." + sub, ctx)
+        if code is None or code == 0:
+            return [_unreadable_match()]
+    return []
 
 
 def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx) -> list:
@@ -1028,18 +1473,13 @@ def _check_git_push_default_branch(tokens, seg, ctx) -> bool:
     if not refspecs:
         if parts["delete"]:
             return False
-        kind, branch = _git_head(repo, ctx)
-        if kind == "branch":
-            return branch in _protected_branches(repo, remote, ctx)
-        return kind == "unknown"
+        return _implicit_push_reaches_default(repo, remote, ctx)
     for ref in refspecs:
         dst = _refspec_dst(ref, parts["delete"])
         if dst.startswith("refs/tags/"):
             continue
         if dst in ("HEAD", "@") or dst == "":
-            kind, branch = _git_head(repo, ctx)
-            if kind == "unknown" or (kind == "branch" and
-                                     branch in _protected_branches(repo, remote, ctx)):
+            if _implicit_push_reaches_default(repo, remote, ctx):
                 return True
             continue
         if _dynamic(dst):
@@ -1047,6 +1487,77 @@ def _check_git_push_default_branch(tokens, seg, ctx) -> bool:
         if dst in ("main", "master") or dst in _protected_branches(repo, remote, ctx):
             return True
     return False
+
+
+def _map_push_refspec(spec: str, branch: str) -> Optional[str]:
+    """Where a `remote.<name>.push` refspec sends `branch`: a branch name, "" when it does
+    not apply to that branch, None when it cannot be read."""
+    spec = spec.lstrip("+")
+    src, _, dst = spec.partition(":")
+    dst = dst or src
+    full = "refs/heads/" + branch
+    if src in ("HEAD", "@") or src in (branch, full):
+        pass
+    elif "*" in src:
+        if src.count("*") != 1 or dst.count("*") != 1:
+            return None
+        head, tail = src.split("*")
+        if not (full.startswith(head) and full.endswith(tail)):
+            return ""
+        star = full[len(head):len(full) - len(tail)]
+        dst = dst.replace("*", star)
+    else:
+        return ""
+    if dst.startswith("refs/tags/"):
+        return ""
+    return dst[len("refs/heads/"):] if dst.startswith("refs/heads/") else dst
+
+
+def _implicit_push_reaches_default(repo: Optional[str], remote: Optional[str], ctx: _Ctx) -> bool:
+    """For a push without a destination branch: may it update the default branch, as far as
+    the local git config shows? Unknown means yes. Never contacts the remote."""
+    kind, branch = _git_head(repo, ctx)
+    if kind in ("norepo", "detached"):
+        return False
+    if kind != "branch":
+        return True
+
+    def get(key):
+        code, values = _git_config_value(repo, key, ctx)
+        if code not in (0, 1):
+            raise LookupError(key)
+        return values[0] if values else None
+
+    try:
+        upstream = get("branch.%s.merge" % branch)
+        remote = remote or get("branch.%s.pushRemote" % branch) or get("remote.pushDefault") \
+            or get("branch.%s.remote" % branch) or "origin"
+        targets = set()
+        if upstream:
+            targets.add(upstream[len("refs/heads/"):] if upstream.startswith("refs/heads/")
+                        else upstream)
+        code, specs = _git_config_value(repo, "remote.%s.push" % remote, ctx, all_values=True)
+        if code not in (0, 1):
+            return True
+        if specs:
+            for spec in specs:
+                dst = _map_push_refspec(spec, branch)
+                if dst is None:
+                    return True
+                if dst:
+                    targets.add(dst)
+        else:
+            mode = (get("push.default") or "simple").lower()
+            if mode in ("current", "simple"):
+                targets.add(branch)
+            elif mode in ("upstream", "tracking"):
+                if not upstream:
+                    return False  # git refuses to push without an upstream
+            elif mode != "nothing":
+                return True  # matching, or a value this guard does not know
+    except LookupError:
+        return True
+    return bool(targets & _protected_branches(repo, remote, ctx))
 
 
 def _check_git_push_tags(tokens, seg, ctx) -> bool:
@@ -1216,8 +1727,8 @@ def _temp_roots() -> list:
 
 def _outside_project(target: str, ctx: _Ctx, root_ok: bool = False) -> bool:
     static = target
-    if any(ch in static for ch in "*?["):
-        static = re.split(r"[*?\[]", static, 1)[0]
+    if any(ch in static for ch in "*?[{"):
+        static = re.split(r"[*?\[{]", static, 1)[0]
         static = static if static.endswith("/") or not static else os.path.dirname(static) or "."
     path = _resolve(static, ctx.cwd)
     if path is None:
@@ -1276,7 +1787,30 @@ def _check_raw_network(tokens, seg, ctx) -> bool:
     return not any(_is_local_host(t) for t in positional)
 
 
+def _check_osascript_beyond_notification(tokens, seg, ctx) -> bool:
+    """Every osascript call is held, except one `-e 'display notification ...'` and nothing else."""
+    if seg["pipe_in"] or seg["heredocs"] or seg["redirects"]:
+        return True
+    return not (len(tokens) == 3 and tokens[1] == "-e" and
+                re.match(r"^\s*display\s+notification\s+\"[^\"]*\"(\s+with\s+title\s+\"[^\"]*\")?"
+                         r"(\s+subtitle\s+\"[^\"]*\")?\s*$", tokens[2]))
+
+
+def _check_open_mail_app(tokens, seg, ctx) -> bool:
+    apps = ("mail", "messages", "microsoft outlook", "outlook", "slack", "telegram", "whatsapp")
+    for i, t in enumerate(tokens[1:], 1):
+        low = t.lower()
+        if low.startswith(("mailto:", "sms:", "imessage:", "slack:", "tg:", "whatsapp:")):
+            return True
+        if t in ("-a", "-b") and i + 1 < len(tokens) and \
+                (tokens[i + 1].lower() in apps or "mail" in tokens[i + 1].lower()):
+            return True
+    return False
+
+
 _CHECKS = {
+    "open_mail_app": _check_open_mail_app,
+    "osascript_beyond_notification": _check_osascript_beyond_notification,
     "git_push_default_branch": _check_git_push_default_branch,
     "git_push_tags": _check_git_push_tags,
     "git_merge_default_branch": _check_git_merge_default_branch,

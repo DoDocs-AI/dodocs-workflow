@@ -1744,6 +1744,26 @@ class FailClosedTests(GuardClassifyBase):
         result = self.bash("for f in w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69; do cp /tmp/x $f; done")
         self.assertEqual(result["describe"], "command cannot be read")
 
+    def test_9_existence_checks_and_reads_of_control_files_are_allowed(self):
+        self.check_rows([
+            ("test -f .claude/settings.json", None),
+            ("[ -f .claude/settings.json ]", None),
+            ("[[ -f .claude/settings.json ]]", None),
+            ("[ -f .claude/settings.json ] && echo yes || echo no", None),
+            ("if [ ! -f .git/hooks/pre-commit ]; then echo missing; fi", None),
+            ("test -e .git/config", None),
+            ("cmp -s .claude/settings.json /tmp/a", None),
+            ("readlink .claude/settings.json", None),
+            ("git cat-file -p HEAD:.claude/settings.json", None),
+            ("[ -f x ] && echo hi > .claude/settings.json", "control"),
+            ("[ -f .claude/settings.json ] > .git/config", "control"),
+            ("test -f x; cp a .git/hooks/pre-push", "control"),
+            ('[ "$(echo hi > .claude/settings.json)" ]', "control"),
+            ("[[ -f a ]] && rm .claude/settings.local.json", "control"),
+            ("cmp a b > .claude/settings.json", "control"),
+            ("readlink -f .git/config | xargs rm", "control"),
+        ])
+
 
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):

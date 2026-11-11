@@ -949,7 +949,7 @@ _COPY_FLAGS = {
 }
 # git subcommands that read or stage the working tree: their path arguments are not written.
 # (Of git stash, only list and show.)
-_GIT_READS = {"add", "diff", "status", "log", "show", "blame", "ls-files", "grep"}
+_GIT_READS = {"add", "diff", "status", "log", "show", "blame", "ls-files", "grep", "cat-file"}
 _GIT_WRITE_OPTIONS = ("--output", "--open-files-in-pager", "--ext-diff", "--textconv")
 # Per program, the options whose value is a pattern to match names with, not a file.
 _EXCLUDES = ("--exclude", "--include")

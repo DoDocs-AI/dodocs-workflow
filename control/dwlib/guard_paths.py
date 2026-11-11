@@ -485,6 +485,11 @@ _READ_ONLY = {
     "sed": _read_only(r"-[nEru]+|-[nEru]*e", r"quiet|silent|regexp-extended|posix|debug|"
                                              r"expression(=.*)?", check=_sed_scripts_only_print),
     "awk": _AWK, "gawk": _AWK, "mawk": _AWK, "nawk": _AWK,
+    "test": _read_only(long=r".*"), "[": _read_only(long=r".*"),  # existence checks
+    "[[": _read_only(long=r".*"),
+    "cmp": _read_only(long=r"silent|quiet|print-bytes|verbose|bytes=.*|ignore-initial=.*"),
+    "readlink": _read_only(long=r"canonicalize(-existing|-missing)?|no-newline|zero|verbose|"
+                                r"quiet|silent"),
 }
 def _is_option(word: str) -> bool:
     return word.startswith("-") and len(word) > 1

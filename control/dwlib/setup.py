@@ -486,8 +486,9 @@ def doctor_levels() -> list:
 
     records, corrupt = store.list_runs()  # before the sessions, so a run started now is not misjudged
     states = None
+    closed = 0
     try:
-        states = agterm.session_states()
+        states, closed = agterm.session_snapshot()
         add("agtermctl", OK, "AGTerm reachable")
     except agterm.AgtermError as exc:
         add("agtermctl", FAIL, "AGTerm not reachable: %s" % (str(exc).splitlines() or ["error"])[0])
@@ -534,16 +535,21 @@ def doctor_levels() -> list:
     else:
         orphans = [r for r in records if r.get("state") == "running"
                    and r.get("agterm_session") and r["agterm_session"] not in states]
-        marked = []
-        for r in orphans:
-            _, changed = runs.finish_run_changed(
-                r["id"], "interrupted", "AGTerm session is gone (found by dw doctor)")
-            if changed:
-                marked.append(r["id"])
-        if marked:
-            add("runs", WARN, "marked interrupted, their terminal session is gone: %s" % ", ".join(marked))
+        if orphans and closed:
+            add("runs", WARN, "%s not visible \u2014 a terminal window is closed; cannot tell"
+                % ", ".join(r["id"] for r in orphans))
         else:
-            add("runs", OK, "no running run has lost its terminal session")
+            marked = []
+            for r in orphans:
+                _, changed = runs.finish_run_changed(
+                    r["id"], "interrupted", "AGTerm session is gone (found by dw doctor)")
+                if changed:
+                    marked.append(r["id"])
+            if marked:
+                add("runs", WARN, "marked interrupted, their terminal session is gone: %s"
+                    % ", ".join(marked))
+            else:
+                add("runs", OK, "no running run has lost its terminal session")
 
     if corrupt_files:
         add("files", FAIL, "corrupt: %s" % ", ".join(corrupt_files))

@@ -116,10 +116,19 @@ def new_session(cwd: str, workspace_name: str, name: str, command: str, context:
 
 def session_states() -> dict:
     """session id -> {status, status_changed_at, name}, across all open windows."""
+    return session_snapshot()[0]
+
+
+def session_snapshot() -> tuple:
+    """(session states of all open windows, number of closed windows). A session that is not
+    in the states may still be running in a closed window: with closed windows, absence is
+    unknown, not gone."""
     windows = _result(_run(["window", "list"], ["--json"], timeout=_timeout(15))).get("windows") or []
     states: dict = {}
+    closed = 0
     for win in windows:
         if not win.get("open", True):
+            closed += 1
             continue
         tree = _result(_run(["tree"], ["--json", "--window", str(win["id"])], timeout=_timeout(15)))
         for ws in (tree.get("tree") or {}).get("workspaces") or []:
@@ -129,7 +138,7 @@ def session_states() -> dict:
                     "status_changed_at": node.get("statusChangedAt"),
                     "name": node.get("name"),
                 }
-    return states
+    return states, closed
 
 
 def _call_timeout(timeout: Optional[float]) -> Optional[float]:

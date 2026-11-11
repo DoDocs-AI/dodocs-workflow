@@ -244,6 +244,23 @@ class StatusTests(StatusBase):
         from dwlib import store
         self.assertEqual(store.load_run(rid)["state"], "running")
 
+    def test_session_absent_with_a_closed_window_is_unknown_not_missing(self):
+        self.add_project("slotme")
+        rid, sid = self.live_run("slotme")
+        sessions = self.fake_sessions()
+        del sessions[sid]
+        (self.fake_agterm_dir / "sessions.json").write_text(json.dumps(sessions))
+        (self.fake_agterm_dir / "closed-window").write_text("")
+        view = self.find_view(self.status_json(), rid)
+        self.assertTrue(view["session_unknown"])
+        self.assertFalse(view["session_missing"])
+        self.assertIn("not visible", self.dw("status").stdout)
+
+    def test_session_unknown_is_false_when_no_window_is_closed(self):
+        self.add_project("slotme")
+        rid, sid = self.live_run("slotme")
+        self.assertFalse(self.find_view(self.status_json(), rid)["session_unknown"])
+
     def test_status_does_not_modify_run_records_or_agterm(self):
         self.add_project("slotme")
         rid, sid = self.live_run("slotme")

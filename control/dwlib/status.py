@@ -99,15 +99,18 @@ def _acknowledged(run: dict) -> bool:
 
 
 def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
-              stall_minutes: float) -> dict:
+              stall_minutes: float, closed_windows: int = 0) -> dict:
     state = run.get("state")
     live = None
     session_missing = False
+    session_unknown = False
     stalled = False
     if sessions is not None and state in ACTIVE and run.get("agterm_session"):
         session = sessions.get(run["agterm_session"])
         if session is None:
-            session_missing = state == "running"
+            # With a closed terminal window the session may be alive there: unknown, not gone.
+            session_unknown = state == "running" and closed_windows > 0
+            session_missing = state == "running" and closed_windows == 0
         else:
             live = session.get("status")
             changed = session.get("status_changed_at")
@@ -122,17 +125,18 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
         "live": live,
         "stalled": stalled,
         "session_missing": session_missing,
+        "session_unknown": session_unknown,
         "progress": find_progress(project["path"], run) if state in ACTIVE else None,
         "result": _result_note(run["id"]) if state in ENDED or state == "blocked" else None,
     }
 
 
 def project_status(project: dict, runs: list, sessions: Optional[dict], now: float,
-                   stall_minutes: float = DEFAULT_STALL_MINUTES) -> dict:
+                   stall_minutes: float = DEFAULT_STALL_MINUTES, closed_windows: int = 0) -> dict:
     mine = [r for r in runs if r.get("project_id") == project["id"]]
 
     def view(r):
-        return _run_view(project, r, sessions, now, stall_minutes)
+        return _run_view(project, r, sessions, now, stall_minutes, closed_windows)
 
     active = sorted((r for r in mine if r.get("state") in ACTIVE),
                     key=lambda r: (r.get("started_at") or 0, r["id"]))
@@ -148,8 +152,10 @@ def project_status(project: dict, runs: list, sessions: Optional[dict], now: flo
 def overall_status(now: float) -> dict:
     registry = store.load_registry()
     records, corrupt = store.list_runs()
+    closed = 0
     try:
-        sessions: Optional[dict] = agterm.session_states()
+        sessions: Optional[dict]
+        sessions, closed = agterm.session_snapshot()
     except agterm.AgtermError:
         sessions = None
     stall = registry.get("stall_minutes", DEFAULT_STALL_MINUTES)
@@ -157,13 +163,13 @@ def overall_status(now: float) -> dict:
         stall = float(stall)
     except (TypeError, ValueError):
         stall = DEFAULT_STALL_MINUTES
-    projects = [project_status(p, records, sessions, now, stall) for p in registry.get("projects", [])]
+    projects = [project_status(p, records, sessions, now, stall, closed) for p in registry.get("projects", [])]
     by_id = {p["id"]: p for p in registry.get("projects", [])}
     needs_owner = []
     for r in sorted(records, key=lambda r: (r.get("created_at") or 0, r["id"])):
         if r.get("state") in NEEDS_OWNER and not _acknowledged(r):
             project = by_id.get(r.get("project_id")) or {"id": r.get("project_id"), "path": ""}
-            needs_owner.append({**_run_view(project, r, sessions, now, stall),
+            needs_owner.append({**_run_view(project, r, sessions, now, stall, closed),
                                 "project": r.get("project_id")})
     return {"needs_owner": needs_owner, "projects": projects,
             "corrupt_files": [str(p) for p in corrupt],

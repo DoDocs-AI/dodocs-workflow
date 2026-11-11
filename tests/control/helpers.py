@@ -44,14 +44,17 @@ class DwTestCase(unittest.TestCase):
         self.env["DW_AGTERM_HOOKS_CONF"] = str(self.hooks_conf)
         self.env["DW_TMUX"] = str(self.tmp / "no-such-tmux")
         self.env["TMUX_TMPDIR"] = str(self.tmp / "tmux-tmp")
-        for var, value in (("DW_HOME", str(self.dw_home)),
-                           ("DW_CLAUDE_SETTINGS", str(self.claude_settings)),
-                           ("DW_AGTERM_HOOKS_CONF", str(self.hooks_conf)), ("DW_RUN_ID", None)):
-            self.addCleanup(self._restore_env, var, os.environ.get(var))
-            if value is None:
-                os.environ.pop(var, None)
-            else:
-                os.environ[var] = value
+        # In-process code must see exactly what a subprocess sees: every override above (and the
+        # removal of the variables popped above) is mirrored into os.environ, then restored.
+        saved_environ = dict(os.environ)
+        self.addCleanup(self._restore_environ, saved_environ)
+        os.environ.clear()
+        os.environ.update(self.env)
+
+    @staticmethod
+    def _restore_environ(saved) -> None:
+        os.environ.clear()
+        os.environ.update(saved)
 
     @staticmethod
     def _restore_env(var, saved) -> None:

@@ -7,7 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from helpers import DW, DwTestCase
+from helpers import DW, FAKE_AGTERMCTL, DwTestCase
 
 MARK_START = "# >>> dodocs-workflow control"
 MARK_END = "# <<< dodocs-workflow control"
@@ -288,6 +288,23 @@ class DoctorTests(SetupBase):
         self.assertTrue(self.line(r.stdout, "runs").startswith("WARN"))
         self.assertEqual(r.returncode, 0)
 
+    def test_doctor_repairs_nothing_when_a_window_is_closed(self):
+        self.installed()
+        self.add_project("alpha")
+        rid = self.dw("run", "alpha", "/scrum-team x").stdout.split()[0]
+        from dwlib import store
+        sid = store.load_run(rid)["agterm_session"]
+        sessions = self.fake_sessions()
+        del sessions[sid]
+        (self.fake_agterm_dir / "sessions.json").write_text(json.dumps(sessions))
+        (self.fake_agterm_dir / "closed-window").write_text("")
+        r = self.dw("doctor")
+        self.assertEqual(store.load_run(rid)["state"], "running")
+        line = self.line(r.stdout, "runs")
+        self.assertTrue(line.startswith("WARN"), line)
+        self.assertIn("%s not visible \u2014 a terminal window is closed; cannot tell" % rid, line)
+        self.assertEqual(r.returncode, 0)
+
     def test_doctor_leaves_running_run_with_live_session_alone(self):
         self.installed()
         self.add_project("alpha")
@@ -381,6 +398,21 @@ class DoctorTests(SetupBase):
         results = setup.doctor()
         self.assertTrue(all(len(t) == 3 and isinstance(t[1], bool) for t in results))
         self.assertIn(False, [ok for _, ok, _ in results])
+
+
+class IsolationTests(DwTestCase):
+    def test_in_process_code_sees_only_fake_binaries_and_temp_paths(self):
+        import shutil
+        from dwlib import agterm
+        self.assertEqual(agterm._binary(), str(FAKE_AGTERMCTL))
+        tmux = shutil.which(os.environ.get("DW_TMUX") or "tmux")
+        self.assertIsNone(tmux)  # the fixture points at a tmux that does not exist
+        self.assertTrue(os.environ["TMUX_TMPDIR"].startswith(str(self.tmp)))
+        for var in ("DW_HOME", "DW_CLAUDE_SETTINGS", "DW_AGTERM_HOOKS_CONF", "DW_CLAUDE_STATE"):
+            self.assertTrue(os.environ[var].startswith(str(self.tmp)), var)
+        for key, value in self.env.items():
+            if key.startswith("DW_"):
+                self.assertEqual(os.environ.get(key), value, key)
 
 
 LEGACY = {

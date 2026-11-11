@@ -151,6 +151,8 @@ def _view_lines(project_id, v, finished=False) -> list:
         flags.append("STALLED" if v["stalled"] else (v["live"] or ""))
     if v.get("session_missing"):
         flags.append("session missing")
+    if v.get("session_unknown"):
+        flags.append("session not visible: a terminal window is closed")
     head = "  %s  %s  [%s]" % (v["id"], project_id, v["state"])
     head += " %s%s" % (_age(v["since"]), " ago" if finished else "")
     flags = [f for f in flags if f]

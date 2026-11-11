@@ -11,6 +11,7 @@ State lives in $DW_HOME/fake-agterm/:
                 poll, "<id>@N" at poll N, a missing file never answers, "@cancelled"
                 reports the dialog cancelled (the owner pressed escape).
   asks.json     questions opened with --no-block: {id: {state, polls}}
+closed-window  when this file exists, `window list` also reports a closed window W2
 FAKE_AGTERM_DOWN=1 makes every call exit 1 with a connection error.
 FAKE_AGTERM_DELAY=<seconds> delays every call (to exercise the guard's time limit).
 A second `ask open` on a session whose earlier question is still pending is refused with
@@ -109,8 +110,10 @@ def main(argv):
     opts, pos = parse(rest)
 
     if cmd == "window" and pos[:1] == ["list"]:
-        out({"windows": [{"id": "W1", "name": "main", "open": True, "active": True}]},
-            opts, "W1 main")
+        windows = [{"id": "W1", "name": "main", "open": True, "active": True}]
+        if os.path.exists(os.path.join(state_dir(), "closed-window")):
+            windows.append({"id": "W2", "name": "closed", "open": False, "active": False})
+        out({"windows": windows}, opts, "W1 main")
     elif cmd == "tree":
         sessions = load_sessions()
         workspaces = {}

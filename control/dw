@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import time
 
 _here = os.path.dirname(os.path.realpath(__file__))
 for _cand in (_here, os.path.join(_here, "..", "lib")):
@@ -13,7 +14,7 @@ for _cand in (_here, os.path.join(_here, "..", "lib")):
         sys.path.insert(0, os.path.normpath(_cand))
         break
 
-from dwlib import agterm, runs, store  # noqa: E402
+from dwlib import agterm, runs, status, store  # noqa: E402
 
 
 class UserError(Exception):
@@ -128,6 +129,94 @@ def cmd_cancel(args) -> int:
     return 0
 
 
+def _age(seconds) -> str:
+    if seconds is None:
+        return "?"
+    seconds = int(seconds)
+    if seconds < 90:
+        return "%ds" % seconds
+    if seconds < 90 * 60:
+        return "%dm" % round(seconds / 60)
+    if seconds < 48 * 3600:
+        return "%dh" % round(seconds / 3600)
+    return "%dd" % round(seconds / 86400)
+
+
+def _indent(text, prefix="      ") -> list:
+    return [prefix + line for line in str(text).splitlines()]
+
+
+def _view_lines(project_id, v, finished=False) -> list:
+    flags = []
+    if v["state"] == "running":
+        flags.append("STALLED" if v["stalled"] else (v["live"] or ""))
+    if v.get("session_missing"):
+        flags.append("session missing")
+    head = "  %s  %s  [%s]" % (v["id"], project_id, v["state"])
+    head += " %s%s" % (_age(v["since"]), " ago" if finished else "")
+    flags = [f for f in flags if f]
+    if flags:
+        head += " (%s)" % ", ".join(flags)
+    lines = [head, "      " + str(v["command"] or "").replace("\n", " ")[:100]]
+    if v["reason"]:
+        lines.append("      reason: %s" % v["reason"])
+    if v["progress"]:
+        lines += _indent(v["progress"])
+    if v["result"]:
+        lines.append("      result:")
+        lines += _indent(v["result"], "        ")
+    return lines
+
+
+def format_status(data: dict) -> str:
+    out: list = []
+    if data["needs_owner"]:
+        out.append("Needs owner:")
+        for v in data["needs_owner"]:
+            out += _view_lines(v["project"], v, finished=v["state"] in status.ENDED)
+    for title, key, finished in (("Running:", "active", False), ("Queued:", "queued", False),
+                                 ("Recently finished:", "recent", True)):
+        rows = [(p["project"], v) for p in data["projects"] for v in p[key]]
+        if key == "active":
+            rows = [(pid, v) for pid, v in rows if v["state"] == "running"]
+        if rows:
+            out.append(title)
+            for pid, v in rows:
+                out += _view_lines(pid, v, finished)
+    if data["corrupt_files"]:
+        out.append("Corrupt files (skipped):")
+        out += ["  " + p for p in data["corrupt_files"]]
+    if not out:
+        out.append("No runs.")
+    if not data["agterm_reachable"]:
+        out.append("AGTerm not reachable: live state unavailable")
+    return "\n".join(out)
+
+
+def cmd_status(args) -> int:
+    data = status.overall_status(time.time())
+    if args.project:
+        pid = _find_project(args.project)["id"]
+        data["projects"] = [p for p in data["projects"] if p["project"] == pid]
+        data["needs_owner"] = [v for v in data["needs_owner"] if v["project"] == pid]
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(format_status(data))
+    return 0
+
+
+def cmd_tail(args) -> int:
+    try:
+        run = store.load_run(args.run_id)
+    except store.RunNotFound:
+        raise UserError("unknown run: %s" % args.run_id)
+    if run.get("state") not in status.ACTIVE or not run.get("agterm_session"):
+        raise UserError("run %s has no live session (state: %s)" % (run["id"], run.get("state")))
+    sys.stdout.write(agterm.session_tail(run["agterm_session"], args.lines))
+    return 0
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message):
         sys.stderr.write("dw: %s\n" % message.splitlines()[0])
@@ -163,6 +252,14 @@ def build_parser() -> argparse.ArgumentParser:
     cancel = sub.add_parser("cancel", help="cancel a queued or running run")
     cancel.add_argument("run_id")
     cancel.set_defaults(func=cmd_cancel)
+    st = sub.add_parser("status", help="merged status of all projects")
+    st.add_argument("project", nargs="?")
+    st.add_argument("--json", action="store_true")
+    st.set_defaults(func=cmd_status)
+    tail = sub.add_parser("tail", help="show the terminal tail of a live run")
+    tail.add_argument("run_id")
+    tail.add_argument("--lines", type=int, default=40)
+    tail.set_defaults(func=cmd_tail)
     return parser
 
 

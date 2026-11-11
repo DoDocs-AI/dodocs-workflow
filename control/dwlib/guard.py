@@ -717,7 +717,7 @@ def _tokens(words: list) -> list:
 SHELLS = ("sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh")
 _INTERPRETER_RE = re.compile(r"^(python[0-9.]*|pypy[0-9.]*|perl[0-9.]*|ruby[0-9.]*|node|nodejs|php[0-9.]*|"
                              r"deno|bun|lua[0-9.]*|luajit|Rscript|julia|tclsh|wish|pwsh|powershell|"
-                             r"groovy|elixir|erl|escript|swift)$")
+                             r"groovy|elixir|erl|escript|swift|expect)$")
 _KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{", "}",
              "coproc"}
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
@@ -741,7 +741,8 @@ class _Ctx:
         self.full_text = full_text
         self.incomplete = False
         self.git_cache: dict = {}
-        self.memo: dict = {}
+        self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
+        self._plausible: Optional[set] = None
 
     def fork(self) -> "_Ctx":
         other = _Ctx.__new__(_Ctx)
@@ -759,7 +760,7 @@ def _unreadable_match() -> dict:
 
 
 def _dynamic(token: str) -> bool:
-    if token in ("[", "[[", "{", "}"):
+    if token in ("[", "[[", "{", "}", "{}"):
         return False
     return _expand(token) is None or any(ch in token for ch in "*?[{")
 
@@ -831,13 +832,18 @@ WRAPPERS = {"env", "sudo", "doas", "command", "builtin", "nohup", "chronic", "un
             "gtimeout", "xargs", "npx", "bunx", "pnpx", "flock", "setsid", "chroot", "script",
             "parallel", "taskset", "cgexec", "systemd-run", "runuser", "su", "nsenter", "unshare",
             "firejail", "proxychains", "proxychains4", "tsocks", "torsocks", "strace", "ltrace",
-            "dtruss", "valgrind", "entr", "nodemon", "expect"}
+            "dtruss", "valgrind", "entr", "nodemon"}
 _RUNNERS = {"pnpm": ("dlx", "exec"), "yarn": ("dlx", "exec"), "npm": ("exec", "x"),
             "uv": ("run", "tool"), "uvx": (), "poetry": ("run",), "pipenv": ("run",),
             "bundle": ("exec",), "op": ("run",), "rye": ("run",), "pdm": ("run",),
             "hatch": ("run",), "pipx": ("run",)}
 _REMOTE_PARALLEL = re.compile(r"^(-S.*|--sshlogin(=.*)?|--sshloginfile(=.*)?|--slf(=.*)?)$")
 MAX_WRAPPER_TOKENS = 200
+ANALYSIS_BUDGET = 400  # command analyses per tool call; past it the command is unreadable
+MAX_DEPTH = 12
+# Programs that read their commands from standard input, or start a shell, when no command
+# is given in their arguments.
+_SHELL_STARTERS = {"su", "runuser", "nsenter", "unshare", "firejail", "chroot", "sudo", "doas"}
 
 
 def _command_strings(token: str) -> list:
@@ -851,37 +857,102 @@ def _command_strings(token: str) -> list:
     return [c for c in out if re.search(r"\s", c)]
 
 
+def _plausible_word(word: str, ctx: _Ctx) -> bool:
+    if word not in ("[", "[[", "{", "}") and _dynamic(word):
+        return True
+    if ctx._plausible is None:
+        ctx._plausible = sensitive_programs(ctx.rules) | set(AGENT_HARNESSES) | {"agtermctl"}
+    name = os.path.basename(word)
+    return name in ctx._plausible or bool(_INTERPRETER_RE.match(name))
+
+
+def _plausible_command(text: str, ctx: _Ctx) -> bool:
+    """Whether a string may be a command worth classifying: some simple command in it starts
+    with a sensitive program, a wrapper, a shell or an interpreter (or a computed word)."""
+    try:
+        lexed = _Lexer(text).run()
+    except _Unreadable:
+        words = text.split()
+        return bool(words) and _plausible_word(words[0], ctx)
+    if lexed.subs:
+        return True
+    for seg in lexed.segments:
+        try:
+            words = _strip_prefix(_tokens(seg["words"]))
+        except _Unreadable:
+            return True
+        if words and _plausible_word(words[0], ctx):
+            return True
+    return False
+
+
+def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
+    """Classify each plausible command string in full, unreadable results included."""
+    out: list = []
+    for text in texts:
+        if _plausible_command(text, ctx):
+            out += _shell_matches(text, ctx.fork(), depth + 1)
+    return out
+
+
+def _has_command_string(tokens: list) -> bool:
+    return any(t in ("-c", "--command") or t.startswith("--command=") or
+               (t.startswith("-") and not t.startswith("--") and "c" in t[1:]) for t in tokens)
+
+
+def _starts_shell_without_command(name: str, tokens: list) -> bool:
+    """For a program that may start a shell: is no command given in its arguments?"""
+    args = tokens[1:]
+    if name in ("su",):
+        return not _has_command_string(args)
+    if name == "runuser":
+        if _has_command_string(args):
+            return False
+        return not ("-u" in args and len(args) > args.index("-u") + 2)
+    if name in ("sudo", "doas"):
+        for i, t in enumerate(args):
+            if t in ("--shell", "--login") or (t.startswith("-") and not t.startswith("--")
+                                               and any(c in t[1:] for c in "si")):
+                return not any(not a.startswith("-") for a in args[i + 1:])
+        return False
+    operands = [t for t in args if not t.startswith("-")]
+    return len(operands) <= (1 if name == "chroot" else 0)
+
+
 def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int = 1) -> list:
     """Classify a wrapper call without parsing its options."""
     name = os.path.basename(tokens[0])
-    if len(tokens) > MAX_WRAPPER_TOKENS or depth > 12:
+    if len(tokens) > MAX_WRAPPER_TOKENS or depth > MAX_DEPTH:
         return [_unreadable_match()]
     if name == "command" and tokens[1:2] in (["-v"], ["-V"]):
         return []
+    out: list = []
     if name == "parallel":
         if any(_REMOTE_PARALLEL.match(t) for t in tokens[1:]):
             return [{"id": "remote-execution", "category": "deploy",
                      "describe": "run commands on remote hosts: %s" % _short(" ".join(tokens))}]
         if all(t.startswith("-") or t.startswith(":::") for t in tokens[1:]):
             return [_unreadable_match()]  # the commands come from standard input
+    if name in _SHELL_STARTERS:
+        for body in seg["heredocs"]:
+            out += _shell_matches(body, ctx.fork(), depth + 1)
+        if seg["pipe_in"] and not seg["heredocs"]:
+            out.append(_unreadable_match())  # its input comes from another command
+        elif not seg["heredocs"] and _starts_shell_without_command(name, tokens):
+            out.append(_unreadable_match())  # an interactive shell this guard cannot see
     sub = ctx.fork()
     if name in ("env", "sudo", "doas", "su", "runuser", "nsenter", "chroot", "unshare") and \
             any(t in ("-C", "-D", "--chdir", "-w", "--wd") or t.startswith("--chdir=") or
                 (t.startswith("-C") and len(t) > 2) for t in tokens):
         sub.cwd = None  # moved somewhere this guard does not follow
     incomplete = name in ("xargs", "parallel")
-    out: list = []
+    inner_seg = dict(seg, heredocs=[] if name in _SHELL_STARTERS else seg["heredocs"])
     for k in range(start, len(tokens)):
-        suffix = tokens[k:]
-        key = (tuple(suffix), sub.cwd, incomplete, seg["pipe_in"], bool(seg["heredocs"]))
-        if key not in ctx.memo:
-            ctx.memo[key] = []  # guards against re-entry while computing
-            ctx.memo[key] = _analyze(suffix, [], seg, sub.fork(), depth + 1, incomplete)
-        out += ctx.memo[key]
+        if tokens[k].startswith("-") or re.search(r"\s", tokens[k]):
+            continue  # an option or a command string (read below) is not a program name
+        out += _analyze(tokens[k:], [], inner_seg, sub.fork(), depth + 1, incomplete)
     for token in tokens[start:]:
-        for text in _command_strings(token):
-            out += [m for m in _shell_matches(text, sub.fork(), depth + 1)
-                    if m["id"] != "control-unreadable"]
+        out += _string_matches(_command_strings(token), sub, depth)
     return out
 
 
@@ -927,6 +998,9 @@ def _run_time_text(token: str) -> bool:
 def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
              incomplete: bool = False) -> list:
     """Matches for one simple command, given as tokens."""
+    ctx.budget["left"] -= 1
+    if ctx.budget["left"] < 0 or depth > MAX_DEPTH:
+        return [_unreadable_match()]
     ctx.incomplete = incomplete
     matches: list = []
     tokens = original
@@ -950,9 +1024,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                 if _run_time_text(arg):
                     matches.append(_unreadable_match())
                     continue
-                for text in [arg] + _command_strings(arg)[1:]:
-                    matches += [m for m in _shell_matches(text, ctx.fork(), depth + 1)
-                                if m["id"] != "control-unreadable"]
+                matches += _string_matches([arg] + _command_strings(arg)[1:], ctx, depth)
             operands = [a for a in args if not a.startswith(("-", "+"))]
             stdin_program = not operands or operands[0] in ("-", "/dev/stdin") or "-s" in args
             if stdin_program and seg["pipe_in"]:
@@ -977,6 +1049,12 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                 matches += _inline_matches(arg, ctx, depth)
             for body in seg["heredocs"]:
                 matches += _inline_matches(body, ctx, depth)
+            if name == "expect":  # spawn/system/exec run their words as a command
+                for text in rest + list(seg["heredocs"]):
+                    for statement in re.split(r"[\n;]", text):
+                        m = re.match(r"\s*(spawn|system|exec)\s+(.+)", statement)
+                        if m:
+                            matches += _shell_matches(m.group(2), ctx.fork(), depth + 1)
             operands = [a for a in rest if not a.startswith("-")]
             if seg["pipe_in"] and (not operands or operands[0] in ("-", "/dev/stdin")):
                 matches.append(_unreadable_match())
@@ -1320,7 +1398,7 @@ def sensitive_programs(rules: list) -> set:
 
 def _word_dynamic(word: str) -> bool:
     """A word whose value is only known when the command runs, or a pattern."""
-    if word in ("[", "[[", "{", "}"):
+    if word in ("[", "[[", "{", "}", "{}"):
         return False
     return _expand(word) is None or any(ch in word for ch in "*?[{")
 

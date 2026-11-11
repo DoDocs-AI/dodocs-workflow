@@ -145,7 +145,7 @@ class ShellFormTests(GuardClassifyBase):
             ("git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\"", None),
             ("echo \"$(bash <<'EOF'\ngit push origin main\nEOF\n)\"", "merge"),
             ("git -c alias.p=push p origin main", "control"),
-            ("printf '%s\\n' main | xargs -I{} git push origin {}", "control"),
+            ("printf '%s\\n' main | xargs -I{} git push origin {}", "merge"),
             ("git push origin $BRANCH", "control"),
             ("f() { git push origin main; }; f", "merge"),
             ("(cd /x && git push origin main)", "merge"),
@@ -688,6 +688,63 @@ class OverApproximationTests(GuardClassifyBase):
                 self.assertIsNone(run("git push"))
         _git(repo, "config", "push.default", "weird")
         self.assertEqual(run("git push"), "merge")
+
+
+class CandidateAndStdinTests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_candidate_readings_keep_unreadable_results(self):
+        self.check_rows([
+            ("bash -c 'git push origin \"$B\"'", "control"),
+            ("sh -c 'kubectl $VERB -f x'", "control"),
+            ("bash -c 'echo ok; git push origin main'", "merge"),
+            ("bash -c 'echo ok'", None),
+            ("bash script.sh \"don't stop\"", None),
+            ("nohup sh -c 'git push origin \"$B\"'", "control"),
+            ("env X='a b' npm test", None),
+            ("xargs -I{} sh -c 'echo {}'", None),
+        ])
+        self.assertIn("command cannot be read",
+                      self.bash("bash -c 'git push origin \"$B\"'")["describe"])
+
+    def test_stdin_and_heredoc_wrappers(self):
+        self.check_rows([
+            ("sudo -s <<< 'gh pr merge 1'", "merge"),
+            ("sudo -s <<'EOF'\nkubectl apply -f x\nEOF", "deploy"),
+            ("su -c 'kubectl apply -f x'", "deploy"),
+            ("su root -c 'git push origin main'", "merge"),
+            ("su -c 'npm test'", None),
+            ("cat f | su", "control"),
+            ("cat f | sudo -s", "control"),
+            ("su root", "control"),
+            ("sudo -s", "control"),
+            ("sudo -i", "control"),
+            ("sudo -s git push origin main", "merge"),
+            ("sudo npm test", None),
+            ("runuser -u app -- npm test", None),
+            ("runuser -u app -- git push origin main", "merge"),
+            ("echo 'git push origin main' | nsenter -t 1 -m sh", "control"),
+            ("unshare -r <<< 'docker push a/b:1'", "deploy"),
+            ("firejail --noprofile", "control"),
+            ("expect -c 'spawn git push origin main'", "merge"),
+            ("expect -c 'spawn ssh prod; send \"x\\r\"'", "deploy"),
+            ("expect -f script.exp", None),
+            ("expect <<'EOF'\nspawn kubectl apply -f x\nexpect eof\nEOF", "deploy"),
+            ("expect -c 'send \"hi\\r\"'", None),
+            ("echo hi | cat", None),
+        ])
+
+    def test_work_budget_holds_pathological_chains(self):
+        start = time.time()
+        result = self.bash("nohup " * 80 + "git status")
+        self.assertLess(time.time() - start, 1.0)
+        self.assertEqual(self.category(result), "control")
+        self.assertEqual(result["describe"], "command cannot be read")
+        self.assertIsNone(self.bash("sudo -u x timeout 5 nice -n 3 nohup npm test"))
 
 
 class GuardEntryPresentTests(DwTestCase):

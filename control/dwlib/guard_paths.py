@@ -411,6 +411,26 @@ _LESS = _read_only(r"-[^-oO=][^oO=]*",  # not -o, -O, --log-file
                    r"quit-if-one-screen|RAW-CONTROL-CHARS|raw-control-chars|chop-long-lines|"
                    r"LINE-NUMBERS|line-numbers|no-init|ignore-case|IGNORE-CASE")
 _AWK = _read_only(r"-F.*|-v", check=_awk_program_only_prints)  # not -f, -i inplace
+_FILE_TEST_OPS = {"-e", "-f", "-d", "-s", "-r", "-w", "-x", "-L", "-h", "-p", "-S", "-b", "-c",
+                  "-g", "-u", "-k", "-O", "-G", "-N", "!", "-a", "-o", "&&", "||", "(", ")",
+                  "]", "]]"}
+_TEST_OPERATORS = {"=", "==", "!=", "=~", "<", ">"}
+
+
+def _only_file_tests(tokens: list) -> bool:
+    """test, [ and [[ only read when every word is a unary file test, a connective or a plain
+    path: an arithmetic operand (-eq family, -v) can run a substitution in an array subscript,
+    so any other operator, and any operand with `[`, `$` or a backquote, is not exempt."""
+    for word in tokens[1:]:
+        if word in _FILE_TEST_OPS:
+            continue
+        if word.startswith("-") or word in _TEST_OPERATORS or "__dwsub" in word or \
+                any(c in word for c in "[$`"):
+            return False
+    return True
+
+
+_FILE_TEST = _read_only(long=r".*", check=_only_file_tests)
 _READ_ONLY = {
     "echo": _read_only(long=r".*"), "printf": _read_only(long=r".*"),  # their words are text
     "cat": _read_only(long=r"number|number-nonblank|show-all|show-ends|show-tabs|"
@@ -485,8 +505,7 @@ _READ_ONLY = {
     "sed": _read_only(r"-[nEru]+|-[nEru]*e", r"quiet|silent|regexp-extended|posix|debug|"
                                              r"expression(=.*)?", check=_sed_scripts_only_print),
     "awk": _AWK, "gawk": _AWK, "mawk": _AWK, "nawk": _AWK,
-    "test": _read_only(long=r".*"), "[": _read_only(long=r".*"),  # existence checks
-    "[[": _read_only(long=r".*"),
+    "test": _FILE_TEST, "[": _FILE_TEST, "[[": _FILE_TEST,  # existence checks only
     "cmp": _read_only(long=r"silent|quiet|print-bytes|verbose|bytes=.*|ignore-initial=.*"),
     "readlink": _read_only(long=r"canonicalize(-existing|-missing)?|no-newline|zero|verbose|"
                                 r"quiet|silent"),

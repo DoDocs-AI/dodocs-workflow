@@ -1762,6 +1762,17 @@ class FailClosedTests(GuardClassifyBase):
             ("[[ -f a ]] && rm .claude/settings.local.json", "control"),
             ("cmp a b > .claude/settings.json", "control"),
             ("readlink -f .git/config | xargs rm", "control"),
+            ("[ -d .git ] && echo repo", None),
+            ("[[ ! -e .claude/settings.local.json ]]", None),
+        ])
+
+    def test_9b_only_plain_file_tests_are_exempt(self):
+        # arithmetic operands (-eq family, -v) run substitutions inside array subscripts
+        self.check_rows([
+            ("[[ x -eq 'a[$(echo hi > .claude/settings.json)]' ]]", "control"),
+            ("[ -v 'a[$(touch .git/hooks/pre-push)]' ]", "control"),
+            ("[[ -f .claude/settings.json && $(echo x > .git/config) ]]", "control"),
+            ("test .claude/settings.json -nt x", "control"),
         ])
 
 

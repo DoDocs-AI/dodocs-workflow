@@ -486,6 +486,12 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
     return matches
 
 
+# test, [ and [[ evaluate the operands of these as arithmetic, where an array subscript such as
+# 'a[$(cmd)]' runs cmd even inside single quotes.
+_TEST_PROGRAMS = ("test", "[", "[[")
+_ARITHMETIC_TESTS = ("-eq", "-ne", "-lt", "-le", "-gt", "-ge", "-v")
+
+
 def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
     try:
         original = _tokens(seg["words"])
@@ -520,6 +526,9 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             tokens = []
             break
         name = os.path.basename(prog)
+        if name in _TEST_PROGRAMS and any(t in _ARITHMETIC_TESTS for t in tokens[1:]) and \
+                any("$(" in t or "`" in t or "__dwsub" in t for t in tokens[1:]):
+            matches.append(_unreadable_match())  # an arithmetic operand runs its substitutions
         if name in SHELLS:
             # The -c value (or the first operand, the script file) is the code. A run-time
             # value there cannot be read; later operands are data for the script.

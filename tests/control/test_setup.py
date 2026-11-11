@@ -209,6 +209,44 @@ class SetupTests(SetupBase):
         self.assertEqual(self.dw("setup", "--remove", "--yes").returncode, 0)
         self.assertEqual(self.settings.read_text(), json.dumps({"model": "x"}))
 
+    def test_setup_through_a_symlink_records_the_resolved_path(self):
+        link = self.tmp / "local-bin" / "dw"
+        link.parent.mkdir()
+        link.symlink_to(DW)
+        r = subprocess.run([sys.executable, str(link), "setup", "--yes"], env=self.env,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        settings, conf = self.settings.read_text(), self.conf.read_text()
+        self.assertEqual(json.loads(settings)["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+                         "'%s' guard" % os.path.realpath(str(DW)))
+        self.assertIn("on status '%s' hook status" % os.path.realpath(str(DW)), conf)
+        self.assertNotIn(str(link), settings + conf)
+
+    def test_setup_replaces_a_stale_guard_entry_and_leaves_other_hooks(self):
+        gone = self.tmp / "gone" / "old" / "bin" / "dw"
+        settings = json.loads(json.dumps(ORIGINAL_SETTINGS))
+        settings["hooks"]["PreToolUse"].append({"matcher": "*", "hooks": [
+            {"type": "command", "command": "'%s' guard" % gone, "timeout": 3600}]})
+        self.write_fixtures(settings)
+        r = self.dw("setup", "--yes")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = json.loads(self.settings.read_text())
+        expected = json.loads(json.dumps(settings))
+        expected["hooks"]["PreToolUse"][1]["hooks"][0]["command"] = "'%s' guard" % DW
+        self.assertEqual(after, expected)
+        r = self.dw("setup", "--yes")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nothing to do", r.stdout.lower())
+
+    def test_plan_setup_refreshes_a_block_whose_path_is_gone(self):
+        from dwlib import setup
+        gone = self.tmp / "gone" / "dw"
+        self.write_fixtures(conf="%s\non status '%s' hook status\non session.closed '%s' hook "
+                                 "session-closed\n%s\n" % (MARK_START, gone, gone, MARK_END))
+        self.assertEqual(self.dw("setup", "--yes").returncode, 0)
+        self.assertNotIn(str(gone), self.conf.read_text())
+        self.assertEqual(setup.plan_setup(self.settings, self.conf, str(DW)), [])
+
     def test_symlinked_settings_file_stays_a_symlink(self):
         real = self.tmp / "dotfiles-settings.json"
         real.write_text(json.dumps({"model": "x"}, indent=2) + "\n")
@@ -382,6 +420,12 @@ class DoctorTests(SetupBase):
         self.assertEqual(r.returncode, 1)
         self.assertTrue(self.line(r.stdout, "dw path").startswith("FAIL"))
         self.assertIn(str(gone), self.line(r.stdout, "dw path"))
+        self.assertIn("run `dw setup` again", self.line(r.stdout, "dw path"))
+        self.assertEqual(self.dw("setup", "--yes").returncode, 0)  # the remedy it names works
+        r = self.dw("doctor")
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertTrue(self.line(r.stdout, "dw path").startswith("OK"))
+        self.assertTrue(self.line(r.stdout, "guard entry").startswith("OK"))
 
     def test_doctor_fails_when_hooks_conf_has_only_one_line(self):
         self.installed()

@@ -2014,14 +2014,20 @@ def deny_pending(run_id: str) -> dict:
 
 def guard_entry_present(settings_path: Path) -> bool:
     """True when a `PreToolUse` hook command in the settings file runs `dw guard`."""
+    return guard_entry_argv(settings_path) is not None
+
+
+def guard_entry_argv(settings_path: Path) -> Optional[list]:
+    """The argv (`[path to dw, "guard"]`) of the first `PreToolUse` hook command in the
+    settings file that runs `dw guard`, or None."""
     try:
         with open(str(settings_path)) as fh:
             data = json.load(fh)
         groups = data["hooks"]["PreToolUse"]
     except (OSError, ValueError, KeyError, TypeError):
-        return False
+        return None
     if not isinstance(groups, list):
-        return False
+        return None
     for group in groups:
         hooks = group.get("hooks") if isinstance(group, dict) else None
         for hook in hooks if isinstance(hooks, list) else []:
@@ -2033,5 +2039,5 @@ def guard_entry_present(settings_path: Path) -> bool:
             except ValueError:
                 continue
             if len(argv) == 2 and os.path.basename(argv[0]) == "dw" and argv[1] == "guard":
-                return True
-    return False
+                return argv
+    return None

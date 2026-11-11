@@ -6,6 +6,9 @@ import os
 import re
 import secrets
 import shlex
+import shutil
+import subprocess
+import tempfile
 import time
 import uuid
 from typing import Optional
@@ -89,12 +92,47 @@ def project_trusted(project_path: str) -> bool:
     return False
 
 
+GUARD_PROBE_TIMEOUT = 10  # seconds
+
+
+def _guard_entry_problem(argv: list) -> Optional[str]:
+    """Run the settings file's guard entry once, without a shell, on a harmless call (a `Read`
+    in a fresh temp directory no project contains) and without `DW_RUN_ID`; a healthy guard
+    allows it silently. Returns what went wrong, or None."""
+    probe_dir = tempfile.mkdtemp(prefix="dw-guard-probe-")
+    try:
+        payload = {"session_id": "dw-preflight", "cwd": probe_dir,
+                   "hook_event_name": "PreToolUse", "tool_name": "Read",
+                   "tool_input": {"file_path": os.path.join(probe_dir, "probe.txt")},
+                   "tool_use_id": "dw-preflight"}
+        env = {k: v for k, v in os.environ.items() if k != "DW_RUN_ID"}
+        try:
+            done = subprocess.run(argv, input=json.dumps(payload), capture_output=True, text=True,
+                                  env=env, cwd=probe_dir, timeout=GUARD_PROBE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return "it did not answer within %d s" % GUARD_PROBE_TIMEOUT
+        except OSError as exc:
+            return "it cannot be started (%s)" % (exc.strerror or exc.__class__.__name__)
+        if done.returncode != 0:
+            return "it exited with status %d" % done.returncode
+        if done.stdout:
+            return "it printed a decision for a harmless call"
+        return None
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+
+
 def _preflight(project: dict, command: str) -> None:
     from . import guard  # guard imports this module
 
     settings = guard.settings_path()
-    if not guard.guard_entry_present(settings):
+    argv = guard.guard_entry_argv(settings)
+    if argv is None:
         raise RunRefused("the approval guard is not installed in %s; run `dw setup` first" % settings)
+    problem = _guard_entry_problem(argv)
+    if problem:
+        raise RunRefused("the approval guard entry in %s does not work: %s; run `dw setup` again"
+                         % (settings, problem))
     harness = project.get("harness")
     if harness != "claude":
         raise RunRefused("project %s uses harness %r; only claude is supported" % (project["id"], harness))

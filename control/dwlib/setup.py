@@ -203,6 +203,43 @@ def _settings_add_apply(path: Path, dw_bin: str) -> list:
     return notes
 
 
+def _executable(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def _stale_guard_hook(hook) -> bool:
+    """Whether a hook object is a guard entry whose program is not an existing executable."""
+    if not _is_guard_hook(hook):
+        return False
+    try:
+        return not _executable(shlex.split(hook["command"])[0])
+    except ValueError:
+        return False
+
+
+def _stale_guard_hooks(data: dict) -> list:
+    pre = _pre_tool_use(data, create=False) or []
+    return [h for g in pre if isinstance(g, dict) and isinstance(g.get("hooks"), list)
+            for h in g["hooks"] if _stale_guard_hook(h)]
+
+
+def _settings_replace_apply(path: Path, dw_bin: str) -> list:
+    """Point every guard entry whose program is gone at `dw_bin`; nothing else changes."""
+    data, text = _load_settings(path)
+    original = json.loads(json.dumps(data))
+    stale = _stale_guard_hooks(data)
+    if not stale:
+        return []
+    for hook in stale:
+        hook["command"] = guard_command(dw_bin)
+    notes = []
+    backup = _backup(path)
+    if backup:
+        notes.append("backup of %s saved to %s" % (path, backup))
+    _write_text(path, _dump_settings(data, text, original))
+    return notes
+
+
 def _settings_remove_apply(path: Path) -> list:
     data, text = _load_settings(path)
     original = json.loads(json.dumps(data))
@@ -341,6 +378,18 @@ def plan_setup(settings_path: Path, hooks_conf_path: Path, dw_bin: str) -> list:
                        + _preview("+", _json_lines({"hooks": {"PreToolUse": ["...", group]}})),
             "apply": lambda: _settings_add_apply(settings_path, dw_bin),
         })
+    else:
+        stale = _stale_guard_hooks(json.loads(json.dumps(data)))
+        if stale:
+            items.append({
+                "file": str(settings_path),
+                "description": "replace the approval guard entry whose program is missing "
+                               "(nothing else changes)",
+                "preview": _style_warning(settings_path, text, data)
+                           + _preview("-", [h["command"] for h in stale])
+                           + _preview("+", [guard_command(dw_bin)]),
+                "apply": lambda: _settings_replace_apply(settings_path, dw_bin),
+            })
     _, lines, span = _conf_state(hooks_conf_path)
     wanted = hook_lines(dw_bin)
     if span is None:
@@ -503,7 +552,7 @@ def doctor_levels() -> list:
 
     dw_paths = _settings_guard_paths(settings) + conf_paths
     if dw_paths:
-        bad = sorted({p for p in dw_paths if not (os.path.isfile(p) and os.access(p, os.X_OK))})
+        bad = sorted({p for p in dw_paths if not _executable(p)})
         if bad:
             add("dw path", FAIL, "missing or not executable: %s; run `dw setup` again" % ", ".join(bad))
         else:

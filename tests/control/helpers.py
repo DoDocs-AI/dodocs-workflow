@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -34,10 +35,14 @@ class DwTestCase(unittest.TestCase):
         self.claude_state = self.tmp / "claude-state.json"
         self.claude_state.write_text(json.dumps({"projects": {}}))
         self.env["DW_CLAUDE_STATE"] = str(self.claude_state)
-        # The guard hook counts as installed through this file, never the real settings.
+        # The guard hook counts as installed through this file, never the real settings. Its
+        # entry runs this checkout's dw under the interpreter running the tests (`dw run` and
+        # `dw resume` execute it once before they launch), never an installed dw.
+        self.dw_wrapper = self.write_dw_script(
+            self.tmp / "bin", "exec %s %s \"$@\"" % (shlex.quote(sys.executable), shlex.quote(str(DW))))
         self.claude_settings = self.tmp / "claude-settings.json"
         self.claude_settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
-            {"type": "command", "command": "'%s' guard" % DW, "timeout": 900}]}]}}))
+            {"type": "command", "command": "'%s' guard" % self.dw_wrapper, "timeout": 900}]}]}}))
         self.env["DW_CLAUDE_SETTINGS"] = str(self.claude_settings)
         # `dw setup` and `dw doctor` never see the real terminal hooks file or tmux sockets.
         self.hooks_conf = self.tmp / "hooks.conf"
@@ -50,6 +55,16 @@ class DwTestCase(unittest.TestCase):
         self.addCleanup(self._restore_environ, saved_environ)
         os.environ.clear()
         os.environ.update(self.env)
+
+    @staticmethod
+    def write_dw_script(directory, body) -> Path:
+        """An executable shell script named `dw` in `directory` running `body`; returns its path."""
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        script = directory / "dw"
+        script.write_text("#!/bin/sh\n%s\n" % body)
+        script.chmod(0o755)
+        return script
 
     @staticmethod
     def _restore_environ(saved) -> None:

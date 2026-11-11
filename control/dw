@@ -270,7 +270,7 @@ def cmd_setup(args) -> int:
         if args.remove:
             plan = setup.plan_remove(settings, conf)
         else:
-            plan = setup.plan_setup(settings, conf, os.path.abspath(__file__))
+            plan = setup.plan_setup(settings, conf, os.path.realpath(__file__))
     except setup.SetupError as exc:
         raise UserError(str(exc))
     if not plan:

@@ -452,6 +452,60 @@ class GuardInstalledTests(GuardHookBase):
         self.assertEqual(self.record(rid)["state"], "interrupted")
 
 
+    def guard_entry(self, program):
+        settings = self.tmp / "entry-settings.json"
+        settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": "'%s' guard" % program, "timeout": 900}]}]}}))
+        return {"DW_CLAUDE_SETTINGS": str(settings)}
+
+    def broken_entries(self):
+        return {"missing": self.tmp / "gone" / "old" / "bin" / "dw",
+                "exits 1": self.write_dw_script(self.tmp / "exits1", "exit 1"),
+                "prints": self.write_dw_script(self.tmp / "prints", "cat >/dev/null; echo '{}'")}
+
+    def test_run_refuses_a_guard_entry_that_does_not_run(self):
+        path = self.add_project("slotme")
+        for name, program in self.broken_entries().items():
+            with self.subTest(entry=name):
+                r = self.dw("run", "slotme", "/scrum-team", "x", env=self.guard_entry(program))
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(len(r.stderr.strip().splitlines()), 1)
+                self.assertIn("dw setup", r.stderr)
+                runs_dir = self.dw_home / "runs"
+                self.assertEqual(list(runs_dir.glob("*.json")) if runs_dir.exists() else [], [])
+        self.assertEqual([c for c in self.agterm_calls() if c[:2] == ["session", "new"]], [])
+
+    def test_resume_refuses_a_guard_entry_that_does_not_run(self):
+        path, rid = self.start_run()
+        from dwlib import runs
+        runs.finish_run(rid, "interrupted", "x")
+        before = self.record(rid)
+        for name, program in self.broken_entries().items():
+            with self.subTest(entry=name):
+                r = self.dw("resume", rid, env=self.guard_entry(program))
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(len(r.stderr.strip().splitlines()), 1)
+                self.assertIn("dw setup", r.stderr)
+                self.assertEqual(self.record(rid), before)
+
+    def test_preflight_runs_the_entry_with_a_harmless_payload_and_no_run_id(self):
+        self.add_project("slotme")
+        seen = self.tmp / "seen"
+        seen.mkdir()
+        probe = self.write_dw_script(self.tmp / "probe", 'cat > %s/stdin; env > %s/env; echo "$1" > %s/argv'
+                                     % (seen, seen, seen))
+        env = self.guard_entry(probe)
+        env["DW_RUN_ID"] = "r-outer"
+        r = self.dw("run", "slotme", "/scrum-team", "x", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = json.loads((seen / "stdin").read_text())
+        self.assertEqual((payload["hook_event_name"], payload["tool_name"]), ("PreToolUse", "Read"))
+        self.assertTrue(payload["tool_input"]["file_path"].startswith(payload["cwd"]))
+        self.assertNotIn(str(self.tmp / "checkouts"), payload["cwd"])
+        self.assertNotIn("DW_RUN_ID=", (seen / "env").read_text())
+        self.assertEqual((seen / "argv").read_text(), "guard\n")
+
+
 class GuardWaitTests(GuardHookBase):
     """The question is opened without blocking and polled together with the run record."""
 

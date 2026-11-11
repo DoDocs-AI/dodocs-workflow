@@ -39,8 +39,14 @@ class DwTestCase(unittest.TestCase):
         self.claude_settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [
             {"type": "command", "command": "'%s' guard" % DW, "timeout": 900}]}]}}))
         self.env["DW_CLAUDE_SETTINGS"] = str(self.claude_settings)
+        # `dw setup` and `dw doctor` never see the real terminal hooks file or tmux sockets.
+        self.hooks_conf = self.tmp / "hooks.conf"
+        self.env["DW_AGTERM_HOOKS_CONF"] = str(self.hooks_conf)
+        self.env["DW_TMUX"] = str(self.tmp / "no-such-tmux")
+        self.env["TMUX_TMPDIR"] = str(self.tmp / "tmux-tmp")
         for var, value in (("DW_HOME", str(self.dw_home)),
-                           ("DW_CLAUDE_SETTINGS", str(self.claude_settings)), ("DW_RUN_ID", None)):
+                           ("DW_CLAUDE_SETTINGS", str(self.claude_settings)),
+                           ("DW_AGTERM_HOOKS_CONF", str(self.hooks_conf)), ("DW_RUN_ID", None)):
             self.addCleanup(self._restore_env, var, os.environ.get(var))
             if value is None:
                 os.environ.pop(var, None)

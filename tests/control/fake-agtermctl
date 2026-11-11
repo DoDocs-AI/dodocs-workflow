@@ -156,6 +156,8 @@ def main(argv):
             return 0
         save_sessions(sessions)
         out({}, opts, "ok")
+    elif cmd == "hooks" and pos[:1] == ["reload"]:
+        out({}, opts, "ok")
     elif cmd == "notify":
         out({}, opts, "ok")
     elif cmd == "ask" and pos[:1] in (["open"], ["result"], ["cancel"]):

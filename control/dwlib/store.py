@@ -5,6 +5,7 @@ import copy
 import fcntl
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -87,6 +88,10 @@ def update_json(path: Path, fn: Callable[[dict], dict], default: dict) -> dict:
             return value
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def slugify(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 def default_registry() -> dict:

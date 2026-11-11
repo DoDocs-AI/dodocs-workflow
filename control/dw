@@ -4,9 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
+from pathlib import Path
 
 _here = os.path.dirname(os.path.realpath(__file__))
 for _cand in (_here, os.path.join(_here, "..", "lib")):
@@ -14,15 +14,14 @@ for _cand in (_here, os.path.join(_here, "..", "lib")):
         sys.path.insert(0, os.path.normpath(_cand))
         break
 
-from dwlib import agterm, events, guard, runs, status, store  # noqa: E402
+from dwlib import agterm, events, guard, runs, setup, status, store  # noqa: E402
 
 
 class UserError(Exception):
     pass
 
 
-def slugify(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+slugify = store.slugify
 
 
 def cmd_project_add(args) -> int:
@@ -253,6 +252,88 @@ def cmd_deny(args) -> int:
     return 0
 
 
+def _confirm(prompt: str) -> bool:
+    """One question to the owner. Anything but a terminal on stdin counts as no."""
+    if not sys.stdin.isatty():
+        return False
+    try:
+        return input(prompt).strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def cmd_setup(args) -> int:
+    settings, conf = setup.claude_settings_path(), setup.hooks_conf_path()
+    try:
+        if args.remove:
+            plan = setup.plan_remove(settings, conf)
+        else:
+            plan = setup.plan_setup(settings, conf, os.path.abspath(__file__))
+    except setup.SetupError as exc:
+        raise UserError(str(exc))
+    if not plan:
+        print("Nothing to do: %s." % ("nothing of dw is installed" if args.remove
+                                      else "already set up"))
+        return 0
+    for item in plan:
+        print("%s: %s" % (item["file"], item["description"]))
+        for line in item["preview"]:
+            print("    " + line)
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("Not a terminal: nothing was changed (use --yes to apply).")
+            return 1
+        if not _confirm("Apply? [y/N] "):
+            print("Nothing was changed.")
+            return 1
+    try:
+        for item in plan:
+            for note in item["apply"]():
+                print(note)
+            print("done: %s" % item["description"])
+    except setup.SetupError as exc:
+        raise UserError(str(exc))
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    failed = False
+    for check, level, detail in setup.doctor_levels():
+        print("%s  %s: %s" % (level, check, detail))
+        failed = failed or level == setup.FAIL
+    return 1 if failed else 0
+
+
+def cmd_project_import_legacy(args) -> int:
+    source = args.source or os.path.expanduser(setup.LEGACY_REGISTRY)
+    if args.group is None and not sys.stdin.isatty():
+        print("Nothing imported: this needs your answers. Run `dw project import-legacy` in a "
+              "terminal to be asked for each project's group, or pass --group NAME to give "
+              "every project the same group.")
+        return 0
+
+    def group_for(entry):
+        if args.group is not None:
+            return args.group
+        try:
+            return input("Group for %s (%s), empty to skip: " % (entry["name"], entry.get("path")))
+        except EOFError:
+            return None
+
+    skipped: list = []
+    try:
+        added = setup.import_legacy(Path(source), group_for, skipped)
+    except setup.SetupError as exc:
+        raise UserError(str(exc))
+    for p in added:
+        print("imported %s into group %s" % (p["id"], p["group"]))
+    for name, reason in skipped:
+        print("skipped %s: %s" % (name, reason))
+    if not added and not skipped:
+        print("No projects in %s." % source)
+    return 0
+
+
 def run_guard() -> int:
     """`dw guard`: the PreToolUse hook. Prints the decision object or nothing; exits 0."""
     try:
@@ -314,6 +395,10 @@ def build_parser() -> argparse.ArgumentParser:
     rm = psub.add_parser("remove")
     rm.add_argument("id")
     rm.set_defaults(func=cmd_project_remove)
+    legacy = psub.add_parser("import-legacy", help="import projects from the old registry")
+    legacy.add_argument("--from", dest="source", metavar="PATH")
+    legacy.add_argument("--group", help="give every imported project this group, without asking")
+    legacy.set_defaults(func=cmd_project_import_legacy)
     run = sub.add_parser("run", help="start a run in an AGTerm session")
     run.add_argument("project")
     run.add_argument("command", nargs=argparse.REMAINDER)
@@ -344,6 +429,12 @@ def build_parser() -> argparse.ArgumentParser:
     deny = sub.add_parser("deny", help="refuse the pending action of a run")
     deny.add_argument("run_id")
     deny.set_defaults(func=cmd_deny)
+    setup_p = sub.add_parser("setup", help="install (or remove) the guard and terminal hooks")
+    setup_p.add_argument("--yes", action="store_true", help="apply without asking")
+    setup_p.add_argument("--remove", action="store_true", help="remove what setup installed")
+    setup_p.set_defaults(func=cmd_setup)
+    doctor = sub.add_parser("doctor", help="check the installation")
+    doctor.set_defaults(func=cmd_doctor)
     return parser
 
 

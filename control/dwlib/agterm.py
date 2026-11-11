@@ -84,6 +84,11 @@ def available() -> bool:
         return False
 
 
+def hooks_reload() -> None:
+    """Ask AGTerm to re-read its hooks file."""
+    _run(["hooks", "reload"], timeout=_timeout(15))
+
+
 def new_session(cwd: str, workspace_name: str, name: str, command: str, context: str) -> str:
     """Start a background session running `command`; returns its session id."""
     proc = _run(["session", "new"], [

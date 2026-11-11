@@ -235,6 +235,15 @@ class _Protected:
             return False
         return any(skel and self.names(skel) for skel in self._skeletons(word, [], ()))
 
+    def words_name(self, words: list) -> bool:
+        """Whether a command whose output is used as a path (in a substitution, or piped to
+        xargs or `while read`) spells a protected path in its words. Only cat, head and tail
+        without options do not count: they give out what is in the file, not its name."""
+        if words[:1] and words[0] in ("cat", "head", "tail") and \
+                not any(_is_option(w) for w in words[1:]):
+            return False
+        return any(self.text_names(w) for w in words[1:])
+
     @staticmethod
     def _file_in(files, tail: list) -> bool:
         """May `tail`, the segments after a protected directory's name, be one of its
@@ -353,9 +362,7 @@ class _Protected:
             for m in _RUN_TIME_PART_RE.finditer(cand):
                 if m.group(1) is not None and int(m.group(1)) < len(bodies or []):
                     words = bodies[int(m.group(1))].split()
-                    if words[:1] and words[0] in _CONTENT_READERS:
-                        continue  # it prints what is in the file, not the file's name
-                    if any(self.text_names(w) for w in words):
+                    if self.words_name(words):
                         return True
         return self.text_hit(token)
 
@@ -479,8 +486,5 @@ _READ_ONLY = {
                                              r"expression(=.*)?", check=_sed_scripts_only_print),
     "awk": _AWK, "gawk": _AWK, "mawk": _AWK, "nawk": _AWK,
 }
-# Of those, the ones that print file contents, not the names they were given.
-_CONTENT_READERS = set(_READ_ONLY) - {"echo", "printf", "ls", "find", "tree", "realpath",
-                                      "basename", "dirname", "stat", "du", "file"}
 def _is_option(word: str) -> bool:
     return word.startswith("-") and len(word) > 1

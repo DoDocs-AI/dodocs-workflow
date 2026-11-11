@@ -1424,7 +1424,7 @@ class ReviewRound5Tests(GuardClassifyBase):
             ("echo x > $(echo out.txt)", None),
             ("echo .claude/settings.json | xargs cat", None),
             ("cat .claude/settings.json | xargs -I{} mkdir -p {}", None),
-            ("jq -r '.dirs[]' .claude/settings.json | xargs touch", None),
+            ("jq -r '.dirs[]' .claude/settings.json | xargs touch", "control"),
             ("git ls-files .claude/settings.json | xargs sed -i '' s/a/b/", "control"),
             ("echo .claude/settings.json | xargs -I{} cp {} /tmp/", None),
             ("ls .claude/agents/*.md | xargs wc -l", None),
@@ -1664,6 +1664,66 @@ class TightenedExemptionTests(GuardClassifyBase):
             ("find . -name .git -prune -o -name config -delete", None),
             ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
         ])
+
+
+class FailClosedTests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_1_find_prune_counts_only_in_its_exact_shapes(self):
+        self.check_rows([
+            ("find . -name .git -type d -prune -o -name config -delete", "control"),
+            ("find . -path ./.git -o -name x -prune -o -name config -delete", "control"),
+            ("find . -name .git -o -type f -prune -o -name pre-push -delete", "control"),
+            ("find . -name config -delete -o -name .git -print -prune", "control"),
+            ("find . \\( -name .git -o -type f \\) -prune -o -name config -delete", "control"),
+            ("find . \\( -name .git -o -name x \\) -print -prune -o -name config -delete",
+             "control"),
+            ("find . -path ./.git -prune -o -name config -delete", None),
+            ("find . -name .git -prune -o -name config -delete", None),
+            ("find . \\( -path ./.git -o -path ./node_modules \\) -prune -o -name config -delete",
+             None),
+            ("find . -path ./.git -prune -o -name '*.md' -exec sed -i '' s/a/b/ {} +", None),
+            ("find . \\( -path ./.git -o -path ./node_modules \\) -prune -o -type f -name '*.py' "
+             "-exec wc -l {} +", None),
+        ])
+
+    def test_2_names_on_stdin_reach_a_writer(self):
+        self.check_rows([
+            ("grep -l x .claude/settings.json | xargs rm", "control"),
+            ("rg -l hooks .claude/settings.json | xargs sed -i '' s/a/b/", "control"),
+            ("jq -r input_filename .claude/settings.json | xargs truncate -s0", "control"),
+            ("ls .git/hooks/pre-push | xargs chmod +x", "control"),
+            ("find .git/hooks -name pre-push | xargs rm", "control"),
+            ("ls .git/hooks/* | grep pre | xargs rm", "control"),
+            ("cat -n .claude/settings.json | xargs touch", "control"),
+            ("echo .git/config | while read f; do cp /tmp/x \"$f\"; done", "control"),
+            ("ls .claude/settings*.json | while read -r f; do sed -i '' s/a/b/ $f; done", "control"),
+            ("echo x > \"$(grep -l hooks .claude/settings.json)\"", "control"),
+            ("cat .claude/settings.json | xargs -I{} mkdir -p {}", None),
+            ("head .git/config | xargs touch", None),
+            ("cat .claude/agents/a.md | head -3", None),
+            ("ls .claude/agents | xargs -n1 echo", None),
+            ("ls .git/hooks/* | xargs wc -l", None),
+            ("echo .git/config | while read f; do cat \"$f\"; done", None),
+            ("ls src | while read f; do cp \"$f\" build/; done", None),
+            ("git commit -m \"$(cat .git/COMMIT_EDITMSG)\"", None),
+        ])
+
+    def test_3_a_loop_list_too_long_to_read(self):
+        self.check_rows([
+            ("for f in w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69 .git/config; do cp /tmp/x $f; done", "control"),
+            ("for f in w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69; do echo x > $f; done", "control"),
+            ("for f in w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69 .git/config; do cat $f; done", None),
+            ("for f in w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69; do echo $f; done", None),
+            ("for f in $(seq 1 200); do echo $f; done", None),
+            ("for f in a b c; do cp /tmp/x out/$f; done", None),
+        ])
+        result = self.bash("for f in w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 w31 w32 w33 w34 w35 w36 w37 w38 w39 w40 w41 w42 w43 w44 w45 w46 w47 w48 w49 w50 w51 w52 w53 w54 w55 w56 w57 w58 w59 w60 w61 w62 w63 w64 w65 w66 w67 w68 w69; do cp /tmp/x $f; done")
+        self.assertEqual(result["describe"], "command cannot be read")
 
 
 class GuardEntryPresentTests(DwTestCase):

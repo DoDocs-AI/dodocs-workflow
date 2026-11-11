@@ -70,7 +70,6 @@ from .guard_paths import (  # noqa: F401
     MAX_WILDCARDS,
     _ANY,
     _AWK,
-    _CONTENT_READERS,
     _DIGEST,
     _DW_HOME_VAR_RE,
     _GIT_ANY,
@@ -199,7 +198,7 @@ class _Ctx:
         self.sub_bodies: list = []  # what the substitutions of the command being read run
         self.marks: tuple = ()  # replace strings of the xargs, parallel or find running this
         self.loop_words: dict = {}  # loop variable -> the words it runs over
-        self.stdin_words: list = []  # words of the command piped into the one being read
+        self.stdin_commands: list = []  # the commands piped into the one being read, as words
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
 
     def fork(self) -> "_Ctx":
@@ -446,14 +445,13 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
     for token in tokens[start:]:
         out += _string_matches(_command_strings(token), sub, depth)
     if incomplete and first_operand is not None and seg["pipe_in"] and \
-            ctx.stdin_words[:1] and ctx.stdin_words[0] not in _CONTENT_READERS and \
-            any(ctx.protected.text_names(w) for w in ctx.stdin_words[1:]):
+            any(ctx.protected.words_name(words) for words in ctx.stdin_commands):
         # The words on standard input spell a protected path: do they land in a write position?
         inner = replaced[first_operand:]
         if not any("__dwsub_input__" in t for t in inner):
             inner = inner + ["__dwsub_input__"]  # no replace string: appended at the end
         if any("__dwsub_input__" in inner[i] for i in _write_positions(inner, sub, False)):
-            out.append(_state_match(" ".join(ctx.stdin_words + ["|"] + tokens)))
+            out.append(_state_match(" ".join(tokens)))
     return out
 
 
@@ -469,12 +467,14 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
     start = ctx.fork()
     before = None
     for seg in lexed.segments:
-        ctx.stdin_words = []
+        # Everything upstream in the same pipeline may put file names on standard input.
+        upstream = list(ctx.stdin_commands) if seg["pipe_in"] else []
         if seg["pipe_in"] and before is not None:
             try:
-                ctx.stdin_words = _strip_prefix(_tokens(before["words"]))
+                upstream.append(_strip_prefix(_tokens(before["words"])))
             except _Unreadable:
                 pass
+        ctx.stdin_commands = upstream
         before = seg
         matches += _segment_matches(seg, ctx, depth)
     for body in lexed.subs:
@@ -751,20 +751,20 @@ def _find_chain_start(tokens: list, action: int, first: int) -> int:
 
 
 def _find_pruned(tokens: list, i: int) -> bool:
-    """Whether the test at `i` belongs to a group that is pruned: -prune follows it, with
-    only alternatives of the same group in between."""
-    j = i + 2
-    while j < len(tokens):
-        t = tokens[j]
-        if t == "-prune":
-            return True
-        if t in _FIND_NAME_TESTS + _FIND_PATH_TESTS + ("-type",):
-            j += 2
-        elif t in _FIND_OR + (")", "-a", "-and"):
-            j += 1
-        else:
-            return False
-    return False
+    """Whether the -name or -path test at `i` is pruned, in one of the exact shapes
+    `TEST PATTERN -prune` and `( TEST PATTERN -o TEST PATTERN ... ) -prune`. In any other
+    shape the -prune is not taken to govern the test."""
+    tests = _FIND_NAME_TESTS + _FIND_PATH_TESTS
+    if tokens[i + 2:i + 3] == ["-prune"]:
+        return True
+    first = i
+    while first >= 3 and tokens[first - 1] in ("-o", "-or") and tokens[first - 3] in tests:
+        first -= 3
+    last = i
+    while tokens[last + 2:last + 3] in (["-o"], ["-or"]) and tokens[last + 3:last + 4] and \
+            tokens[last + 3] in tests:
+        last += 3
+    return tokens[first - 1:first] == ["("] and tokens[last + 2:last + 4] == [")", "-prune"]
 
 
 def _find_write_matches(tokens: list, ctx: _Ctx) -> list:
@@ -991,16 +991,31 @@ def _loop_words(original: list, ctx: _Ctx) -> bool:
         return True
     if words[:1] not in (["for"], ["select"]) or len(words) < 2:
         return False
-    ctx.loop_words[words[1]] = words[3:3 + MAX_LOOP_WORDS] if words[2:3] == ["in"] else []
+    values = words[3:] if words[2:3] == ["in"] else []
+    ctx.loop_words[words[1]] = values if len(values) <= MAX_LOOP_WORDS else None  # None: not read
     return True
 
 
-def _loop_variants(word: str, ctx: _Ctx) -> list:
-    """A word, and the word with each value of a loop variable it uses put in."""
+def _read_words(tokens: list, ctx: _Ctx) -> None:
+    """`... | while read NAME`: the variable stands for what the upstream commands print. When
+    their words spell a protected path, those words are its values."""
+    if tokens[:1] != ["read"]:
+        return
+    named = [w for words in ctx.stdin_commands if ctx.protected.words_name(words) for w in words[1:]]
+    for name in tokens[1:]:
+        if not name.startswith("-") and named:
+            ctx.loop_words[name] = named if len(named) <= MAX_LOOP_WORDS else None
+
+
+def _loop_variants(word: str, ctx: _Ctx) -> Optional[list]:
+    """A word, and the word with each value of a loop variable it uses put in. None when it
+    uses a variable whose list is too long to read."""
     out = [word]
     for name, values in ctx.loop_words.items():
         rx = re.compile(r"\$\{%s\}|\$%s(?![A-Za-z0-9_])" % (re.escape(name), re.escape(name)))
         if rx.search(word):
+            if values is None:
+                return None
             out += [rx.sub(lambda m: value, word) for value in values]
     return out
 
@@ -1033,6 +1048,7 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
     # leading words and options (every suffix of its arguments was classified as a command of
     # its own, with that command's write positions); otherwise see _write_positions.
     head = len(original) - len(tokens)
+    _read_words(tokens, ctx)
     if wrapped:
         own = len(original) - len(_strip_prefix(list(original)))
         checked = [i for i, t in enumerate(original)
@@ -1049,7 +1065,10 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
     if tokens and os.path.basename(tokens[0]) == "rg" and any(re.match(r"--pre(-glob)?(=|$)", t) for t in tokens[1:]):
         out.append(_unreadable_match())  # rg runs the --pre command on every file it reads
     words = [original[i] for i in checked if i != skip] + list(redirects)
-    words = [variant for w in words for variant in _loop_variants(w, ctx)]
+    variants = [_loop_variants(w, ctx) for w in words]
+    if None in variants:  # a write position uses a loop variable whose list was too long to read
+        out.append(_unreadable_match())
+    words = [variant for found in variants for variant in found or ()]
     if any(ctx.protected.token_hit(w, ctx.cwd, ctx.sub_bodies, ctx.marks) for w in words):
         out.append(_state_match(" ".join(original)))
     return out

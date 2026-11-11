@@ -146,11 +146,50 @@ COMMANDS=(
     "web-design"
     "wiki"
     "spec-bootstrap"
+    "control"
 )
 
 for cmd in "${COMMANDS[@]}"; do
     rm -f "$CLAUDE_DIR/commands/$cmd.md"
 done
+
+# Control point: take the guard entry and hooks block out while dw still exists, then
+# remove the program. registry.json, runs/ and dw.log are never touched.
+DW_HOME_DIR="${DW_INSTALL_HOME:-$HOME/.dodocs-workflow}"
+CONTROL_FILES=(
+    "dw"
+    "guard-rules.json"
+    "dwlib/__init__.py"
+    "dwlib/agterm.py"
+    "dwlib/events.py"
+    "dwlib/guard.py"
+    "dwlib/guard_git.py"
+    "dwlib/guard_paths.py"
+    "dwlib/guard_shell.py"
+    "dwlib/paths.py"
+    "dwlib/runs.py"
+    "dwlib/setup.py"
+    "dwlib/status.py"
+    "dwlib/store.py"
+)
+
+if [ -x "$DW_HOME_DIR/bin/dw" ]; then
+    if ! "$DW_HOME_DIR/bin/dw" setup --remove --yes >/dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: 'dw setup --remove' failed; check ~/.claude/settings.json and the terminal hooks file by hand.${NC}"
+    fi
+fi
+for item in "${CONTROL_FILES[@]}"; do
+    case "$item" in
+        dw) rm -f "$DW_HOME_DIR/bin/dw" ;;
+        guard-rules.json) rm -f "$DW_HOME_DIR/guard-rules.default.json" ;;
+        *) rm -f "$DW_HOME_DIR/lib/$item" ;;
+    esac
+done
+rm -rf "$DW_HOME_DIR/lib/dwlib/__pycache__"
+rmdir "$DW_HOME_DIR/lib/dwlib" "$DW_HOME_DIR/lib" "$DW_HOME_DIR/bin" 2>/dev/null || true
+if [ -L "$HOME/.local/bin/dw" ] && [ "$(readlink "$HOME/.local/bin/dw")" = "$DW_HOME_DIR/bin/dw" ]; then
+    rm -f "$HOME/.local/bin/dw"
+fi
 
 rm -f "$CLAUDE_DIR/docker/agent-env.Dockerfile"
 rm -f "$CLAUDE_DIR/docker/agent-entrypoint.sh"
@@ -162,4 +201,5 @@ rm -f "$VERSION_FILE"
 
 echo -e "${GREEN}dodocs-workflow uninstalled.${NC}"
 echo ""
+echo "Note: the control point's registry.json, runs/ and dw.log under $DW_HOME_DIR were kept."
 echo "Note: Project-specific .claude/scrum-team-config.md files were NOT removed."

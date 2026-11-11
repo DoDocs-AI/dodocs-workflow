@@ -2,6 +2,22 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [Unreleased]
+
+feat(control): control point — `/control` and the `dw` command
+
+- `/control` command: one session that starts runs in all registered projects as
+  background AGTerm sessions, reports status, and passes approvals; it never does a
+  project's work.
+- `dw` CLI (`control/`): project registry, runs with limits (1 per project, 3 in total),
+  status, approvals, `dw setup`, `dw doctor`, `dw project import-legacy`.
+- Approval guard: a global Claude Code `PreToolUse` entry, active only where a run is
+  active. It is not a sandbox; see docs/explanation-control-point.md for what it does not
+  protect against.
+- `install.sh` installs `dw` to `~/.dodocs-workflow/` with an absolute python3 (3.9+)
+  shebang and never runs `dw setup`; `uninstall.sh` runs `dw setup --remove --yes` first
+  and keeps `registry.json`, `runs/` and `dw.log`.
+
 ## [v2.0.1] - 2026-09-09
 
 chore: MIT LICENSE + scrum team pipeline diagram

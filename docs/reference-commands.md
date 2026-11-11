@@ -1,7 +1,7 @@
 # Command Reference
 
 Every slash command dodocs-workflow installs, what it takes, and what it writes.
-27 commands for Claude Code; OpenCode ships a 5-command subset (marked **OC** below).
+28 commands for Claude Code; OpenCode ships a 5-command subset (marked **OC** below).
 
 All commands run from your project root and read `.claude/scrum-team-config.md`
 unless noted otherwise. Commands that build features also require `openspec/` in
@@ -21,6 +21,7 @@ the project root (see [Setup and maintenance](#setup-and-maintenance)).
 - [Product and GTM pipelines](#product-and-gtm-pipelines)
 - [Design](#design)
 - [Knowledge and operations](#knowledge-and-operations)
+- [Control point](#control-point)
 - [Data connectors](#data-connectors)
 - [Flags that appear across commands](#flags-that-appear-across-commands)
 
@@ -391,6 +392,45 @@ unblock stalled work.
 
 Writes `docs/supervisor/DASHBOARD.md`. Pairs with `/loop 1h /supervisor` for
 continuous monitoring.
+
+---
+
+## Control point
+
+One session to start runs in all your registered projects and ask how they are going.
+Setup, limits and what the approval guard does not cover are on the
+[control point page](explanation-control-point.md). Claude Code only.
+
+### `/control`
+
+Opens the control session: a thin prompt over the `dw` command. It runs `dw doctor` first,
+starts runs with `dw run`, answers status questions (what needs you, then what is running,
+then what finished), and runs `dw approve` or `dw deny` only on your explicit word. It never
+edits a project. Refusals from `dw run` (project not trusted in Claude Code,
+`/container-team` and `--docker` commands, guard not installed) are relayed as they are.
+
+### `dw` subcommands
+
+`install.sh` puts `dw` at `~/.dodocs-workflow/bin/dw` (linked into `~/.local/bin` when that
+directory exists). State lives in `~/.dodocs-workflow/` (override with `DW_HOME`).
+
+| Subcommand | Effect |
+|---|---|
+| `dw setup [--yes] [--remove]` | Add (or remove) the guard entry in `~/.claude/settings.json` and the two hook lines in AGTerm's `hooks.conf`; shows the change and asks first. Runs cannot start until it has been run |
+| `dw doctor` | Check the installation: guard entry, terminal hooks, AGTerm, registry |
+| `dw project add --name N --path P --group G [--notes T]` | Register a project; `group` is the AGTerm workspace its runs appear in |
+| `dw project list [--json]` | List registered projects |
+| `dw project remove <id>` | Unregister a project |
+| `dw project import-legacy [--from PATH] [--group NAME]` | Import projects from the old `/workspace` registry (asks for each group unless `--group` is given); the old files are not modified |
+| `dw run <project> "<command>"` | Start a run as a background AGTerm session, or queue it when a limit is reached (1 per project, 3 in total) |
+| `dw queue [--json]` | List queued runs |
+| `dw status [project] [--json]` | Merged status: run record, live session state, pipeline progress |
+| `dw tail <run-id> [--lines N]` | Read-only tail of a live run's terminal |
+| `dw approve <run-id>` | Let the run's pending action through once (not for `control` holds) |
+| `dw deny <run-id>` | Refuse the pending action |
+| `dw dismiss <run-id>` | Acknowledge a finished run so it stops asking for attention |
+| `dw resume <run-id>` | Reopen an interrupted run's Claude conversation |
+| `dw cancel <run-id>` | Close a queued or running run's session and mark it cancelled |
 
 ---
 

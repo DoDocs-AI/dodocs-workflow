@@ -306,3 +306,10 @@ A per-harness mapping turns tiers into models, including local ones. Pi has no b
 subagents (optional `pi-subagents` package), so there the pipeline needs that package or
 runs tasks sequentially. An existing Pi `scrum-team` extension on this machine is prior
 material. The registry's `harness` field then selects per project.
+
+**Owner input received during the build (2026-11-11) — not a confirmed plan.** The owner
+is interested in (a) Claude calling Pi (`pi -p --model ...`) as a worker for routine tasks
+on local models (LM Studio), Gemini or other small models, and (b) Pi as a possible main
+harness with Claude as an escalation tool. Proposed order after part 1: a leaner pipeline
+with Pi as the routine-tier worker, then routines, then Pi as the main harness. None of
+this is decided; it is recorded so parts 3 and 4 can take it into account.

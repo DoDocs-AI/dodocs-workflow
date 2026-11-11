@@ -690,7 +690,7 @@ cd dodocs-workflow && bash install-opencode.sh
 
 **What gets installed** (to `~/.claude/` or `~/.opencode/`):
 - 89 agent definitions in `agents/` (Claude Code) / 25 in `agents/` (OpenCode)
-- 27 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
+- 28 slash commands in `commands/` (Claude Code) / 5 in `commands/` (OpenCode)
 - Docker runtime files in `docker/`
 - Config template
 - Status line script with auto-update notifications

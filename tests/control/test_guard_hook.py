@@ -506,6 +506,76 @@ class GuardInstalledTests(GuardHookBase):
         self.assertEqual((seen / "argv").read_text(), "guard\n")
 
 
+class GuardEntryPointTests(GuardHookBase):
+    """`dw guard` fails closed inside a run even when the library cannot be used at all."""
+
+    def broken_copy(self):
+        import shutil
+        from helpers import REPO_ROOT
+        dest = self.tmp / "broken-install"
+        shutil.copytree(str(REPO_ROOT / "control"), str(dest),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        (dest / "dwlib" / "status.py").write_text("this is not python (\n")
+        return dest / "dw"
+
+    def run_copy(self, dw, *args, env=None, stdin=""):
+        run_env = dict(self.env)
+        run_env.update(env or {})
+        return subprocess.run([sys.executable, str(dw), *args], input=stdin, env=run_env,
+                              capture_output=True, text=True)
+
+    def test_import_failure_denies_inside_a_run(self):
+        dw = self.broken_copy()
+        r = self.run_copy(dw, "guard", env={"DW_RUN_ID": "r-x"},
+                          stdin=json.dumps(self.payload(self.tmp, "ls")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual((out["hookEventName"], out["permissionDecision"]), ("PreToolUse", "deny"))
+        self.assertTrue(out["permissionDecisionReason"].startswith("Guard error: "))
+        self.assertEqual(len(r.stdout.strip().splitlines()), 1)
+
+    def test_import_failure_outside_a_run_prints_no_decision(self):
+        dw = self.broken_copy()
+        r = self.run_copy(dw, "guard", stdin=json.dumps(self.payload(self.tmp, "ls")))
+        self.assertNotIn("permissionDecision", r.stdout)
+
+    def test_import_failure_in_dw_hook_exits_zero_silently(self):
+        dw = self.broken_copy()
+        r = self.run_copy(dw, "hook", "status", env={"AGT_SESSION_ID": "s", "AGT_EVENT_STATUS": "active"})
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+    def load_dw_module(self):
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("dw_entry_under_test", str(DW))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        return module
+
+    def last_net(self, run_id):
+        import io
+        import os
+        from unittest import mock
+        module = self.load_dw_module()
+        if run_id:
+            os.environ["DW_RUN_ID"] = run_id
+        out = io.StringIO()
+        with mock.patch.object(module.guard, "run_hook", side_effect=RuntimeError("boom")), \
+                mock.patch.object(module.sys, "stdin", io.StringIO("{}")), \
+                mock.patch.object(module.sys, "stdout", out):
+            self.assertEqual(module.run_guard(), 0)
+        return out.getvalue()
+
+    def test_last_net_denies_inside_a_run(self):
+        out = json.loads(self.last_net("r-x"))["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertEqual(out["permissionDecisionReason"], "Guard error: boom")
+
+    def test_last_net_outside_a_run_prints_nothing(self):
+        self.assertEqual(self.last_net(None), "")
+
+
 class GuardWaitTests(GuardHookBase):
     """The question is opened without blocking and polled together with the run record."""
 

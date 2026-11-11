@@ -14,7 +14,26 @@ for _cand in (_here, os.path.join(_here, "..", "lib")):
         sys.path.insert(0, os.path.normpath(_cand))
         break
 
-from dwlib import agterm, events, guard, runs, setup, status, store  # noqa: E402
+
+def _guard_deny(reason: str) -> dict:
+    """A PreToolUse deny object, built without dwlib so it works when dwlib cannot load."""
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": reason}}
+
+
+def _guard_error_reason(exc: BaseException) -> str:
+    return "Guard error: %s" % ((" ".join(str(exc).split()) or exc.__class__.__name__)[:300])
+
+
+try:
+    from dwlib import agterm, events, guard, runs, setup, status, store  # noqa: E402
+except BaseException as _exc:  # noqa: B902 - a hook must answer even when dwlib is broken
+    if sys.argv[1:2] == ["hook"]:
+        sys.exit(0)  # unattended terminal hook: never fails, never prints
+    if sys.argv[1:] == ["guard"] and os.environ.get("DW_RUN_ID"):
+        sys.stdout.write(json.dumps(_guard_deny(_guard_error_reason(_exc))) + "\n")
+        sys.exit(0)  # inside a run the guard fails closed
+    raise
 
 
 class UserError(Exception):
@@ -342,7 +361,7 @@ def run_guard() -> int:
         decision = guard.run_hook(sys.stdin.read())
     except BaseException as exc:  # noqa: B902 - run_hook does not raise; this is the last net
         events.log_error("guard", exc)
-        decision = None
+        decision = _guard_deny(_guard_error_reason(exc)) if os.environ.get("DW_RUN_ID") else None
     if decision:
         sys.stdout.write(json.dumps(decision) + "\n")
     return 0

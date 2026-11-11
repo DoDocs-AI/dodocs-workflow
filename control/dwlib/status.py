@@ -70,12 +70,14 @@ def _result_note(run_id: str) -> Optional[str]:
 
 def _since(run: dict, now: float) -> Optional[float]:
     state = run.get("state")
-    if state in ENDED:
-        ref = run.get("ended_at")
-    elif state in ACTIVE:
-        ref = run.get("started_at")
-    else:
-        ref = run.get("created_at")
+    ref = run.get("state_changed_at")
+    if ref is None:
+        if state in ENDED:
+            ref = run.get("ended_at")
+        elif state in ACTIVE:
+            ref = run.get("started_at")
+        else:
+            ref = run.get("created_at")
     if ref is None:
         ref = run.get("created_at")
     return max(0.0, now - ref) if ref is not None else None
@@ -144,7 +146,7 @@ def overall_status(now: float) -> dict:
     by_id = {p["id"]: p for p in registry.get("projects", [])}
     needs_owner = []
     for r in sorted(records, key=lambda r: (r.get("created_at") or 0, r["id"])):
-        if r.get("state") in NEEDS_OWNER:
+        if r.get("state") in NEEDS_OWNER and not r.get("acknowledged"):
             project = by_id.get(r.get("project_id")) or {"id": r.get("project_id"), "path": ""}
             needs_owner.append({**_run_view(project, r, sessions, now, stall),
                                 "project": r.get("project_id")})

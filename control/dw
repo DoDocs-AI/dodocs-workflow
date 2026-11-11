@@ -14,7 +14,7 @@ for _cand in (_here, os.path.join(_here, "..", "lib")):
         sys.path.insert(0, os.path.normpath(_cand))
         break
 
-from dwlib import agterm, runs, status, store  # noqa: E402
+from dwlib import agterm, events, runs, status, store  # noqa: E402
 
 
 class UserError(Exception):
@@ -217,6 +217,48 @@ def cmd_tail(args) -> int:
     return 0
 
 
+def cmd_resume(args) -> int:
+    try:
+        run = runs.resume_run(args.run_id)
+    except (runs.RunRefused, runs.RunError) as exc:
+        raise UserError(str(exc))
+    print("%s resumed" % run["id"])
+    return 0
+
+
+def cmd_dismiss(args) -> int:
+    try:
+        run = runs.dismiss_run(args.run_id)
+    except runs.RunError as exc:
+        raise UserError(str(exc))
+    print("%s dismissed" % run["id"])
+    return 0
+
+
+def run_hook(argv) -> int:
+    """`dw hook status|session-closed`: called by the terminal app, unattended.
+
+    Always exits 0 and writes nothing to stdout or stderr; errors go to $DW_HOME/dw.log.
+    """
+    action = argv[0] if argv else ""
+    event = "hook %s" % action
+    try:
+        session_id = os.environ.get("AGT_SESSION_ID", "")
+        if action == "status":
+            status_name = os.environ.get("AGT_EVENT_STATUS", "")
+            event = "hook status %s" % status_name
+            if session_id and status_name:
+                events.on_status(session_id, status_name)
+        elif action == "session-closed":
+            if session_id:
+                events.on_session_closed(session_id)
+        else:
+            raise ValueError("unknown hook action: %r" % action)
+    except BaseException as exc:  # noqa: B902 - a hook must never fail
+        events.log_error(event, exc)
+    return 0
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message):
         sys.stderr.write("dw: %s\n" % message.splitlines()[0])
@@ -260,10 +302,19 @@ def build_parser() -> argparse.ArgumentParser:
     tail.add_argument("run_id")
     tail.add_argument("--lines", type=int, default=40)
     tail.set_defaults(func=cmd_tail)
+    resume = sub.add_parser("resume", help="reopen an interrupted run")
+    resume.add_argument("run_id")
+    resume.set_defaults(func=cmd_resume)
+    dismiss = sub.add_parser("dismiss", help="acknowledge a finished run")
+    dismiss.add_argument("run_id")
+    dismiss.set_defaults(func=cmd_dismiss)
     return parser
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["hook"]:
+        return run_hook(argv[1:])
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)

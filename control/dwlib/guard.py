@@ -715,7 +715,9 @@ def _tokens(words: list) -> list:
 # -- shell analysis ----------------------------------------------------------
 
 SHELLS = ("sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh")
-_INTERPRETER_RE = re.compile(r"^(python[0-9.]*|pypy[0-9.]*|perl|ruby|node|nodejs|php|deno|bun)$")
+_INTERPRETER_RE = re.compile(r"^(python[0-9.]*|pypy[0-9.]*|perl[0-9.]*|ruby[0-9.]*|node|nodejs|php[0-9.]*|"
+                             r"deno|bun|lua[0-9.]*|luajit|Rscript|julia|tclsh|wish|pwsh|powershell|"
+                             r"groovy|elixir|erl|escript|swift)$")
 _KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{", "}",
              "coproc"}
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
@@ -739,6 +741,7 @@ class _Ctx:
         self.full_text = full_text
         self.incomplete = False
         self.git_cache: dict = {}
+        self.memo: dict = {}
 
     def fork(self) -> "_Ctx":
         other = _Ctx.__new__(_Ctx)
@@ -820,194 +823,66 @@ def _skip_options(tokens: list, start: int, value_opts=(), stop_at_positional=Tr
     return i
 
 
-# Option shapes of the wrappers: (flag letters, value letters, long flags, long value options).
-# An option outside these makes the command unreadable.
-_WRAPPER_SPECS = {
-    "env": ("i0v", "uCS", {"--ignore-environment", "--null", "--debug"},
-            {"--unset", "--chdir", "--split-string"}),
-    "sudo": ("AbBEeHiKklnPSsVv", "uUgCDhprtT",
-             {"--preserve-env", "--login", "--shell", "--non-interactive", "--background",
-              "--stdin", "--askpass", "--set-home", "--reset-timestamp", "--remove-timestamp",
-              "--bell", "--preserve-groups"},
-             {"--user", "--group", "--chdir", "--host", "--prompt", "--role", "--type",
-              "--close-from", "--other-user", "--command-timeout"}),
-    "doas": ("ns", "uC", set(), set()),
-    "command": ("pvV", "", set(), set()),
-    "builtin": ("", "", set(), set()),
-    "nohup": ("", "", set(), set()),
-    "chronic": ("ev", "", set(), set()),
-    "unbuffer": ("p", "", set(), set()),
-    "time": ("pvqa", "fo", {"--portability", "--verbose", "--quiet", "--append"},
-             {"--format", "--output"}),
-    "exec": ("cl", "a", set(), set()),
-    "nice": ("", "n", set(), {"--adjustment"}),
-    "ionice": ("t", "cnpPu", {"--ignore"}, {"--class", "--classdata", "--pid", "--pgid", "--uid"}),
-    "caffeinate": ("dimsu", "tw", set(), set()),
-    "stdbuf": ("", "ioe", set(), {"--input", "--output", "--error"}),
-    "watch": ("bcdegptx", "nq", {"--beep", "--color", "--differences", "--errexit", "--chgexit",
-                                 "--precise", "--no-title", "--exec", "--no-wrap"},
-              {"--interval", "--equexit"}),
-    "dotenv": ("p", "efvc", {"--debug", "--override"}, set()),
-    "timeout": ("v", "sk", {"--preserve-status", "--foreground", "--verbose"},
-                {"--signal", "--kill-after"}),
-    "gtimeout": ("v", "sk", {"--preserve-status", "--foreground", "--verbose"},
-                 {"--signal", "--kill-after"}),
-    "xargs": ("0rtpxiel", "InPLdEsa", {"--null", "--no-run-if-empty", "--verbose", "--interactive",
-                                       "--exit", "--open-tty"},
-              {"--max-args", "--max-procs", "--delimiter", "--arg-file", "--replace", "--max-lines",
-               "--eof", "--max-chars", "--process-slot-var"}),
-    "npx": ("yq", "pc", {"--yes", "--no", "--quiet", "--no-install", "--ignore-existing"},
-            {"--package", "--call"}),
-    "flock": ("sxeunoF", "wEc", {"--shared", "--exclusive", "--unlock", "--nonblock", "--nb",
-                                 "--close", "--no-fork", "--verbose"},
-              {"--timeout", "--conflict-exit-code", "--command"}),
-    "setsid": ("cfw", "", {"--ctty", "--fork", "--wait"}, set()),
-    "chroot": ("", "", {"--skip-chdir"}, {"--userspec", "--groups"}),
-    "script": ("adkpqrefw", "FtTIOBocE", {"--append", "--return", "--flush", "--force", "--quiet"},
-               {"--command", "--timing", "--log-in", "--log-out", "--log-io", "--log-timing",
-                "--output-limit", "--echo", "--logging-format"}),
-    "parallel": ("0kqvXmuegtrH", "jSaNnLdIPC", None, {"--jobs", "--sshlogin", "--arg-file",
-                                                      "--delimiter", "--colsep", "--joblog",
-                                                      "--results", "--tmpdir", "--max-procs",
-                                                      "--timeout", "--retries", "--memfree",
-                                                      "--load", "--max-args", "--max-lines"}),
-}
-_WRAPPER_SPECS["bunx"] = _WRAPPER_SPECS["pnpx"] = _WRAPPER_SPECS["npx"]
+# Wrappers run another command given in their arguments. Their options are not parsed:
+# every suffix of the arguments is classified as a command, and so is every argument that
+# holds a command string (see _command_strings).
+WRAPPERS = {"env", "sudo", "doas", "command", "builtin", "nohup", "chronic", "unbuffer", "time",
+            "exec", "nice", "ionice", "caffeinate", "stdbuf", "watch", "dotenv", "timeout",
+            "gtimeout", "xargs", "npx", "bunx", "pnpx", "flock", "setsid", "chroot", "script",
+            "parallel", "taskset", "cgexec", "systemd-run", "runuser", "su", "nsenter", "unshare",
+            "firejail", "proxychains", "proxychains4", "tsocks", "torsocks", "strace", "ltrace",
+            "dtruss", "valgrind", "entr", "nodemon", "expect"}
+_RUNNERS = {"pnpm": ("dlx", "exec"), "yarn": ("dlx", "exec"), "npm": ("exec", "x"),
+            "uv": ("run", "tool"), "uvx": (), "poetry": ("run",), "pipenv": ("run",),
+            "bundle": ("exec",), "op": ("run",), "rye": ("run",), "pdm": ("run",),
+            "hatch": ("run",), "pipx": ("run",)}
+_REMOTE_PARALLEL = re.compile(r"^(-S.*|--sshlogin(=.*)?|--sshloginfile(=.*)?|--slf(=.*)?)$")
+MAX_WRAPPER_TOKENS = 200
 
 
-def _parse_options(tokens: list, start: int, spec: tuple, assignments: bool = False,
-                   numeric: bool = False) -> Optional[tuple]:
-    """(index of the first operand, {option: value}) or None when an option is unknown.
-    Handles clusters (-qc CMD, -cCMD), --name=value and --name value."""
-    flags, values, long_flags, long_values = spec
-    found: dict = {}
-    i = start
-    while i < len(tokens):
-        t = tokens[i]
-        if t == "--":
-            return i + 1, found
-        if t.startswith("--"):
-            name, eq, val = t.partition("=")
-            if name in long_values:
-                if eq:
-                    found[name] = val
-                elif i + 1 < len(tokens):
-                    found[name] = tokens[i + 1]
-                    i += 1
-                else:
-                    return None
-            elif long_flags is None or name in long_flags:
-                found[name] = val if eq else True
-            else:
-                return None
-            i += 1
-            continue
-        if t.startswith("-") and len(t) > 1:
-            if numeric and re.fullmatch(r"-\d+", t):
-                i += 1
-                continue
-            k = 1
-            while k < len(t):
-                ch = t[k]
-                if ch in values:
-                    rest = t[k + 1:]
-                    if rest:
-                        found["-" + ch] = rest
-                    elif i + 1 < len(tokens):
-                        found["-" + ch] = tokens[i + 1]
-                        i += 1
-                    else:
-                        return None
-                    break
-                if ch not in flags:
-                    return None
-                found["-" + ch] = True
-                k += 1
-            i += 1
-            continue
-        if assignments and _ASSIGNMENT_RE.match(t):
-            i += 1
-            continue
-        return i, found
-    return i, found
+def _command_strings(token: str) -> list:
+    """Parts of one argument that may be a command given as a string: the argument, the part
+    after its first "=", and an attached short option's value (-c'cmd', -qccmd)."""
+    out = [token]
+    if "=" in token:
+        out.append(token.split("=", 1)[1])
+    if token.startswith("-") and not token.startswith("--"):
+        out += [token[k:] for k in range(2, min(len(token), 6))]
+    return [c for c in out if re.search(r"\s", c)]
 
 
-def _unwrap(tokens: list, ctx: _Ctx):
-    """Strip one wrapper (env, sudo, nohup, ...). Returns new tokens, ("script", text) for a
-    command given as one string, ("unreadable",) for an option shape this guard does not
-    know, or None when `tokens[0]` is not a wrapper."""
+def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int = 1) -> list:
+    """Classify a wrapper call without parsing its options."""
     name = os.path.basename(tokens[0])
-    if name in _WRAPPER_SPECS:
-        parsed = _parse_options(tokens, 1, _WRAPPER_SPECS[name],
-                                assignments=name in ("env", "sudo", "doas", "dotenv"),
-                                numeric=name == "nice")
-        if parsed is None:
-            return ("unreadable",)
-        i, opts = parsed
-        if name in ("flock", "script") and i + 1 < len(tokens) and tokens[i + 1].startswith("-"):
-            again = _parse_options(tokens, i + 1, _WRAPPER_SPECS[name])  # GNU getopt permutes
-            if again is None:
-                return ("unreadable",)
-            opts.update(again[1])
-            if not isinstance(opts.get("-c") or opts.get("--command"), str):
-                return ("unreadable",)
-        command = opts.get("-c") if name in ("flock", "script") else None
-        command = command or opts.get("--command")
-        if name == "env" and (opts.get("-S") or opts.get("--split-string")):
-            split = opts.get("-S") or opts.get("--split-string")
-            return ("script", " ".join([str(split)] + tokens[i:]))
-        if isinstance(command, str):
-            return ("script", command)
-        chdir = opts.get("-C") if name == "env" else opts.get("-D") if name == "sudo" else None
-        chdir = chdir or opts.get("--chdir")
-        if isinstance(chdir, str):
-            ctx.cwd = _resolve(chdir, ctx.cwd)
-        if name == "command" and (opts.get("-v") or opts.get("-V")):
-            return []
-        if name == "xargs":
-            ctx.incomplete = True
-        if name in ("flock", "chroot", "script", "timeout", "gtimeout"):
-            i += 1  # the lock file, new root, typescript file or duration
-        if name == "parallel":
-            if opts.get("-S") or opts.get("--sshlogin"):
-                return ["ssh"] + tokens[1:]
-            ctx.incomplete = True
-            inner = tokens[i:]
-            for k, t in enumerate(inner):
-                if t.startswith(":::"):
-                    inner = inner[:k]
-                    break
-            return inner if inner else ("unreadable",)
-        return tokens[i:]
-    if name in ("pnpm", "yarn", "npm", "uv", "poetry", "pipenv", "bundle", "op", "rye", "pdm",
-                "hatch") and len(tokens) > 1:
-        runner = {"pnpm": ("dlx", "exec"), "yarn": ("dlx", "exec"), "npm": ("exec", "x"),
-                  "uv": ("run",), "poetry": ("run",), "pipenv": ("run",), "bundle": ("exec",),
-                  "op": ("run",), "rye": ("run",), "pdm": ("run",), "hatch": ("run",)}[name]
-        if tokens[1] in runner:
-            return tokens[_skip_options(tokens, 2, {"--with", "--package", "-p", "--env-file"}):]
-    return None
-
-
-def _shell_script(tokens: list):
-    """For `bash -c SCRIPT`: (SCRIPT, rest); (None, rest) when there is no -c, where rest
-    are the arguments after the shell's options."""
-    i = 1
-    while i < len(tokens):
-        t = tokens[i]
-        if t in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file"):
-            i += 2
-        elif t == "--":
-            return None, tokens[i + 1:]
-        elif len(t) > 1 and t[0] in "-+" and not t.startswith("--"):
-            if t[0] == "-" and "c" in t[1:]:
-                return (tokens[i + 1] if i + 1 < len(tokens) else ""), []
-            i += 1
-        elif t.startswith("--"):
-            i += 1
-        else:
-            break
-    return None, tokens[i:]
+    if len(tokens) > MAX_WRAPPER_TOKENS or depth > 12:
+        return [_unreadable_match()]
+    if name == "command" and tokens[1:2] in (["-v"], ["-V"]):
+        return []
+    if name == "parallel":
+        if any(_REMOTE_PARALLEL.match(t) for t in tokens[1:]):
+            return [{"id": "remote-execution", "category": "deploy",
+                     "describe": "run commands on remote hosts: %s" % _short(" ".join(tokens))}]
+        if all(t.startswith("-") or t.startswith(":::") for t in tokens[1:]):
+            return [_unreadable_match()]  # the commands come from standard input
+    sub = ctx.fork()
+    if name in ("env", "sudo", "doas", "su", "runuser", "nsenter", "chroot", "unshare") and \
+            any(t in ("-C", "-D", "--chdir", "-w", "--wd") or t.startswith("--chdir=") or
+                (t.startswith("-C") and len(t) > 2) for t in tokens):
+        sub.cwd = None  # moved somewhere this guard does not follow
+    incomplete = name in ("xargs", "parallel")
+    out: list = []
+    for k in range(start, len(tokens)):
+        suffix = tokens[k:]
+        key = (tuple(suffix), sub.cwd, incomplete, seg["pipe_in"], bool(seg["heredocs"]))
+        if key not in ctx.memo:
+            ctx.memo[key] = []  # guards against re-entry while computing
+            ctx.memo[key] = _analyze(suffix, [], seg, sub.fork(), depth + 1, incomplete)
+        out += ctx.memo[key]
+    for token in tokens[start:]:
+        for text in _command_strings(token):
+            out += [m for m in _shell_matches(text, sub.fork(), depth + 1)
+                    if m["id"] != "control-unreadable"]
+    return out
 
 
 def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
@@ -1041,78 +916,18 @@ _GIT_ENV_RE = re.compile(
     r"^(GIT_CONFIG(_GLOBAL|_SYSTEM|_COUNT|_PARAMETERS|_NOSYSTEM|_KEY_\w+|_VALUE_\w+)?|GIT_DIR|"
     r"GIT_WORK_TREE|GIT_COMMON_DIR|GIT_SSH|GIT_SSH_COMMAND|GIT_SSH_VARIANT|GIT_EXEC_PATH|"
     r"GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_NAMESPACE|GIT_PROXY_COMMAND|GIT_ASKPASS)=")
-_INTERPRETER_SWITCHES = {
-    "python": ("c", "bBdEhiIOqsSuvVxR", "WX", ""),
-    "pypy": ("c", "bBdEhiIOqsSuvVxR", "WX", ""),
-    "perl": ("eE", "acnpstTuUwWlSXv", "MmIxFCdD", "il0"),
-    "ruby": ("e", "acdlnpsSvwWyU", "rIECxFKT", "i0"),
-    "php": ("r", "aehilnsvwHq", "dfcz", ""),
-}
-_LONG_INLINE = {"node": ("--eval", "--print", "-e", "-p"), "nodejs": ("--eval", "--print", "-e", "-p"),
-                "bun": ("--eval", "--print", "-e", "-p"), "deno": ("eval",)}
+_EXACT_VARIABLE_RE = re.compile(r"\s*\$\{?\w+\}?\s*")
 
 
-def _inline_codes(name: str, rest: list) -> tuple:
-    """(inline code strings, whether inline code was given, whether the switches could not be
-    read) for an interpreter call."""
-    family = re.sub(r"[0-9.]+$", "", name)
-    codes: list = []
-    if family in _LONG_INLINE:
-        names = _LONG_INLINE[family]
-        for i, t in enumerate(rest):
-            head, eq, val = t.partition("=")
-            if eq and head in names:
-                codes.append(val)
-            elif t in names and i + 1 < len(rest):
-                codes.append(rest[i + 1])
-        return codes, bool(codes), False
-    if family not in _INTERPRETER_SWITCHES:
-        return codes, False, False
-    inline, flags, values, attached = _INTERPRETER_SWITCHES[family]
-    i = 0
-    while i < len(rest):
-        t = rest[i]
-        if t == "--" or not t.startswith("-") or t == "-":
-            break
-        if t.startswith("--"):
-            if any(ch in t for ch in inline) and family == "python" and t.startswith("--c"):
-                return codes, True, True
-            i += 1
-            continue
-        k = 1
-        while k < len(t):
-            ch = t[k]
-            if ch in inline:
-                code = t[k + 1:]
-                if not code:
-                    if i + 1 >= len(rest):
-                        return codes, True, True
-                    code = rest[i + 1]
-                    i += 1
-                codes.append(code)
-                if family == "python":
-                    return codes, True, False  # python stops reading switches after -c
-                break
-            if ch in attached:
-                if any(c in t[k + 1:] for c in inline):
-                    return codes, True, True  # e.g. perl -pie: cannot tell code from a suffix
-                break
-            if ch in values:
-                if not t[k + 1:]:
-                    i += 1
-                break
-            if ch not in flags:
-                if any(c in t[k:] for c in inline):
-                    return codes, True, True
-                break
-            k += 1
-        i += 1
-    return codes, bool(codes), False
+def _run_time_text(token: str) -> bool:
+    """An argument whose whole text is only known at run time."""
+    return "__dwsub" in token or bool(_EXACT_VARIABLE_RE.fullmatch(token))
 
 
-def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int) -> list:
+def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
+             incomplete: bool = False) -> list:
     """Matches for one simple command, given as tokens."""
-    ctx.incomplete = False
+    ctx.incomplete = incomplete
     matches: list = []
     tokens = original
     if any(_GIT_ENV_RE.match(t) for t in original):
@@ -1128,44 +943,45 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int) 
             break
         name = os.path.basename(prog)
         if name in SHELLS:
-            script, args = _shell_script(tokens)
-            if script is not None:
-                matches += _shell_matches(script, ctx.fork(), depth + 1)
-            else:
-                stdin_program = not args or args[0] in ("-", "/dev/stdin") or "-s" in tokens
-                if (args and "__dwsub" in args[0]) or (stdin_program and seg["pipe_in"]):
+            # Every argument may be the script (-c, -lc, an attached -c'...'): classify each
+            # as a command. Arguments only known at run time cannot be read.
+            args = tokens[1:]
+            for arg in args:
+                if _run_time_text(arg):
                     matches.append(_unreadable_match())
-                elif stdin_program:
-                    for body in seg["heredocs"]:
-                        matches += _shell_matches(body, ctx.fork(), depth + 1)
+                    continue
+                for text in [arg] + _command_strings(arg)[1:]:
+                    matches += [m for m in _shell_matches(text, ctx.fork(), depth + 1)
+                                if m["id"] != "control-unreadable"]
+            operands = [a for a in args if not a.startswith(("-", "+"))]
+            stdin_program = not operands or operands[0] in ("-", "/dev/stdin") or "-s" in args
+            if stdin_program and seg["pipe_in"]:
+                matches.append(_unreadable_match())
+            for body in seg["heredocs"]:
+                matches += _shell_matches(body, ctx.fork(), depth + 1)
             tokens = []
             break
         if _INTERPRETER_RE.match(name):
-            value = {"-W", "-X", "-I", "-r", "--require", "-M"}
+            # Options are not parsed: every argument and any here-document is scanned as code.
             rest = tokens[1:]
             if name.startswith("python") and "-m" in rest:
                 k = rest.index("-m")
                 if k + 1 < len(rest):
+                    for arg in rest[:k]:
+                        matches += _inline_matches(arg, ctx, depth)
                     tokens = rest[k + 1:]
                     continue
-            codes, inline, unreadable = _inline_codes(name, rest)
-            if unreadable:
+            for arg in rest:
+                if _run_time_text(arg):
+                    matches.append(_unreadable_match())
+                matches += _inline_matches(arg, ctx, depth)
+            for body in seg["heredocs"]:
+                matches += _inline_matches(body, ctx, depth)
+            operands = [a for a in rest if not a.startswith("-")]
+            if seg["pipe_in"] and (not operands or operands[0] in ("-", "/dev/stdin")):
                 matches.append(_unreadable_match())
-            for code in codes:
-                if "__dwsub" in code or re.fullmatch(r"\s*\$\{?\w+\}?\s*", code):
-                    matches.append(_unreadable_match())
-                matches += _inline_matches(code, ctx, depth)
-            positional = _flags_values(rest, value)
-            if not inline:
-                stdin_program = not positional or positional[0] in ("-", "/dev/stdin")
-                if (positional and "__dwsub" in positional[0]) or \
-                        (stdin_program and seg["pipe_in"]):
-                    matches.append(_unreadable_match())
-                elif stdin_program:
-                    for body in seg["heredocs"]:
-                        matches += _inline_matches(body, ctx, depth)
-            if positional and os.path.basename(positional[0]) == "dw":
-                tokens = rest[rest.index(positional[0]):]
+            if operands and os.path.basename(operands[0]) == "dw":
+                tokens = rest[rest.index(operands[0]):]
                 continue
             break
         if name == "osascript":
@@ -1192,17 +1008,15 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int) 
                     target.startswith("/dev/fd") or "://" in target or "$" in target:
                 matches.append(_unreadable_match())
             break
-        unwrapped = _unwrap(tokens, ctx)
-        if unwrapped is None:
-            break
-        if isinstance(unwrapped, tuple):
-            if unwrapped[0] == "unreadable":
-                matches.append(_unreadable_match())
-            else:
-                matches += _shell_matches(unwrapped[1], ctx.fork(), depth + 1)
+        if name in WRAPPERS:
+            matches += _wrapper_matches(tokens, seg, ctx, depth)
             tokens = []
             break
-        tokens = unwrapped
+        if name in _RUNNERS and (not _RUNNERS[name] or tokens[1:2] and tokens[1] in _RUNNERS[name]):
+            matches += _wrapper_matches(tokens, seg, ctx, depth, start=1 if not _RUNNERS[name] else 2)
+            tokens = []
+            break
+        break
     if tokens and os.path.basename(tokens[0]) in ("cd", "pushd"):
         target = next((t for t in tokens[1:] if not t.startswith("-")), None)
         if target is None:
@@ -1339,6 +1153,11 @@ _GIT_ROUTING_KEY_RE = re.compile(
     r"^(alias\..+|remote\..+\.(push|url|pushurl)|remote\.pushdefault|push\..+|"
     r"url\..+\.(insteadof|pushinsteadof)|core\.sshcommand|core\.hookspath|"
     r"branch\..+\.(merge|remote|pushremote))$", re.I)
+# The only keys `git -c` may set without a question; any other key can run commands or
+# change where pushes go.
+_GIT_HARMLESS_KEY_RE = re.compile(
+    r"^(user\.(name|email)|color\.[A-Za-z0-9.-]+|core\.quotepath|advice\.[A-Za-z0-9]+|"
+    r"init\.defaultbranch|core\.autocrlf)$", re.I)
 _GIT_ROUTING_SECTION_RE = re.compile(r"^(alias|remote|push|url|branch)(\..*)?$|^core$", re.I)
 
 
@@ -1393,15 +1212,12 @@ def _git_control_matches(tokens: list, ctx: _Ctx) -> list:
         t = tokens[i]
         if t == "-c" and i + 1 < len(tokens):
             key = tokens[i + 1].split("=", 1)[0]
-            if _GIT_ROUTING_KEY_RE.match(key) or re.match(r"^include(if)?\.", key, re.I) or \
-                    key.lower() in ("core.gitproxy", "core.fsmonitor", "core.pager",
-                                    "credential.helper") or _dynamic(key):
+            if not _GIT_HARMLESS_KEY_RE.match(key):
                 return [_unreadable_match()]
             i += 2
-        elif t in ("-C", "--git-dir", "--work-tree", "--namespace", "--exec-path",
-                   "--config-env"):
-            if t == "--config-env":
-                return [_unreadable_match()]
+        elif t.startswith("--config-env"):
+            return [_unreadable_match()]
+        elif t in ("-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"):
             i += 2
         elif t.startswith("-"):
             i += 1
@@ -1439,6 +1255,11 @@ def _git_control_matches(tokens: list, ctx: _Ctx) -> list:
 def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx) -> list:
     out = []
     skip = None
+    if not tokens:  # a wrapper: its suffixes were classified; spare a read-only dw program
+        for i, t in enumerate(original):
+            if os.path.basename(t) == "dw" and \
+                    any(original[i + 1:i + 1 + len(a)] == a for a in DW_READ_ONLY):
+                skip = i
     if tokens:
         name = os.path.basename(tokens[0])
         if name == "dw":
@@ -1490,7 +1311,7 @@ _ALWAYS_SENSITIVE = {"git", "gh", "ssh", "scp", "rsync", "curl", "wget", "osascr
 
 def sensitive_programs(rules: list) -> set:
     """Programs whose unreadable deciding words make a command `control` (see module doc)."""
-    names = set(_ALWAYS_SENSITIVE) | set(SHELLS) | set(_WRAPPER_SPECS) | SQL_CLIENTS
+    names = set(_ALWAYS_SENSITIVE) | set(SHELLS) | WRAPPERS | set(_RUNNERS) | SQL_CLIENTS
     names |= {"python", "python3", "pypy", "perl", "ruby", "node", "nodejs", "php", "deno", "bun"}
     for rule in rules:
         names |= set(rule.get("program") or ())
@@ -1576,13 +1397,16 @@ def _bash_rule_matches(rule: dict, tokens: list, seg: dict, ctx: _Ctx) -> bool:
 # -- checks used by the rules file -------------------------------------------
 
 
-def _git_call(repo: str, *args) -> tuple:
+def _git_call(repo: str, *args, stderr: Optional[list] = None) -> tuple:
+    """(exit code or None, stdout). Pass a list as `stderr` to receive git's error text."""
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0")
     try:
         proc = subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True,
                               timeout=10, env=env)
     except (OSError, subprocess.SubprocessError):
         return None, ""
+    if stderr is not None:
+        stderr.append(proc.stderr)
     return proc.returncode, proc.stdout.strip()
 
 
@@ -1592,12 +1416,13 @@ def _git_head(repo: Optional[str], ctx: _Ctx) -> tuple:
         return "unknown", None
     key = ("head", repo)
     if key not in ctx.git_cache:
-        code, out = _git_call(repo, "symbolic-ref", "--short", "-q", "HEAD")
+        err: list = []
+        code, out = _git_call(repo, "symbolic-ref", "--short", "-q", "HEAD", stderr=err)
         if code == 0 and out:
             ctx.git_cache[key] = ("branch", out)
         elif code == 1:
             ctx.git_cache[key] = ("detached", None)
-        elif code == 128:
+        elif code == 128 and "not a git repository" in "".join(err).lower():
             ctx.git_cache[key] = ("norepo", None)
         else:
             ctx.git_cache[key] = ("unknown", None)
@@ -1815,7 +1640,8 @@ def _implicit_push_reaches_default(repo: Optional[str], remote: Optional[str], c
                     return True
                 targets |= found
         elif detached:
-            return False  # git refuses a push from a detached HEAD without a refspec
+            mode = (get("push.default") or "simple").lower()
+            return mode not in ("simple", "current", "upstream", "tracking", "nothing")
         else:
             mode = (get("push.default") or "simple").lower()
             if mode in ("current", "simple"):

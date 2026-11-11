@@ -553,9 +553,10 @@ class SecurityReviewTests(GuardClassifyBase):
             ("flock -n /tmp/l git push origin main", "merge"),
             ("script -qc 'npm test' /dev/null", None),
             ("flock -n /tmp/l npm test", None),
-            ("script -Z weird git push origin main", "control"),
-            ("flock --frobnicate /tmp/l npm test", "control"),
-            ("timeout --frobnicate 5 npm test", "control"),
+            ("script -Z weird git push origin main", "merge"),
+            ("flock --frobnicate /tmp/l npm test", None),
+            ("timeout --frobnicate 5 npm test", None),
+            ("timeout --frobnicate 5 git push origin main", "merge"),
             ("nice -n 5 npm test", None),
             ("nice -5 npm test", None),
             ("env -i PATH=/bin npm test", None),
@@ -573,8 +574,9 @@ class SecurityReviewTests(GuardClassifyBase):
             ("python3 -c\"import os; os.system('git push origin main')\"", "merge"),
             ("node --eval=\"require('child_process').execSync('kubectl apply -f x')\"", "deploy"),
             ("node --print=\"require('child_process').execSync('kubectl apply -f x')\"", "deploy"),
-            ("perl -pie 's/a/b/' f", "control"),
-            ("python3 -Zc 'print(1)'", "control"),
+            ("perl -pie 's/a/b/' f", None),
+            ("perl -pie 'system(\"git push origin main\")' f", "merge"),
+            ("python3 -Zc 'print(1)'", None),
             ("perl -ne 'print' f", None),
             ("perl -pi -e 's/a/b/' f", None),
             ("perl -Mstrict -e 'print 1'", None),
@@ -625,6 +627,67 @@ class SecurityReviewTests(GuardClassifyBase):
             ("git log $(git merge-base HEAD main)..HEAD", None),
             ("npm test -- $ARGS", None),
         ])
+
+
+class OverApproximationTests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_findings_examples(self):
+        self.check_rows([
+            ("perl -x -e 'system(\"git push origin main\")'", "merge"),
+            ("ruby -Ke 'system(\"git push origin main\")'", "merge"),
+            ("python --check-hash-based-pycs always -c 'import os; os.system(\"gh pr merge 1\")'",
+             "merge"),
+            ("lua -e 'os.execute(\"git push origin main\")'", "merge"),
+            ("Rscript -e 'system(\"kubectl apply -f x\")'", "deploy"),
+            ("git -c diff.external=x diff", "control"),
+            ("git -c credential.helper=x fetch", "control"),
+            ("git -c core.editor=x commit", "control"),
+            ("git -c core.pager=x log", "control"),
+            ("git --config-env=core.sshCommand=X push origin feature", "control"),
+            ("git -c user.name=x commit -m y", None),
+            ("git -c user.email=a@b -c color.ui=never -c advice.detachedHead=false log", None),
+            ("git -c init.defaultBranch=main init", None),
+            ("parallel --unknown-flag git push origin main ::: a", "merge"),
+            ("nohup ~/.dodocs-workflow/bin/dw status", None),
+            ("nohup ~/.dodocs-workflow/bin/dw approve r-1", "control"),
+            ("parallel --slf hosts.txt uptime", "deploy"),
+            ("parallel --sshloginfile hosts.txt uptime", "deploy"),
+            ("parallel -S host1 uptime", "deploy"),
+            ("parallel", "control"),
+            ("sudo --weird-flag x git push origin main", "merge"),
+            ("env --frob=1 kubectl apply -f x", "deploy"),
+            ("nohup --x docker push a/b:1", "deploy"),
+            ("xargs --frob git push origin main", "merge"),
+            ("bash --rcfile x -o pipefail -c 'git push origin main'", "merge"),
+            ("bash -c'git push origin main'", "merge"),
+            ("python -m pytest -x -q", None),
+            ("perl -pe 's/a/b/' f.txt", None),
+            ("ruby -e 'puts 1'", None),
+            ("xargs -n1 echo", None),
+            ("timeout 5 npm test", None),
+            ("find . -name '*.py' -exec wc -l {} +", None),
+            ("sudo -u deploy npm test", None),
+            ("nice -n 10 make deploy", None),
+            ("bash script.sh \"don't\"", None),
+        ])
+
+    def test_detached_head_push_follows_push_default(self):
+        repo = self.make_repo(branch="main")
+        _git(repo, "checkout", "-q", "--detach")
+        run = lambda c: self.category(self.bash(c, cwd=str(repo), project=str(repo)))
+        _git(repo, "config", "push.default", "matching")
+        self.assertEqual(run("git push"), "merge")
+        for mode in ("simple", "current", "upstream", "nothing"):
+            _git(repo, "config", "push.default", mode)
+            with self.subTest(mode=mode):
+                self.assertIsNone(run("git push"))
+        _git(repo, "config", "push.default", "weird")
+        self.assertEqual(run("git push"), "merge")
 
 
 class GuardEntryPresentTests(DwTestCase):

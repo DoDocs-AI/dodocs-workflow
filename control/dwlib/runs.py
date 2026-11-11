@@ -304,7 +304,7 @@ def dismiss_run(run_id: str) -> dict:
     def dismiss(r):
         if r.get("state") not in FINISHED_STATES:
             raise RunError("run %s is %s, not finished" % (run_id, r.get("state")))
-        return {**r, "acknowledged": True}
+        return {**r, "acknowledged": True, "acknowledged_at": time.time()}
 
     try:
         return store.update_run(run_id, dismiss)
@@ -345,7 +345,10 @@ def resume_run(run_id: str) -> dict:
         def mark(r):
             if r.get("state") != "interrupted":
                 raise RunError("run %s is no longer interrupted" % run_id)
-            return _moved(r, now, state="running", reason=None, agterm_session=sid, ended_at=None)
+            moved = _moved(r, now, state="running", reason=None, agterm_session=sid, ended_at=None)
+            moved.pop("acknowledged", None)
+            moved.pop("acknowledged_at", None)
+            return moved
 
         try:
             return store.update_run(run_id, mark)

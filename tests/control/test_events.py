@@ -440,3 +440,36 @@ class StateChangedAtTests(EventBase):
         data = json.loads(self.dw("status", "--json").stdout)
         view = [v for p in data["projects"] for v in p["active"] if v["id"] == rid][0]
         self.assertAlmostEqual(view["since"], 5000, delta=30)
+
+
+class AcknowledgementTests(EventBase):
+    def needs_owner(self):
+        return [v["id"] for v in json.loads(self.dw("status", "--json").stdout)["needs_owner"]]
+
+    def test_dismissed_run_not_resumed_stays_out(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.closed_event(sid)
+        self.dw("dismiss", rid)
+        self.assertIn("acknowledged_at", self.record(rid))
+        self.assertEqual(self.needs_owner(), [])
+
+    def test_dismiss_resume_interrupt_again_returns_to_needs_owner(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.closed_event(sid)
+        self.dw("dismiss", rid)
+        self.assertEqual(self.dw("resume", rid).returncode, 0)
+        self.assertNotIn("acknowledged", self.record(rid))
+        sid2 = self.record(rid)["agterm_session"]
+        self.closed_event(sid2)
+        self.assertEqual(self.record(rid)["state"], "interrupted")
+        self.assertEqual(self.needs_owner(), [rid])
+
+    def test_stale_acknowledgement_is_ignored_by_status(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.closed_event(sid)
+        rec = self.record(rid)
+        self.set_record(rid, acknowledged=True, acknowledged_at=rec["state_changed_at"] - 10)
+        self.assertEqual(self.needs_owner(), [rid])

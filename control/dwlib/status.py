@@ -89,6 +89,15 @@ def _since(run: dict, now: float) -> Optional[float]:
     return max(0.0, now - ref) if ref is not None else None
 
 
+def _acknowledged(run: dict) -> bool:
+    if run.get("acknowledged") is not True:
+        return False
+    at, changed = run.get("acknowledged_at"), run.get("state_changed_at")
+    if at is None or changed is None:
+        return at is not None or changed is None
+    return at >= changed
+
+
 def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
               stall_minutes: float) -> dict:
     state = run.get("state")
@@ -152,7 +161,7 @@ def overall_status(now: float) -> dict:
     by_id = {p["id"]: p for p in registry.get("projects", [])}
     needs_owner = []
     for r in sorted(records, key=lambda r: (r.get("created_at") or 0, r["id"])):
-        if r.get("state") in NEEDS_OWNER and not r.get("acknowledged"):
+        if r.get("state") in NEEDS_OWNER and not _acknowledged(r):
             project = by_id.get(r.get("project_id")) or {"id": r.get("project_id"), "path": ""}
             needs_owner.append({**_run_view(project, r, sessions, now, stall),
                                 "project": r.get("project_id")})

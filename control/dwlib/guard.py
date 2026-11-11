@@ -23,6 +23,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import posixpath
 import re
 import shlex
 import time
@@ -164,6 +165,7 @@ class _Protected:
         self.note = os.path.realpath(str(paths.result_note_path(run_id))).lower() if run_id else None
         self.markers = [".dodocs-workflow", "agterm/hooks.conf"] + self.dirs + sorted(self.files)
         names = {os.path.basename(d) for d in self.dirs} | {".dodocs-workflow"}
+        self.dir_names = {".git", ".claude", "agterm"} | names
         self.suffix_res = [
             re.compile(r"(^|/)\.claude/settings(\.local)?\.json$", re.I),
             re.compile(r"(^|/)agterm/hooks\.conf$", re.I),
@@ -185,29 +187,41 @@ class _Protected:
             return any(_inside(t, path) for t in list(self.files) + self.dirs)
         return False
 
-    def suffix_hit(self, text: str, bodies: list) -> bool:
-        """For a path whose prefix is only known at run time: does its static suffix name a
-        protected file? ($PWD/.git/config, $X/.claude/settings.json, $(git ...)/config)"""
+    def run_time_path_hit(self, text: str, bodies: list, marks=()) -> bool:
+        """For a path with run-time parts (variables, substitutions, globs, braces, xargs or
+        parallel replace strings): split it into fixed and run-time parts. It is a hit when a
+        run-time part follows a segment naming a protected directory (.git, .claude, agterm,
+        the DW_HOME directory), or when its normalised fixed ending names a protected file."""
+        home = _home()
+        text = text.replace("${HOME}", home).replace("$HOME", home)
+        if text == "~" or text.startswith("~/"):
+            text = home + text[1:]
+        for mark in marks:
+            text = text.replace(mark, "__dwsub_input__")
         last = None
         for last in _RUN_TIME_PART_RE.finditer(text):
             pass
-        if last is None:
+        skeleton = re.sub(r"[*?\[\]{}]", "\0", _RUN_TIME_PART_RE.sub("\0", text))
+        if "\0" not in skeleton:
             return False
-        suffix = text[last.end():]
-        if not suffix:
+        segments = [seg for seg in skeleton.split("/") if seg not in ("", ".")]
+        for i, seg in enumerate(segments):
+            if seg.lower() in self.dir_names and any("\0" in later for later in segments[i + 1:]):
+                return True
+        tail = skeleton[skeleton.rfind("\0") + 1:]
+        if not tail.strip("/"):
             return False
+        ending = posixpath.normpath("/" + tail.lstrip("/"))
+        if _GIT_INTERNAL_RE.search(ending) or any(rx.search(ending) for rx in self.suffix_res):
+            return True
 
         def body(m):
             if m.group(1) is not None and int(m.group(1)) < len(bodies):
                 return "$(" + bodies[int(m.group(1))] + ")"
             return m.group(0)
 
-        prefix = _RUN_TIME_PART_RE.sub(body, text[:last.end()])
-        if _GIT_INTERNAL_RE.search("/" + suffix.lstrip("/")):
-            return True
-        if any(rx.search(suffix) for rx in self.suffix_res):
-            return True
-        return bool(_GIT_DIR_SUFFIX_RE.match(suffix)) and "git" in prefix.lower()
+        prefix = _RUN_TIME_PART_RE.sub(body, text[:last.end()]) if last else text
+        return bool(_GIT_DIR_SUFFIX_RE.match(ending)) and "git" in prefix.lower()
 
     def pattern_hit(self, text: str, cwd: Optional[str]) -> bool:
         """For a path with glob characters, braces or run-time parts: may it name a protected path?"""
@@ -261,7 +275,8 @@ class _Protected:
         return any(m in clean for m in self.markers) or \
             bool(re.search(r"\.claude/settings(\.local)?\.json", clean))
 
-    def token_hit(self, token: str, cwd: Optional[str], bodies: Optional[list] = None) -> bool:
+    def token_hit(self, token: str, cwd: Optional[str], bodies: Optional[list] = None,
+                  marks=()) -> bool:
         candidates = [token]
         if "=" in token:
             candidates.append(token.split("=", 1)[1])
@@ -269,10 +284,11 @@ class _Protected:
             if not cand or len(cand) > 4096:
                 continue
             plain = cand.replace("${HOME}", "").replace("$HOME", "")
-            if any(ch in plain for ch in "*?[{") or _expand(cand) is None:
-                if cand not in ("[", "[[", "{", "}") and self.pattern_hit(cand, cwd):
+            marked = any(mark in cand for mark in marks)
+            if any(ch in plain for ch in "*?[{") or _expand(cand) is None or marked:
+                if self.run_time_path_hit(cand, bodies or [], marks):
                     return True
-                if _expand(cand) is None and self.suffix_hit(cand, bodies or []):
+                if cand not in ("[", "[[", "{", "}") and self.pattern_hit(cand, cwd):
                     return True
                 continue
             resolved = _resolve(cand, cwd)
@@ -355,7 +371,8 @@ _LOADER_LONG = ("--require", "--import", "--loader", "--experimental-loader")
 
 
 def _loader_args(args: list, family: str) -> list:
-    """Values of the options that load code (perl -MMod, ruby -rlib, node -r/--require/...)."""
+    """Values of the options that load code (perl -MMod, ruby -rlib, node -r/--require/...),
+    anywhere on the line: which options take a separate value is not modelled."""
     letters = _LOADER_LETTERS.get(family, "")
     found: list = []
     i = 0
@@ -377,8 +394,6 @@ def _loader_args(args: list, family: str) -> list:
             elif i + 1 < len(args):
                 found.append(args[i + 1])
                 i += 1
-        elif not t.startswith("-"):
-            break  # the script: what follows is its own arguments
         i += 1
     return found
 
@@ -483,6 +498,7 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
                 t = t.replace(mark, "__dwsub_input__")
             replaced.append(t)
     inner_seg = seg
+    sub.marks = tuple(marks)  # replace strings are run-time parts of paths
     first_operand = None
     for k in range(start, len(tokens)):
         if tokens[k].startswith("-") or re.search(r"\s", tokens[k]):
@@ -817,11 +833,13 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx) -
     for i, token in enumerate(original):
         if i == skip:
             continue
-        if ctx.protected.token_hit(token, ctx.cwd, getattr(ctx, "sub_bodies", None)):
+        if ctx.protected.token_hit(token, ctx.cwd, getattr(ctx, "sub_bodies", None),
+                                    getattr(ctx, "marks", ())):
             out.append(_state_match(" ".join(original)))
             return out
     for target in redirects:
-        if ctx.protected.token_hit(target, ctx.cwd, getattr(ctx, "sub_bodies", None)):
+        if ctx.protected.token_hit(target, ctx.cwd, getattr(ctx, "sub_bodies", None),
+                                    getattr(ctx, "marks", ())):
             out.append(_state_match(" ".join(original)))
             return out
     return out

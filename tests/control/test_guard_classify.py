@@ -947,6 +947,65 @@ class ReviewRound2Tests(GuardClassifyBase):
         self.assertIsNone(run("cat .git/HEAD"))
 
 
+class ReviewRound3Tests(GuardClassifyBase):
+    def check_rows(self, rows, cwd="/p", project="/p"):
+        for command, expected in rows:
+            with self.subTest(command=command):
+                result = self.bash(command, cwd=cwd, project=project)
+                self.assertEqual(self.category(result), expected, result)
+
+    def test_b1_placeholders_inside_protected_paths(self):
+        self.check_rows([
+            ("echo a | xargs -I{} cp x {}/.git/config", "control"),
+            ("echo a | xargs -I{} cp x {}/.git/hooks/pre-push", "control"),
+            ("echo a | xargs -I{} tee {}/.git/config", "control"),
+            ("echo a | xargs -I{} cp x .git/hooks/{}", "control"),
+            ("echo a | xargs -I{} cp x .git/{}/pre-push", "control"),
+            ("echo a | xargs -I{} tee .git/hooks/{}", "control"),
+            ("echo a | xargs -I{} cp x .git/{}", "control"),
+            ("echo a | xargs -I % cp x %/.git/config", "control"),
+            ("echo a | xargs -I@ cp x ~/.claude/@", "control"),
+            ("echo a | parallel cp x {}/.claude/settings.json ::: a", "control"),
+        ])
+
+    def test_b2_path_variants_and_every_static_part(self):
+        self.check_rows([
+            ("echo x > $D/.git//config", "control"),
+            ("echo x > $D/.git/./config", "control"),
+            ("echo x > $PWD/x/../.git/config", "control"),
+            ("echo x > $PWD/.git/$X/../config", "control"),
+            ("echo x > $PWD/.git/hooks/$NAME", "control"),
+            ("echo x > $PWD/.claude/$F", "control"),
+            ("echo x > $CFG/agterm/$F", "control"),
+            ("echo x > $H/.dodocs-workflow/$F", "control"),
+            ("cp x .git/hooks/*", "control"),
+            ("echo x > $D/.GIT//CONFIG", "control"),
+        ])
+
+    def test_b3_loader_options_anywhere(self):
+        self.check_rows([
+            ("perl -I lib -M\"$MOD\" x.pl", "control"),
+            ("ruby -I lib -r $LIB x.rb", "control"),
+            ("node app.js -r \"$X\"", "control"),
+            ("node --inspect app.js --require=$X", "control"),
+            ("bun x.ts --import $M", "control"),
+        ])
+
+    def test_must_stay_allowed(self):
+        self.check_rows([
+            ("ls | xargs -I{} cp {} /tmp/", None),
+            ("find . -name '*.py' | xargs -I{} wc -l {}", None),
+            ("echo x > $D/settings.json", None),
+            ("echo x > \"$OUT/result.txt\"", None),
+            ("perl -I lib -MJSON x.pl", None),
+            ("ruby -I lib -r json x.rb", None),
+            ("node --max-old-space-size=4096 app.js", None),
+            ("python3 -m pytest -q", None),
+            ("cat .git/HEAD", None),
+            ("node app.js \"$PORT\"", None),
+        ])
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

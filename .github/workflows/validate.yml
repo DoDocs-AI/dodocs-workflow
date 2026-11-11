@@ -33,3 +33,6 @@ jobs:
 
       - name: Validate OpenSpec integration
         run: bash tests/validate-openspec.sh
+
+      - name: Validate control point
+        run: bash tests/validate-control.sh

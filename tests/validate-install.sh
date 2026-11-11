@@ -78,6 +78,10 @@ trap 'rm -rf "$FAKE_HOME"' EXIT
 # must not create or touch them
 export DW_CLAUDE_SETTINGS="$FAKE_HOME/settings.json"
 export DW_AGTERM_HOOKS_CONF="$FAKE_HOME/hooks.conf"
+# The terminal and tmux binaries are pointed at paths that do not exist, so no step
+# (the uninstall's `dw setup --remove` reloads the terminal hooks) reaches the real ones
+export DW_AGTERMCTL="$FAKE_HOME/no-such-agtermctl"
+export DW_TMUX="$FAKE_HOME/no-such-tmux"
 mkdir -p "$FAKE_HOME/.local/bin"
 
 if HOME="$FAKE_HOME" bash "$INSTALL_SH" >"$FAKE_HOME/install.out" 2>&1; then
@@ -165,7 +169,7 @@ else
 fi
 
 # Minimal PATH, as hooks run
-if [ "$(env -i HOME="$FAKE_HOME" DW_HOME="$DWH" PATH=/usr/bin:/bin "$DWH/bin/dw" project list --json 2>/dev/null)" = "[]" ]; then
+if [ "$(env -i HOME="$FAKE_HOME" DW_HOME="$DWH" DW_AGTERMCTL="$DW_AGTERMCTL" DW_TMUX="$DW_TMUX" PATH=/usr/bin:/bin "$DWH/bin/dw" project list --json 2>/dev/null)" = "[]" ]; then
     pass "installed dw runs with a minimal PATH and 'project list --json' prints []"
 else
     fail "installed dw did not print [] for 'project list --json'"
@@ -201,7 +205,8 @@ echo '{}' > "$DWH/runs/r1.json"
 echo "x" > "$DWH/dw.log"
 echo '{"hooks": {"UserPromptSubmit": []}}' > "$DW_CLAUDE_SETTINGS"
 if env -i HOME="$FAKE_HOME" DW_HOME="$DWH" DW_CLAUDE_SETTINGS="$DW_CLAUDE_SETTINGS" \
-        DW_AGTERM_HOOKS_CONF="$DW_AGTERM_HOOKS_CONF" PATH=/usr/bin:/bin "$DWH/bin/dw" setup --yes >/dev/null 2>&1 \
+        DW_AGTERM_HOOKS_CONF="$DW_AGTERM_HOOKS_CONF" DW_AGTERMCTL="$DW_AGTERMCTL" DW_TMUX="$DW_TMUX" \
+        PATH=/usr/bin:/bin "$DWH/bin/dw" setup --yes >/dev/null 2>&1 \
    && grep -q "guard" "$DW_CLAUDE_SETTINGS"; then
     pass "dw setup (temp files) adds the guard entry, for the uninstall check below"
 else

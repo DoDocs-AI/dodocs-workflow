@@ -179,6 +179,23 @@ class StatusEventTests(EventBase):
                 self.note("r-m", text)
                 self.assertEqual(events.read_result_note("r-m"), expected)
 
+    def test_read_result_note_marker_after_list_quote_or_code_and_before_a_dash(self):
+        from dwlib import events
+        for text, expected in (
+                ("- BLOCKED: x", ("BLOCKED", "x")),
+                ("> BLOCKED: x", ("BLOCKED", "x")),
+                ("`BLOCKED`: x", ("BLOCKED", "x")),
+                ("BLOCKED — need x", ("BLOCKED", "need x")),
+                ("BLOCKED – need x\nmore", ("BLOCKED", "need x\nmore")),
+                ("BLOCKED  \nwhy", ("BLOCKED", "why")),
+                ("BLOCKED\r\nwhy", ("BLOCKED", "why")),
+                ("Failed to reproduce, all good", ("DONE", "Failed to reproduce, all good")),
+                ("Done with the refactor\nok", ("DONE", "Done with the refactor\nok")),
+                ("Blocked waiting\nx", ("DONE", "Blocked waiting\nx"))):
+            with self.subTest(text=text):
+                self.note("r-m", text)
+                self.assertEqual(events.read_result_note("r-m"), expected)
+
     def test_completed_with_marker_and_text_on_one_line_stays_blocked(self):
         self.add_project("alpha")
         rid, sid = self.start("alpha")

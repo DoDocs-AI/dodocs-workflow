@@ -10,10 +10,12 @@ from . import agterm, paths, runs, store
 
 MARKERS = ("DONE", "BLOCKED", "FAILED")
 REASON_CHARS = 200
-# The marker: the first word of the note's first line, after any leading `#`, `*` or spaces and
-# before an optional `:`, `-` or `.` (Markdown emphasis around it is ignored). Group 2 is the rest
-# of the line, which joins the body.
-_MARKER_LINE_RE = re.compile(r"^[#*\s]*([A-Za-z]+)\**(?:\s*[:.\-]\**\s*|\s+|$)(.*)$")
+# The marker: the first word of the note's first line, after any leading `#`, `*`, `-`, `>`, backquote
+# or spaces, followed by the end of the line or by `:`, `-`, an em or en dash, or `.` (closing
+# emphasis or a closing backquote may come first). A marker word followed by more prose is not a
+# marker. Group 2 is the rest of the line, which joins the body.
+_MARKER_LINE_RE = re.compile(
+    r"^[#*>`\s-]*([A-Za-z]+)[*_`]*(?:\s*[:.\-\u2014\u2013][*_`]*\s*(.*)|\s*)$")
 
 
 def log_error(event: str, exc: BaseException) -> None:
@@ -41,7 +43,7 @@ def read_result_note(run_id: str) -> Optional[tuple]:
     first, _, rest = text.strip().partition("\n")
     m = _MARKER_LINE_RE.match(first)
     if m and m.group(1).upper() in MARKERS:
-        return m.group(1).upper(), (m.group(2) + "\n" + rest).strip()
+        return m.group(1).upper(), ((m.group(2) or "") + "\n" + rest).strip()
     return "DONE", text.strip()
 
 

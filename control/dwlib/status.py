@@ -59,10 +59,16 @@ def find_progress(project_path: str, run: dict) -> Optional[str]:
 
 
 def _result_note(run_id: str) -> Optional[str]:
-    try:
-        with open(str(paths.result_note_path(run_id)), encoding="utf-8", errors="replace") as fh:
-            lines = fh.read().splitlines()
-    except OSError:
+    candidates = [paths.result_note_path(run_id)] + paths.blocked_note_paths(run_id)
+    lines = None
+    for candidate in candidates:
+        try:
+            with open(str(candidate), encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+            break
+        except OSError:
+            continue
+    if lines is None:
         return None
     text = "\n".join(lines[:RESULT_LINES]).rstrip()
     return text or None

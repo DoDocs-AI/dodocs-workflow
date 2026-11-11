@@ -93,6 +93,50 @@ class StatusEventTests(EventBase):
         self.status_event(sid, "completed")  # next turn end: no second notification
         self.assertEqual(len(self.notify_calls()), 1)
 
+    def test_blocked_note_is_handled_once(self):
+        from dwlib import paths
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.note(rid, "BLOCKED\nneed the API key\n")
+        self.status_event(sid, "completed")
+        self.assertEqual(self.record(rid)["state"], "blocked")
+        self.assertFalse(paths.result_note_path(rid).exists())
+        moved = list(paths.runs_dir().glob(rid + ".result.blocked-*.md"))
+        self.assertEqual(len(moved), 1)
+        self.assertIn("need the API key", moved[0].read_text())
+        self.status_event(sid, "active")
+        self.assertEqual(self.record(rid)["state"], "running")
+        self.status_event(sid, "completed")  # no new note: nothing changes
+        self.assertEqual(self.record(rid)["state"], "running")
+        self.note(rid, "DONE\nfinished after all\n")
+        self.status_event(sid, "completed")
+        self.assertEqual(self.record(rid)["state"], "done")
+        self.assertTrue(paths.result_note_path(rid).exists())
+
+    def test_blocked_note_at_session_close_is_moved_aside(self):
+        from dwlib import paths
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.note(rid, "BLOCKED\nwhy\n")
+        self.closed_event(sid)
+        self.assertEqual(self.record(rid)["state"], "interrupted")
+        self.assertFalse(paths.result_note_path(rid).exists())
+        self.assertEqual(len(list(paths.runs_dir().glob(rid + ".result.blocked-*.md"))), 1)
+
+    def test_failed_move_is_logged_and_state_change_stands(self):
+        from dwlib import paths
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.note(rid, "BLOCKED\nwhy\n")
+        # a directory squatting on every candidate target name makes the move fail
+        import time
+        now = int(time.time())
+        for t in range(now - 1, now + 3):
+            (paths.runs_dir() / ("%s.result.blocked-%d.md" % (rid, t))).mkdir()
+        r = self.status_event(sid, "completed")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        self.assertEqual(self.record(rid)["state"], "blocked")
+
     def test_note_without_marker_counts_as_done(self):
         self.add_project("alpha")
         rid, sid = self.start("alpha")

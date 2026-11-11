@@ -305,3 +305,21 @@ class TailTests(StatusBase):
         self.assertEqual(call[call.index("--lines") + 1], "40")
         r = self.dw("tail", "r-nope")
         self.assertEqual(r.returncode, 2)
+
+
+class BlockedNoteStatusTests(StatusBase):
+    def test_blocked_run_shows_moved_aside_note(self):
+        from dwlib import paths
+        self.add_project("alpha")
+        rid, sid = self.live_run("alpha")
+        self.dw("hook", "status", env={"AGT_SESSION_ID": sid, "AGT_EVENT_STATUS": "blocked"})
+        old = paths.runs_dir() / (rid + ".result.blocked-100.md")
+        new = paths.runs_dir() / (rid + ".result.blocked-200.md")
+        old.write_text("BLOCKED\nold question\n")
+        new.write_text("BLOCKED\nneed the API key\n")
+        view = self.find_view(self.status_json(), rid)
+        self.assertEqual(view["state"], "blocked")
+        self.assertIn("need the API key", view["result"])
+        self.assertNotIn("old question", view["result"])
+        paths.result_note_path(rid).write_text("DONE\ncurrent\n")
+        self.assertIn("current", self.find_view(self.status_json(), rid)["result"])

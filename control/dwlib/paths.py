@@ -29,3 +29,13 @@ def result_note_path(run_id: str) -> Path:
 
 def prompt_path(run_id: str) -> Path:
     return runs_dir() / (run_id + ".prompt")
+
+
+def blocked_note_paths(run_id: str) -> list:
+    """Moved-aside BLOCKED notes of a run, newest first."""
+    found = []
+    for p in runs_dir().glob(run_id + ".result.blocked-*.md"):
+        stamp = p.name[len(run_id) + len(".result.blocked-"):-len(".md")]
+        if stamp.isdigit():
+            found.append((int(stamp), p))
+    return [p for _, p in sorted(found, reverse=True)]

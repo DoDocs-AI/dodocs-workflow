@@ -1,6 +1,7 @@
 """Run state changes driven by AGTerm events (called from `dw hook ...`)."""
 from __future__ import annotations
 
+import os
 import time
 from typing import Optional
 
@@ -37,6 +38,23 @@ def read_result_note(run_id: str) -> Optional[tuple]:
     if marker in MARKERS:
         return marker, rest.strip()
     return "DONE", text.strip()
+
+
+def _set_aside(run_id: str, event: str) -> None:
+    """Move a handled BLOCKED note out of the way so it is acted on only once."""
+    try:
+        source = paths.result_note_path(run_id)
+        stamp = int(time.time())
+        while True:
+            target = paths.runs_dir() / ("%s.result.blocked-%d.md" % (run_id, stamp))
+            if not target.exists():
+                break
+            stamp += 1
+            if stamp > time.time() + 10:
+                raise OSError("no free name for the moved-aside note")
+        os.rename(str(source), str(target))
+    except Exception as exc:
+        log_error(event + " move note", exc)
 
 
 def _find_active_run(session_id: str) -> Optional[dict]:
@@ -93,7 +111,9 @@ def _finish_from_note(run: dict, note: tuple, session_id: str, event: str) -> No
     run_id = run["id"]
     if marker == "BLOCKED":
         reason = "blocked: " + _first_line(body, "see result note")
-        if _block(run_id, reason):
+        changed = _block(run_id, reason)
+        _set_aside(run_id, event)
+        if changed:
             _notify(event, session_id, "dw: %s needs you" % run_id, reason)
         return
     if marker == "FAILED":
@@ -140,5 +160,7 @@ def on_session_closed(session_id: str) -> None:
             if note is not None:
                 reason = "session closed while blocked: " + _first_line(note[1], "see result note")
             runs.finish_run(run["id"], "interrupted", reason)
+            if note is not None:
+                _set_aside(run["id"], "session closed")
     finally:
         runs.start_eligible()

@@ -124,18 +124,19 @@ class StatusEventTests(EventBase):
         self.assertEqual(len(list(paths.runs_dir().glob(rid + ".result.blocked-*.md"))), 1)
 
     def test_failed_move_is_logged_and_state_change_stands(self):
-        from dwlib import paths
+        from unittest import mock
+        from dwlib import events, paths
         self.add_project("alpha")
         rid, sid = self.start("alpha")
         self.note(rid, "BLOCKED\nwhy\n")
-        # a directory squatting on every candidate target name makes the move fail
-        import time
-        now = int(time.time())
-        for t in range(now - 1, now + 3):
-            (paths.runs_dir() / ("%s.result.blocked-%d.md" % (rid, t))).mkdir()
-        r = self.status_event(sid, "completed")
-        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        with mock.patch.dict(os.environ, {"DW_AGTERMCTL": self.env["DW_AGTERMCTL"]}), \
+                mock.patch.object(events.os, "rename", side_effect=OSError("disk says no")):
+            events.on_status(sid, "completed")  # must not raise
         self.assertEqual(self.record(rid)["state"], "blocked")
+        self.assertTrue(paths.result_note_path(rid).exists())  # the move really failed
+        log = (self.dw_home / "dw.log").read_text()
+        self.assertIn("move note", log)
+        self.assertIn("disk says no", log)
 
     def test_note_without_marker_counts_as_done(self):
         self.add_project("alpha")

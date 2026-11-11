@@ -39,8 +39,11 @@ It is **not**:
    `~/.claude/settings.json` and two lines in AGTerm's `hooks.conf`. It merges and never
    rewrites other entries. **Runs cannot start until this has been run**, and `dw run` and
    `dw resume` test the guard entry once before each launch: an entry whose program is gone
-   or fails refuses the run. Running `dw setup` again repairs such an entry. `dw doctor`
-   checks the result; `dw setup --remove` takes it all out again.
+   or fails, or whose matcher does not cover all tools, refuses the run. Running `dw setup`
+   again repairs an entry whose program is missing or not executable, or whose matcher does
+   not cover all tools, and leaves exactly one guard entry. It does **not** repair an entry
+   whose program exists but fails: fix that one by hand. `dw doctor` checks the result;
+   `dw setup --remove` takes it all out again.
 3. **Register projects.** `dw project add --name <name> --path <path> --group <AGTerm workspace>`, or
    `dw project import-legacy` to import the projects from the old `/workspace` registry
    (it asks for each project's workspace; the old command and its files are left untouched).
@@ -135,9 +138,13 @@ Things that pass although you might expect them to be held.
   (`x=.git; echo x > $x/config`, `cd "$(git rev-parse --git-dir)" && echo x > config`).
 - A substitution that prints a protected name: `echo x > $(echo .git)/config`,
   `echo x > $(basename .git)/config`.
-- A command hidden in a variable that is then used as an arithmetic operand of `test`, `[` or
-  `[[` (a variable holding `a[$(cmd)]` in `[ "$x" -eq 0 ]`) is run by the shell's arithmetic
-  evaluation and is not seen.
+- A subscript that reaches arithmetic evaluation at run time. In `[[ ... ]]` with a numeric
+  operator (`[[ "$x" -eq 0 ]]`) and in any `-v` test (`[ -v "$x" ]`), bash evaluates the
+  operand's value as arithmetic, so a value that arrives at run time (a variable, or the output
+  of a command substitution such as `[[ $(cat staged.txt) -eq 0 ]]`) and contains a subscript
+  like `a[$(cmd)]` runs `cmd` unseen. Plain `[` and `test` with `-eq` and the like do not
+  evaluate arithmetic. The same class: `let 'a[$(cmd)]'`, and arithmetic expansion such as
+  `$((x))` of a variable holding a subscript.
 - Words that are run-time values outside a deciding position, such as the body of
   `curl -d "$DATA"` to a local host.
 - Names produced by an earlier command and piped into a writer are not checked:

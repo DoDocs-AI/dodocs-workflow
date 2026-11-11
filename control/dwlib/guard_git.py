@@ -266,8 +266,9 @@ def _refspec_dst(ref: str, delete: bool) -> str:
         ref = dst or src
     elif ref.startswith(":"):
         ref = ref[1:]
-    if ref.startswith("refs/heads/"):
-        ref = ref[len("refs/heads/"):]
+    for prefix in ("refs/heads/", "heads/"):  # git reads heads/X as the branch X too
+        if ref.startswith(prefix):
+            return ref[len(prefix):]
     return ref
 
 
@@ -297,6 +298,8 @@ def _check_git_push_default_branch(tokens, seg, ctx) -> bool:
                 continue
         if dst.startswith("refs/tags/"):
             continue
+        if dst.startswith("refs/"):
+            return True  # another namespace (refs/for/, refs/remotes/...): cannot be read
         if dst in ("HEAD", "@") or dst == "":
             if _implicit_push_reaches_default(repo, remote, ctx):
                 return True

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import ipaddress
 import json
 import os
 import posixpath
@@ -492,6 +493,19 @@ _TEST_PROGRAMS = ("test", "[", "[[")
 _ARITHMETIC_TESTS = ("-eq", "-ne", "-lt", "-le", "-gt", "-ge", "-v")
 
 
+def _arithmetic_subscript(tokens: list) -> bool:
+    """Whether an operand of an arithmetic test (either side of -eq and the like, the word after
+    -v) holds a subscript with a command in it. A plain substitution there is only a value: its
+    body is classified on its own."""
+    for i in range(1, len(tokens)):
+        if tokens[i] not in _ARITHMETIC_TESTS:
+            continue
+        operands = tokens[i + 1:i + 2] + (tokens[i - 1:i] if tokens[i] != "-v" and i > 1 else [])
+        if any("[" in t and ("$(" in t or "`" in t or "__dwsub" in t) for t in operands):
+            return True
+    return False
+
+
 def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
     try:
         original = _tokens(seg["words"])
@@ -526,8 +540,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             tokens = []
             break
         name = os.path.basename(prog)
-        if name in _TEST_PROGRAMS and any(t in _ARITHMETIC_TESTS for t in tokens[1:]) and \
-                any("$(" in t or "`" in t or "__dwsub" in t for t in tokens[1:]):
+        if name in _TEST_PROGRAMS and _arithmetic_subscript(tokens):
             matches.append(_unreadable_match())  # an arithmetic operand runs its substitutions
         if name in SHELLS:
             # The -c value (or the first operand, the script file) is the code. A run-time
@@ -1214,7 +1227,12 @@ def _is_local_host(host: Optional[str]) -> bool:
     if not host:
         return False
     host = host.strip("[]").lower()
-    return host in _LOCAL_HOSTS or host.startswith("127.") or host.endswith(".localhost")
+    if host in _LOCAL_HOSTS or (host.endswith(".localhost") and host != ".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _url_host(url: str) -> Optional[str]:
@@ -1335,16 +1353,24 @@ def _check_gh_api_write(tokens, seg, ctx) -> bool:
     nonflags = [t for t in tokens[1:] if not t.startswith("-")]
     if nonflags[:1] != ["api"]:
         return False
+    # A field or input option in any spelling, or a method other than GET, makes it a write.
+    # A long option counts under any prefix of its name (an ambiguous prefix fails closed).
     for i, t in enumerate(tokens):
-        opt, eq, val = t.partition("=")
-        if opt in ("-X", "--method"):
-            method = val if eq else (tokens[i + 1] if i + 1 < len(tokens) else "")
-            if method.upper() not in _READ_METHODS:
+        following = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if t.startswith("--") and len(t) > 2:
+            name, eq, val = t.partition("=")
+            if any(o.startswith(name) for o in ("--field", "--raw-field", "--input")):
                 return True
-        elif t.startswith("-X") and len(t) > 2 and t[2:].upper() not in _READ_METHODS:
-            return True
-        if opt in ("-f", "-F", "--field", "--raw-field", "--input"):
-            return True
+            if "--method".startswith(name) and (val if eq else following).upper() != "GET":
+                return True
+        elif t.startswith("-") and not t.startswith("--"):
+            for k, ch in enumerate(t[1:], 1):  # a cluster of short options, as gh reads it
+                if ch in "fF":
+                    return True
+                if ch == "X" and (t[k + 1:] or following).upper() != "GET":
+                    return True
+                if ch in "XHqtp":  # these take a value: the rest of the word is that value
+                    break
     return False
 
 

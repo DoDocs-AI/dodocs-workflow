@@ -1869,3 +1869,21 @@ class GuardEntryPresentTests(DwTestCase):
             with self.subTest(settings=bad):
                 self.assertFalse(guard.guard_entry_present(self.write(bad)))
         self.assertFalse(guard.guard_entry_present(self.tmp / "missing.json"))
+
+    def test_entry_counts_only_in_a_group_that_covers_every_tool(self):
+        from dwlib import guard
+        hook = {"type": "command", "command": "'/x/bin/dw' guard"}
+        for group, present in (({"hooks": [hook]}, True), ({"matcher": "", "hooks": [hook]}, True),
+                               ({"matcher": "*", "hooks": [hook]}, True),
+                               ({"matcher": "Read", "hooks": [hook]}, False),
+                               ({"matcher": "Bash", "hooks": [hook]}, False),
+                               ({"matcher": "Bash|Write", "hooks": [hook]}, False),
+                               ({"matcher": None, "hooks": [hook]}, True),
+                               ({"matcher": 3, "hooks": [hook]}, False)):
+            with self.subTest(group=group):
+                path = self.write({"hooks": {"PreToolUse": [group]}})
+                self.assertEqual(guard.guard_entry_present(path), present)
+                self.assertEqual(guard.guard_entry_narrow(path), not present)
+        path = self.write({"hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [hook]},
+                                                    {"matcher": "*", "hooks": [hook]}]}})
+        self.assertTrue(guard.guard_entry_present(path))

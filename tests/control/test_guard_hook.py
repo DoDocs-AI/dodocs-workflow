@@ -534,6 +534,30 @@ class GuardInstalledTests(GuardHookBase):
                 self.assertIn("dw setup", r.stderr)
                 self.assertEqual(self.record(rid), before)
 
+    def narrow_entry(self, matcher):
+        settings = self.tmp / "narrow-settings.json"
+        settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": matcher, "hooks": [
+            {"type": "command", "command": "'%s' guard" % self.dw_wrapper, "timeout": 900}]}]}}))
+        return {"DW_CLAUDE_SETTINGS": str(settings)}
+
+    def test_run_and_resume_refuse_a_guard_entry_that_does_not_cover_all_tools(self):
+        path, rid = self.start_run()
+        from dwlib import runs
+        runs.finish_run(rid, "interrupted", "x")
+        before = self.record(rid)
+        self.add_project("other")
+        for matcher in ("Read", "Bash"):
+            with self.subTest(matcher=matcher):
+                env = self.narrow_entry(matcher)
+                for args in (("run", "other", "/scrum-team", "x"), ("resume", rid)):
+                    r = self.dw(*args, env=env)
+                    self.assertEqual(r.returncode, 2, r.stdout)
+                    self.assertEqual(len(r.stderr.strip().splitlines()), 1, r.stderr)
+                    self.assertIn("does not cover all tools", r.stderr)
+                    self.assertIn("dw setup", r.stderr)
+                self.assertEqual(self.record(rid), before)
+                self.assertEqual(len(list((self.dw_home / "runs").glob("r-*.json"))), 1)
+
     def test_preflight_runs_the_entry_with_a_harmless_payload_and_no_run_id(self):
         self.add_project("slotme")
         seen = self.tmp / "seen"

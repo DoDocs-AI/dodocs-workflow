@@ -2061,21 +2061,41 @@ def deny_pending(run_id: str) -> dict:
 
 
 def guard_entry_present(settings_path: Path) -> bool:
-    """True when a `PreToolUse` hook command in the settings file runs `dw guard`."""
+    """True when a `PreToolUse` hook command in the settings file runs `dw guard` for every
+    tool (its group's matcher is absent, empty or `*`)."""
     return guard_entry_argv(settings_path) is not None
+
+
+def guard_entry_narrow(settings_path: Path) -> bool:
+    """True when the settings file runs `dw guard` only in groups whose matcher leaves some
+    tools out."""
+    return not guard_entry_present(settings_path) and bool(_guard_entries(settings_path))
+
+
+def covers_all_tools(group: dict) -> bool:
+    """Whether a `PreToolUse` hook group runs for every tool."""
+    return group.get("matcher") in (None, "", "*")
 
 
 def guard_entry_argv(settings_path: Path) -> Optional[list]:
     """The argv (`[path to dw, "guard"]`) of the first `PreToolUse` hook command in the
-    settings file that runs `dw guard`, or None."""
+    settings file that runs `dw guard` for every tool, or None."""
+    return next((argv for group, argv in _guard_entries(settings_path)
+                 if covers_all_tools(group)), None)
+
+
+def _guard_entries(settings_path: Path) -> list:
+    """(group, argv) for every `PreToolUse` hook command in the settings file that runs
+    `dw guard`, whatever its group's matcher."""
     try:
         with open(str(settings_path)) as fh:
             data = json.load(fh)
         groups = data["hooks"]["PreToolUse"]
     except (OSError, ValueError, KeyError, TypeError):
-        return None
+        return []
     if not isinstance(groups, list):
-        return None
+        return []
+    found = []
     for group in groups:
         hooks = group.get("hooks") if isinstance(group, dict) else None
         for hook in hooks if isinstance(hooks, list) else []:
@@ -2087,5 +2107,5 @@ def guard_entry_argv(settings_path: Path) -> Optional[list]:
             except ValueError:
                 continue
             if len(argv) == 2 and os.path.basename(argv[0]) == "dw" and argv[1] == "guard":
-                return argv
-    return None
+                found.append((group, argv))
+    return found

@@ -217,21 +217,52 @@ def _stale_guard_hook(hook) -> bool:
         return False
 
 
-def _stale_guard_hooks(data: dict) -> list:
+def _guard_hook_slots(data: dict) -> list:
+    """(group, hook) for every guard hook in `hooks.PreToolUse`, whatever the group's matcher."""
     pre = _pre_tool_use(data, create=False) or []
-    return [h for g in pre if isinstance(g, dict) and isinstance(g.get("hooks"), list)
-            for h in g["hooks"] if _stale_guard_hook(h)]
+    return [(g, h) for g in pre if isinstance(g, dict) and isinstance(g.get("hooks"), list)
+            for h in g["hooks"] if _is_guard_hook(h)]
 
 
-def _settings_replace_apply(path: Path, dw_bin: str) -> list:
-    """Point every guard entry whose program is gone at `dw_bin`; nothing else changes."""
+def _repair_guard_hooks(data: dict, dw_bin: str) -> list:
+    """Leave exactly one guard entry, covering every tool and running an existing program:
+    keep a healthy one if there is one, else point a covering one whose program is gone at
+    `dw_bin`, else add a new group; every other guard hook is taken out of its group (a group
+    left empty goes too). Other hooks and their groups are never changed. Changes `data` in
+    place and returns preview lines; [] when there is nothing to repair or no guard hook."""
+    slots = _guard_hook_slots(data)
+    if not slots:
+        return []
+    keep = next((h for g, h in slots if guard.covers_all_tools(g) and not _stale_guard_hook(h)),
+                None)
+    lines: list = []
+    if keep is None:
+        keep = next((h for g, h in slots if guard.covers_all_tools(g)), None)
+        if keep is not None:  # a covering entry whose program is gone: rewrite it in place
+            lines += ["- " + keep["command"], "+ " + guard_command(dw_bin)]
+            keep["command"] = guard_command(dw_bin)
+    emptied = []
+    for group, hook in slots:
+        if hook is keep:
+            continue
+        lines.append("- %s (matcher %s)" % (hook["command"], json.dumps(group.get("matcher"))))
+        group["hooks"][:] = [h for h in group["hooks"] if h is not hook]
+        if not group["hooks"]:
+            emptied.append(group)
+    pre = _pre_tool_use(data, create=False)
+    pre[:] = [g for g in pre if not any(g is e for e in emptied)]
+    if keep is None:
+        pre.append(_guard_group(dw_bin))
+        lines.append("+ " + guard_command(dw_bin))
+    return lines
+
+
+def _settings_repair_apply(path: Path, dw_bin: str) -> list:
+    """Apply `_repair_guard_hooks` to the settings file; nothing else changes."""
     data, text = _load_settings(path)
     original = json.loads(json.dumps(data))
-    stale = _stale_guard_hooks(data)
-    if not stale:
+    if not _repair_guard_hooks(data, dw_bin):
         return []
-    for hook in stale:
-        hook["command"] = guard_command(dw_bin)
     notes = []
     backup = _backup(path)
     if backup:
@@ -368,7 +399,7 @@ def plan_setup(settings_path: Path, hooks_conf_path: Path, dw_bin: str) -> list:
     items = []
     data, text = _load_settings(settings_path)
     _pre_tool_use(json.loads(json.dumps(data)), create=True)  # validates the shape
-    if not guard.guard_entry_present(settings_path):
+    if not _guard_hook_slots(json.loads(json.dumps(data))):
         group = _guard_group(dw_bin)
         items.append({
             "file": str(settings_path),
@@ -379,16 +410,15 @@ def plan_setup(settings_path: Path, hooks_conf_path: Path, dw_bin: str) -> list:
             "apply": lambda: _settings_add_apply(settings_path, dw_bin),
         })
     else:
-        stale = _stale_guard_hooks(json.loads(json.dumps(data)))
-        if stale:
+        repair = _repair_guard_hooks(json.loads(json.dumps(data)), dw_bin)
+        if repair:
             items.append({
                 "file": str(settings_path),
-                "description": "replace the approval guard entry whose program is missing "
+                "description": "replace the approval guard entry whose program is missing or "
+                               "whose matcher does not cover all tools, leaving one entry "
                                "(nothing else changes)",
-                "preview": _style_warning(settings_path, text, data)
-                           + _preview("-", [h["command"] for h in stale])
-                           + _preview("+", [guard_command(dw_bin)]),
-                "apply": lambda: _settings_replace_apply(settings_path, dw_bin),
+                "preview": _style_warning(settings_path, text, data) + repair,
+                "apply": lambda: _settings_repair_apply(settings_path, dw_bin),
             })
     _, lines, span = _conf_state(hooks_conf_path)
     wanted = hook_lines(dw_bin)
@@ -544,6 +574,9 @@ def doctor_levels() -> list:
 
     if guard.guard_entry_present(settings):
         add("guard entry", OK, "installed in %s" % settings)
+    elif guard.guard_entry_narrow(settings):
+        add("guard entry", FAIL, "in %s does not cover all tools (its matcher leaves some out); "
+                                 "run `dw setup`" % settings)
     else:
         add("guard entry", FAIL, "not installed in %s; run `dw setup`" % settings)
 

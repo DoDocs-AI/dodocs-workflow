@@ -2101,12 +2101,8 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
 
     run = store.update_run(run_id, claim)
     kind = outcome["kind"]
-    if kind == "gone":
-        return None
-    if kind == "approved":
-        return _output("allow", "Approved by the owner for this run.")
-    if kind == "granted":
-        return _output("allow", "Approved once by the owner.")
+    if kind in ("gone", "approved", "granted"):
+        return None  # an approved action prints nothing: the harness's own flow decides
     if kind == "busy":
         return _output("deny", PENDING_REASON)
 
@@ -2124,13 +2120,9 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             buttons.append(("run", "Approve for this run"))
         buttons.append(("deny", "Deny"))
         message = "%s\n\n%s: %s" % (describe, tool, _short(_action_text(tool, tool_input), 600))
-        try:
-            answer = agterm.ask(sid, "%s: approve %s?" % (name, match["category"]), message,
-                                buttons, _ask_timeout(), default="deny")
-        except agterm.AgtermError as exc:
-            if "ask already pending" not in str(exc):
-                error = exc
-            events.log_error("guard ask", exc)
+        answer, error = _wait_for_owner(
+            run_id, sid, "%s: approve %s?" % (name, match["category"]), message, buttons,
+            lambda r: _decided_elsewhere(r, match["id"], parts, action, control))
     if answer == "run" and control:
         answer = "once"
     if answer not in ("once", "run", "deny"):
@@ -2146,11 +2138,25 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         if not active:
             result["out"] = _output("deny", "Guard error: run %s is no longer active" % run_id)
             return r
+        approved = not control and all(p in (r.get("approvals") or []) for p in parts)
+        if answer is None and approved:
+            result["out"] = None
+            result["answered"] = True
+            if not ours:
+                return r
+            out = {**r, "pending_approval": None}
+            if r.get("state") == "blocked" and \
+                    str(r.get("reason") or "").startswith("awaiting approval"):
+                out = runs._moved(out, time.time(), state="running", reason=None)
+            return out
         if not ours:
             grant = _matching_grant(grants, match["id"], action)
             if grant is not None and answer != "deny":
-                result["out"] = _output("allow", "Approved once by the owner.")
+                result["out"] = None
+                result["answered"] = True
                 return {**r, "grants": _without(grants, grant)}
+            if pending == {}:
+                result["answered"] = True
             result["out"] = _output("deny", DENIED_REASON if answer == "deny" or pending == {}
                                     else PENDING_REASON)
             return r
@@ -2174,8 +2180,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
                 out["grants"] = _without(grants, grant)
             result["out"] = _output("deny", DENIED_REASON)
         else:
-            result["out"] = _output("allow", "Approved by the owner%s."
-                                    % (" for this run" if answer == "run" else " once"))
+            result["out"] = None
         result["answered"] = True
         return out
 
@@ -2183,6 +2188,66 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
     if result.get("answered") and sid:
         _try("guard status", agterm.set_status, sid, "active")
     return result["out"]
+
+
+def _poll_interval() -> float:
+    try:
+        return max(0.01, float(os.environ.get("DW_GUARD_POLL_INTERVAL") or 1.0))
+    except ValueError:
+        return 1.0
+
+
+def _decided_elsewhere(r: dict, rule_id: str, parts: list, action: str, control: bool) -> bool:
+    """Whether the run record already settles a question that is still open: the run ended,
+    `dw approve` left a grant, `dw deny` cleared it, or the rule was approved for the run."""
+    if r.get("state") not in runs.ACTIVE_STATES:
+        return True
+    if (r.get("pending_approval") or {}).get("action") != action:
+        return True
+    if _matching_grant(list(r.get("grants") or []), rule_id, action) is not None:
+        return True
+    return not control and all(p in (r.get("approvals") or []) for p in parts)
+
+
+def _wait_for_owner(run_id: str, sid: str, title: str, message: str, buttons: list,
+                    settled) -> tuple:
+    """Open the question without blocking, then poll it and the run record until one of them
+    decides or the deadline passes. Returns (button id or None, error or None). The dialog
+    is never left open."""
+    ask_id = None
+    error = None
+    try:
+        ask_id = agterm.ask_open(sid, title, message, buttons, default="deny")
+    except agterm.AgtermError as exc:
+        events.log_error("guard ask", exc)
+        if "ask already pending" not in str(exc):
+            return None, exc
+    deadline = time.monotonic() + _ask_timeout()
+    interval = _poll_interval()
+    answer = None
+    still_open = ask_id is not None
+    try:
+        while True:
+            if still_open:
+                state, button = agterm.ask_result(ask_id)
+                if state == "answered":
+                    answer, still_open = button, False
+                    break
+                if state == "cancelled":
+                    still_open = False
+                    break
+            if settled(store.load_run(run_id)):
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(interval)
+    except Exception as exc:  # AGTerm or the record went away mid-wait
+        events.log_error("guard wait", exc)
+        error = exc
+    finally:
+        if still_open:
+            _try("guard ask cancel", agterm.ask_cancel, ask_id)
+    return answer, error
 
 
 def decide(payload: dict) -> Optional[dict]:

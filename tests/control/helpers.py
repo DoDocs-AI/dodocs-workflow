@@ -28,7 +28,7 @@ class DwTestCase(unittest.TestCase):
         self.env["DW_HOME"] = str(self.dw_home)
         self.env["DW_AGTERMCTL"] = str(FAKE_AGTERMCTL)
         for var in ("AGT_SOCKET", "AGTERM_SOCKET", "DW_CLAUDE", "FAKE_AGTERM_DOWN", "DW_RUN_ID",
-                    "DW_GUARD_ASK_TIMEOUT"):
+                    "DW_GUARD_ASK_TIMEOUT", "DW_GUARD_POLL_INTERVAL"):
             self.env.pop(var, None)
         # Workspace trust is read from this file, never from the real ~/.claude.json.
         self.claude_state = self.tmp / "claude-state.json"
@@ -109,6 +109,12 @@ class DwTestCase(unittest.TestCase):
     def fake_sessions(self) -> dict:
         path = self._sessions_file()
         return json.loads(path.read_text()) if path.exists() else {}
+
+    def fake_open_asks(self) -> list:
+        """Ids of questions opened with --no-block that are neither answered nor cancelled."""
+        path = self.fake_agterm_dir / "asks.json"
+        asks = json.loads(path.read_text()) if path.exists() else {}
+        return [k for k, v in asks.items() if v.get("state") == "pending"]
 
     def script_ask(self, answer_id) -> None:
         self.fake_agterm_dir.mkdir(parents=True, exist_ok=True)

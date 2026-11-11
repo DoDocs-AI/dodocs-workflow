@@ -6,7 +6,11 @@ State lives in $DW_HOME/fake-agterm/:
   sessions.json {session id: {name, cwd, command, workspace, context, restore,
                               status, statusChangedAt, text}} - tests may edit it
   ask-answer    button id that `ask` answers with (missing file = timeout, exit 124;
-                "@already-pending" = AGTerm's refusal of a second ask on a session)
+                "@already-pending" = AGTerm's refusal of a second ask on a session).
+                For `ask open --no-block` + `ask result`: "<id>" answers at the first
+                poll, "<id>@N" at poll N, a missing file never answers, "@cancelled"
+                reports the dialog cancelled (the owner pressed escape).
+  asks.json     questions opened with --no-block: {id: {state, polls}}
 FAKE_AGTERM_DOWN=1 makes every call exit 1 with a connection error.
 """
 import json
@@ -148,6 +152,8 @@ def main(argv):
         out({}, opts, "ok")
     elif cmd == "notify":
         out({}, opts, "ok")
+    elif cmd == "ask" and pos[:1] in (["open"], ["result"], ["cancel"]):
+        return nonblocking_ask(pos, opts)
     elif cmd == "ask":
         path = os.path.join(state_dir(), "ask-answer")
         try:
@@ -163,6 +169,66 @@ def main(argv):
     else:
         fail("unknown command: %s" % " ".join(argv[:2]), 2)
     return 0
+
+
+def scripted_answer():
+    try:
+        with open(os.path.join(state_dir(), "ask-answer")) as fh:
+            return fh.read().strip()
+    except (IOError, OSError):
+        return None
+
+
+def nonblocking_ask(pos, opts):
+    path = os.path.join(state_dir(), "asks.json")
+    try:
+        with open(path) as fh:
+            asks = json.load(fh)
+    except (IOError, OSError, ValueError):
+        asks = {}
+
+    def save():
+        with open(path + ".tmp", "w") as fh:
+            json.dump(asks, fh)
+        os.replace(path + ".tmp", path)
+
+    if pos[0] == "open":
+        if scripted_answer() == "@already-pending":
+            print(json.dumps({"ok": False, "error": "ask already pending"}))
+            return 1
+        if not opts.get("--no-block"):
+            fail("this fake only scripts blocking asks without the 'open' word", 2)
+        ask_id = str(uuid.uuid4()).upper()
+        asks[ask_id] = {"state": "pending", "polls": 0}
+        save()
+        print(json.dumps({"ok": True, "result": {"id": ask_id}}))
+        return 0
+    ask_id = pos[1] if len(pos) > 1 else ""
+    if ask_id not in asks:
+        fail("unknown dialog: %s" % ask_id)
+    entry = asks[ask_id]
+    if pos[0] == "cancel":
+        if entry["state"] == "pending":
+            entry["state"] = "cancelled"
+        save()
+        print(json.dumps({"ok": True, "result": {"result": "cancelled"}}))
+        return 0
+    if entry["state"] == "pending":
+        entry["polls"] += 1
+        answer = scripted_answer()
+        if answer == "@cancelled":
+            entry["state"] = "cancelled"
+        elif answer and not answer.startswith("@"):
+            button, _, after = answer.partition("@")
+            if entry["polls"] >= int(after or 1):
+                entry["state"] = "answered"
+                entry["id"] = button
+        save()
+    if entry["state"] == "answered":
+        print(json.dumps({"result": "answered", "id": entry["id"], "label": entry["id"]}))
+        return 0
+    print(json.dumps({"result": entry["state"]}))
+    return 1 if entry["state"] == "pending" else 2
 
 
 if __name__ == "__main__":

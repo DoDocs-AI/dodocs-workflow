@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import time
 
-from helpers import DwTestCase
+from helpers import DW, DwTestCase
 
 PENDING_REASON = ("Approval is pending with the owner. Do not work around it. "
                   "Continue other work, then retry this exact action later.")
@@ -16,7 +18,8 @@ class GuardHookBase(DwTestCase):
         self.user_home = self.tmp / "user-home"
         self.user_home.mkdir()
         self.env["HOME"] = str(self.user_home)
-        self.env["DW_GUARD_ASK_TIMEOUT"] = "5"
+        self.env["DW_GUARD_ASK_TIMEOUT"] = "1"
+        self.env["DW_GUARD_POLL_INTERVAL"] = "0.05"
 
     def start_run(self, name="slotme"):
         path = self.add_project(name)
@@ -43,8 +46,43 @@ class GuardHookBase(DwTestCase):
         self.assertEqual(out["hookEventName"], "PreToolUse")
         return out
 
+    def raw_guard(self, payload, env=None):
+        r = self.dw("guard", stdin=json.dumps(payload), env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def start_guard(self, payload, env=None):
+        run_env = dict(self.env)
+        run_env.update(env or {})
+        proc = subprocess.Popen([sys.executable, str(DW), "guard"], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                env=run_env)
+        proc.stdin.write(json.dumps(payload))
+        proc.stdin.close()
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        return proc
+
+    def finish_guard(self, proc, limit=10):
+        out = proc.stdout.read()
+        proc.wait(timeout=limit)
+        proc.stdout.close()
+        proc.stderr.close()
+        self.assertEqual(proc.returncode, 0)
+        return json.loads(out)["hookSpecificOutput"] if out.strip() else None
+
+    def wait_for(self, check, limit=10):
+        end = time.time() + limit
+        while time.time() < end:
+            if check():
+                return
+            time.sleep(0.05)
+        self.fail("condition not reached")
+
     def ask_calls(self):
-        return [c for c in self.agterm_calls() if c[0] == "ask"]
+        return [c for c in self.agterm_calls() if c[:2] == ["ask", "open"]]
+
+    def cancel_calls(self):
+        return [c for c in self.agterm_calls() if c[:2] == ["ask", "cancel"]]
 
     def clear_answer(self):
         path = self.fake_agterm_dir / "ask-answer"
@@ -85,8 +123,7 @@ class GuardHookTests(GuardHookBase):
         path, rid = self.start_run()
         self.script_ask("once")
         for _ in range(2):
-            out = self.guard(self.payload(path, "git push origin main"))
-            self.assertEqual(out["permissionDecision"], "allow")
+            self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
         self.assertEqual(len(self.ask_calls()), 2)
         rec = self.record(rid)
         self.assertEqual((rec["state"], rec["reason"], rec["pending_approval"]), ("running", None, None))
@@ -95,11 +132,9 @@ class GuardHookTests(GuardHookBase):
     def test_approve_for_run_is_remembered(self):
         path, rid = self.start_run()
         self.script_ask("run")
-        out = self.guard(self.payload(path, "git push origin main"))
-        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
         self.clear_answer()
-        out = self.guard(self.payload(path, "git push -f origin main"))
-        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertIsNone(self.guard(self.payload(path, "git push -f origin main")))
         self.assertEqual(len(self.ask_calls()), 1)
         rec = self.record(rid)
         self.assertEqual(len(rec["approvals"]), 1)
@@ -137,8 +172,7 @@ class GuardHookTests(GuardHookBase):
         path, rid = self.start_run()
         self.guard(self.payload(path, "git push origin main"))
         self.script_ask("once")
-        out = self.guard(self.payload(path, "git push origin main"))
-        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
         self.assertEqual(self.record(rid)["pending_approval"], None)
 
     def test_ask_already_pending_counts_as_no_answer(self):
@@ -158,8 +192,7 @@ class GuardHookTests(GuardHookBase):
         self.assertEqual((rec["state"], rec["reason"], rec["pending_approval"]), ("running", None, None))
         self.assertEqual(len(rec["grants"]), 1)
         asks = len(self.ask_calls())
-        out = self.guard(self.payload(path, "git push origin main"))
-        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
         self.assertEqual(len(self.ask_calls()), asks)
         self.assertEqual(self.record(rid)["grants"], [])
         out = self.guard(self.payload(path, "git push origin main"))
@@ -200,8 +233,7 @@ class GuardHookTests(GuardHookBase):
         # A forged "run" answer is treated as once: nothing is remembered.
         self.assertEqual(self.dw("deny", rid).returncode, 0)
         self.script_ask("run")
-        out = self.guard(self.payload(path, "dw approve %s" % rid))
-        self.assertEqual(out["permissionDecision"], "allow")
+        self.assertIsNone(self.guard(self.payload(path, "dw approve %s" % rid)))
         self.assertEqual(self.record(rid)["approvals"], [])
 
     def test_second_guarded_call_while_one_pending_is_denied_without_second_dialog(self):
@@ -264,6 +296,18 @@ class GuardHookTests(GuardHookBase):
         out = self.guard(None, raw="not json", env={"DW_RUN_ID": rid})
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertTrue(out["permissionDecisionReason"].startswith("Guard error: "))
+
+    def test_approved_paths_print_nothing(self):
+        path, rid = self.start_run()
+        self.script_ask("once")
+        self.assertEqual(self.raw_guard(self.payload(path, "git push origin main")).stdout, "")
+        self.script_ask("run")
+        self.assertEqual(self.raw_guard(self.payload(path, "kubectl apply -f k8s/")).stdout, "")
+        self.clear_answer()
+        self.assertEqual(self.raw_guard(self.payload(path, "kubectl apply -f other/")).stdout, "")
+        self.raw_guard(self.payload(path, "docker push a/b:1"))
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        self.assertEqual(self.raw_guard(self.payload(path, "docker push a/b:1")).stdout, "")
 
     def test_guard_latency_outside_runs(self):
         projects = []
@@ -346,3 +390,88 @@ class GuardInstalledTests(GuardHookBase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("dw setup", r.stderr)
         self.assertEqual(self.record(rid)["state"], "interrupted")
+
+
+class GuardWaitTests(GuardHookBase):
+    """The question is opened without blocking and polled together with the run record."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.path, self.rid = self.start_run()
+        self.push = self.payload(self.path, "git push origin main")
+
+    def opened(self):
+        return bool(self.ask_calls())
+
+    def test_answer_after_some_polls_is_used(self):
+        self.script_ask("once@3")
+        self.assertIsNone(self.guard(self.push, env={"DW_GUARD_ASK_TIMEOUT": "20"}))
+        results = [c for c in self.agterm_calls() if c[:2] == ["ask", "result"]]
+        self.assertGreaterEqual(len(results), 3)
+        self.assertIn("--no-block", self.ask_calls()[0])
+        self.assertEqual(self.cancel_calls(), [])
+
+    def test_timeout_cancels_the_dialog_and_leaves_pending(self):
+        out = self.guard(self.push)
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+        self.assertEqual(len(self.cancel_calls()), 1)
+        self.assertIsNotNone(self.record(self.rid)["pending_approval"])
+        self.assertEqual(self.fake_open_asks(), [])
+
+    def test_owner_escape_denies_as_no_answer(self):
+        self.script_ask("@cancelled")
+        out = self.guard(self.push, env={"DW_GUARD_ASK_TIMEOUT": "20"})
+        self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+        self.assertIsNotNone(self.record(self.rid)["pending_approval"])
+
+    def test_dw_approve_while_waiting_lets_the_action_through_at_once(self):
+        start = time.time()
+        proc = self.start_guard(self.push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(self.opened)
+        self.assertEqual(self.dw("approve", self.rid).returncode, 0)
+        self.assertIsNone(self.finish_guard(proc))
+        self.assertLess(time.time() - start, 15)
+        self.assertEqual(len(self.cancel_calls()), 1)
+        self.assertEqual(self.fake_open_asks(), [])
+        rec = self.record(self.rid)
+        self.assertEqual((rec["grants"], rec["pending_approval"], rec["state"]), ([], None, "running"))
+
+    def test_dw_deny_while_waiting_denies_at_once(self):
+        proc = self.start_guard(self.push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(self.opened)
+        self.assertEqual(self.dw("deny", self.rid).returncode, 0)
+        out = self.finish_guard(proc)
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", DENIED_REASON))
+        self.assertEqual(len(self.cancel_calls()), 1)
+
+    def test_run_finished_while_waiting_denies(self):
+        proc = self.start_guard(self.push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(self.opened)
+        from dwlib import runs
+        runs.finish_run(self.rid, "interrupted", "x")
+        out = self.finish_guard(proc)
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertEqual(len(self.cancel_calls()), 1)
+        self.assertEqual(self.record(self.rid)["state"], "interrupted")
+
+    def test_rule_approved_for_run_while_waiting_lets_it_through(self):
+        proc = self.start_guard(self.push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(self.opened)
+        from dwlib import store
+        rule = self.record(self.rid)["pending_approval"]["rule"]
+        store.update_run(self.rid, lambda r: {**r, "approvals": [rule]})
+        self.assertIsNone(self.finish_guard(proc))
+        rec = self.record(self.rid)
+        self.assertEqual((rec["pending_approval"], rec["state"]), (None, "running"))
+        self.assertEqual(len(self.cancel_calls()), 1)
+
+    def test_ask_already_pending_polls_only_the_record(self):
+        self.script_ask("@already-pending")
+        proc = self.start_guard(self.push, env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(self.opened)
+        self.assertEqual(self.dw("approve", self.rid).returncode, 0)
+        self.assertIsNone(self.finish_guard(proc))
+        self.assertEqual([c for c in self.agterm_calls() if c[:2] == ["ask", "result"]], [])
+        self.assertEqual(self.cancel_calls(), [])

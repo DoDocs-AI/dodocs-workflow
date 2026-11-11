@@ -164,6 +164,48 @@ def ask(session_id: str, title: str, message: str, buttons: list, timeout: int,
     return None
 
 
+def ask_open(session_id: str, title: str, message: str, buttons: list,
+             default: Optional[str] = None) -> str:
+    """Open a question without waiting; returns its dialog id. AGTerm refuses a second
+    question on a session with an AgtermError whose text says "ask already pending"."""
+    options = ["--message", message, "--target", session_id, "--no-block", "--json"]
+    if default:
+        options += ["--default", default]
+    for button_id, label in buttons:
+        options += ["--button", "%s=%s" % (button_id, label)]
+    result = _result(_run(["ask", "open", title], options, timeout=_timeout(15)))
+    ask_id = result.get("id")
+    if not ask_id:
+        raise AgtermError("agtermctl did not return a dialog id")
+    return str(ask_id)
+
+
+def ask_result(ask_id: str) -> tuple:
+    """("pending", None) | ("answered", button id) | ("cancelled", None)."""
+    proc = _run(["ask", "result", ask_id], ["--json"], timeout=_timeout(15), ok_codes=(0, 1, 2))
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        raise AgtermError("unreadable agtermctl output: %r" % proc.stdout[:200])
+    if isinstance(data, dict) and isinstance(data.get("result"), dict):
+        data = data["result"]
+    if not isinstance(data, dict):
+        raise AgtermError("unexpected agtermctl output")
+    state = data.get("result")
+    if state == "answered" and data.get("id"):
+        return "answered", str(data["id"])
+    if state == "pending":
+        return "pending", None
+    if data.get("ok") is False:
+        raise AgtermError(str(data.get("error")))
+    return "cancelled", None
+
+
+def ask_cancel(ask_id: str) -> None:
+    """Close a question nobody needs any more; a dialog already closed is not an error."""
+    _run(["ask", "cancel", ask_id], ["--json"], timeout=_timeout(15), ok_codes=(0, 1, 2))
+
+
 def close_session(session_id: str) -> None:
     _run(["session", "close"], ["--target", session_id], timeout=_timeout(15))
 

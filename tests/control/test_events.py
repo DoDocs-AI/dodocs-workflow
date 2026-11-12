@@ -376,6 +376,28 @@ class ResumeTests(EventBase):
         self.assertIn("--permission-mode bypassPermissions", inner)
         self.assertNotIn("--session-id", inner)
 
+    def test_resume_gives_the_conversation_a_first_prompt_through_a_file(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        hs = self.record(rid)["harness_session"]
+        self.closed_event(sid)
+        self.assertEqual(self.dw("resume", rid).returncode, 0)
+        argv = self.new_session_calls()[-1]
+        inner = shlex.split(argv[argv.index("--command") + 1])[-1]
+        from dwlib import paths
+        prompt_file = os.path.abspath(str(paths.resume_prompt_path(rid)))
+        self.assertIn("--resume %s \"$(cat %s)\"" % (hs, shlex.quote(prompt_file)), inner)
+        self.assertIn("DW_RUN_ID=%s" % rid, inner)
+        self.assertIn("--permission-mode bypassPermissions", inner)
+        text = open(prompt_file, encoding="utf-8").read()
+        note = os.path.abspath(str(paths.result_note_path(rid)))
+        self.assertTrue(text.startswith(
+            "You were interrupted. Continue the task from where it stopped and finish it.\n\n"), text)
+        self.assertIn("write a short result note to %s." % note, text)
+        self.assertIn("the directory already exists.", text)
+        self.assertNotIn("You were interrupted", inner)
+        self.assertNotIn("result note", inner)
+
     def test_resume_only_for_interrupted(self):
         self.add_project("alpha")
         rid, sid = self.start("alpha")

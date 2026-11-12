@@ -26,6 +26,9 @@ RESULT_NOTE_SUFFIX = (
 )
 
 
+RESUME_PROMPT = "You were interrupted. Continue the task from where it stopped and finish it."
+
+
 class RunRefused(Exception):
     """The run cannot be started; the message is for the owner."""
 
@@ -162,17 +165,23 @@ def _session_command(run_id: str, harness_session: str, resume: bool = False) ->
     claude = os.environ.get("DW_CLAUDE") or "claude"
     head = "DW_RUN_ID=%s %s --permission-mode bypassPermissions" % (run_id, shlex.quote(claude))
     if resume:
-        inner = "%s --resume %s" % (head, harness_session)
+        # The prompt is an ordinary positional argument after --resume; without one the
+        # reopened conversation waits at its input line.
+        inner = "%s --resume %s \"$(cat %s)\"" % (
+            head, harness_session,
+            shlex.quote(os.path.abspath(str(paths.resume_prompt_path(run_id)))))
     else:
         inner = "%s --session-id %s \"$(cat %s)\"" % (
             head, harness_session, shlex.quote(os.path.abspath(str(paths.prompt_path(run_id)))))
     return "zsh -lc " + shlex.quote(inner)
 
 
-def _write_prompt(run_id: str, command: str) -> None:
+def _write_prompt(run_id: str, command: str, resume: bool = False) -> None:
+    """The first prompt, in a file (never inline): the run's command, or for a resume the
+    fixed sentence that makes the conversation go on; then the result-note instructions."""
     note = os.path.abspath(str(paths.result_note_path(run_id)))
-    text = command + "\n\n" + RESULT_NOTE_SUFFIX % note
-    path = paths.prompt_path(run_id)
+    text = (RESUME_PROMPT if resume else command) + "\n\n" + RESULT_NOTE_SUFFIX % note
+    path = paths.resume_prompt_path(run_id) if resume else paths.prompt_path(run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(text.encode("utf-8"))
 
@@ -390,6 +399,7 @@ def resume_run(run_id: str) -> dict:
                                int(limits.get("per_project", 1)), int(limits.get("total", 3)))
         if reason:
             raise RunRefused("cannot resume %s now: %s" % (run_id, reason))
+        _write_prompt(run_id, run["command"], resume=True)
         sid = agterm.new_session(
             cwd=project["path"], workspace_name=project["group"],
             name=_session_name(project, run["command"]),

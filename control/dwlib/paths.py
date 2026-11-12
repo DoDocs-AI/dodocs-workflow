@@ -31,6 +31,10 @@ def prompt_path(run_id: str) -> Path:
     return runs_dir() / (run_id + ".prompt")
 
 
+def resume_prompt_path(run_id: str) -> Path:
+    return runs_dir() / (run_id + ".resume.prompt")
+
+
 def blocked_note_paths(run_id: str) -> list:
     """Moved-aside BLOCKED notes of a run, newest first."""
     found = []

@@ -1076,6 +1076,7 @@ class GuardResultNoteTests(GuardHookBase):
 
     def test_mkdir_of_the_existing_state_directories_is_allowed(self):
         for command in ("mkdir -p %s" % self.runs, "mkdir -p %s" % self.home,
+                        "mkdir -p %s/" % self.runs,
                         "mkdir --parents %s" % self.runs, "mkdir -pv -m 700 %s %s" % (self.home, self.runs),
                         "test -d %s" % self.runs, "[ -d %s ]" % self.runs, "ls %s" % self.runs,
                         "stat %s" % self.runs):
@@ -1101,6 +1102,9 @@ class GuardResultNoteTests(GuardHookBase):
                         "mkdir %s/bin" % self.home, "mkdir %s" % self.runs,
                         "mkdir -p %s > %s/registry.json" % (self.runs, self.home),
                         "touch %s" % self.runs, "chmod 700 %s" % self.runs, "rm -r %s" % self.runs,
-                        "echo x > %s/%s.json" % (self.runs, self.rid)):
+                        "echo x > %s/%s.json" % (self.runs, self.rid),
+                        "mkdir -p %s/new/.." % self.runs, "mkdir -p %s/x/../runs" % self.home,
+                        "mkdir -p %s/./sub" % self.runs, "mkdir -p %s/RUNS/../bin" % self.home,
+                        "mkdir -p %s/." % self.runs):
             with self.subTest(command=command):
                 self.held_as_control(command)

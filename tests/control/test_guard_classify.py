@@ -1895,8 +1895,13 @@ class ZshPrecommandTests(GuardClassifyBase):
 
 class StateDirectoryMkdirTests(GuardClassifyBase):
     def test_mkdir_of_the_state_directories_is_spared_only_inside_a_run(self):
-        runs = os.path.realpath(str(self.paths.runs_dir()))
+        runs = os.path.realpath(os.path.join(str(self.paths.home()), "runs"))
         outside = self.guard.load_rules({"guard_rules": []})
+        command = "mkdir -p %s" % runs
+        # A directory that does not exist yet would be created: not spared.
+        self.assertEqual(self.category(self.bash(command)), "control")
+        os.makedirs(runs)
+        runs = os.path.realpath(runs)
         command = "mkdir -p %s" % runs
         self.assertIsNone(self.bash(command))
         result = self.guard.classify("Bash", {"command": command}, "/p", "/p", outside)

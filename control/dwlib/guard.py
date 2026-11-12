@@ -1071,8 +1071,9 @@ def _makes_only_existing_state_dirs(tokens: list, ctx: _Ctx) -> bool:
     """Inside a run: `mkdir -p` (or --parents; -v and -m MODE allowed) whose every operand is
     the state directory itself or its runs directory, the directory the run's result note
     goes in. They exist already, so the command changes nothing; agents run it before writing
-    their note. Anything else (another directory, no -p, an operand that is not plain text)
-    is judged as usual."""
+    their note. Each operand must already exist and be the same directory (os.path.samefile).
+    Anything else (another directory, no -p, an operand with a run-time part, glob, brace,
+    "." or "..") is judged as usual."""
     if not ctx.protected.note:
         return False
     parents = False
@@ -1102,15 +1103,23 @@ def _makes_only_existing_state_dirs(tokens: list, ctx: _Ctx) -> bool:
         i += 1
     if not parents or not operands:
         return False
-    home = ctx.protected.dw_home.lower()
-    allowed = {home, os.path.join(home, "runs")}
+    home = ctx.protected.dw_home
+    allowed = [d for d in (home, os.path.join(home, "runs")) if os.path.isdir(d)]
     for op in operands:
+        # As written: no run-time part, glob or brace, and no "." or ".." component (mkdir -p
+        # creates every missing directory it walks through, whatever the path resolves to).
+        op = op.rstrip("/")
         if not op or re.search(r"[$`*?\[\]{}~\\]|__dwsub", op):
+            return False
+        if any(part in (".", "..") for part in op.split("/")):
             return False
         if ctx.cwd is None and not op.startswith("/"):
             return False  # relative to a directory nobody knows
-        real = os.path.realpath(os.path.join(ctx.cwd or "/", op)).lower()
-        if real not in allowed:
+        target = os.path.join(ctx.cwd or "/", op)
+        try:
+            if not os.path.isdir(target) or not any(os.path.samefile(target, d) for d in allowed):
+                return False
+        except OSError:
             return False
     return True
 

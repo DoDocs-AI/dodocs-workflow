@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import unicodedata
 from typing import Optional
 
 
@@ -26,10 +27,18 @@ NAME_MAX = 80
 _CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 
 
+def _marked_format(text: str) -> str:
+    """Unicode format characters (category Cf: bidirectional overrides and isolates, zero-width
+    spaces and joiners, byte-order marks...) shown as a visible placeholder: they could
+    otherwise make the owner read a different command than the one that runs."""
+    return "".join(CONTROL_MARK if unicodedata.category(ch) == "Cf" else ch for ch in text)
+
+
 def sanitise(text, limit: int) -> str:
-    """One line AGTerm accepts: control characters become spaces, runs of whitespace
-    collapse, the ends are trimmed, and text over `limit` characters ends in an ellipsis."""
-    line = " ".join(_CONTROL_RE.sub(" ", str(text)).split())
+    """One line AGTerm accepts: control characters and line or paragraph separators become
+    spaces, format characters a visible "?", runs of whitespace collapse, the ends are
+    trimmed, and text over `limit` characters ends in an ellipsis."""
+    line = " ".join(_marked_format(_CONTROL_RE.sub(" ", str(text))).split())
     return line if len(line) <= limit else line[:limit - 1] + "\u2026"
 
 
@@ -43,7 +52,7 @@ def visible(text) -> str:
     """Text whose line breaks, tabs and other control characters are shown as printable marks
     (which AGTerm accepts), so a command keeps its meaning on one line."""
     line = _LINE_BREAK_RE.sub(LINE_BREAK_MARK, str(text)).replace("\t", TAB_MARK)
-    return _CONTROL_RE.sub(CONTROL_MARK, line)
+    return _marked_format(_CONTROL_RE.sub(CONTROL_MARK, line))
 
 
 def _buttons(buttons: list) -> list:

@@ -329,6 +329,18 @@ class GuardHookTests(GuardHookBase):
         self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
                          ("deny", PENDING_REASON))
 
+    def test_format_characters_never_reach_the_dialog_or_notification(self):
+        import unicodedata
+        path, rid = self.start_run("slo\u202etme")
+        self.script_ask("once")
+        command = "echo '\u202eevil\u2066x\u2069\u200b' && git push origin main"
+        self.assertIsNone(self.guard(self.payload(path, command)))
+        ask = self.ask_calls()[0]
+        notify = [c for c in self.agterm_calls() if c[0] == "notify"][0]
+        for text in ask + notify:
+            self.assertFalse([c for c in text if unicodedata.category(c) in ("Cf", "Zl", "Zp")],
+                             ascii(text))
+
     def test_ask_open_failure_text_is_not_relayed_to_the_agent(self):
         path, rid = self.start_run()
         self.fake_agterm_dir.mkdir(parents=True, exist_ok=True)

@@ -572,6 +572,16 @@ class AgtermAdapterTests(RunTestBase):
             self.assertNotIn(unicodedata.category(marker), ("Cc", "Cf", "Zl", "Zp"))
             self.assertEqual(agterm.sanitise(marker, 10), marker)
 
+    def test_format_characters_become_visible_placeholders(self):
+        import unicodedata
+        from dwlib import agterm
+        hidden = "\u202e\u2066\u2069\u200b\u200c\u200d\u200e\u200f\u061c\u202a\ufeff\u2028"
+        for out in (agterm.sanitise("a" + hidden + "b", 80), agterm.visible("a" + hidden + "b")):
+            self.assertFalse([c for c in out if unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp")],
+                             ascii(out))
+            self.assertIn("?", out)
+            self.assertTrue(out.startswith("a") and out.endswith("b"), ascii(out))
+
     def test_free_text_reaching_agtermctl_is_sanitised(self):
         from dwlib import agterm
         bad = "line one\nline\ttwo\x1b"

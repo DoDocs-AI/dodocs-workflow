@@ -14,6 +14,14 @@ feat(control): control point — `/control` and the `dw` command
 - Approval guard: a global Claude Code `PreToolUse` entry, active only where a run is
   active. It is not a sandbox; see docs/explanation-control-point.md for what it does not
   protect against.
+- Manual acceptance run on a real terminal changed how the guard and the runs behave: the
+  approval question now opens (one line, the guarded action first, long commands trimmed with
+  a visible marker); one approval covers the guarded part of a plain command sequence in its
+  directory, so "commit, then push" and a later plain push are the same action; `dw` creates
+  the run's result note up front and the guard spares only plain writes to it; `dw resume`
+  tells the agent to continue; zsh command words (`repeat`, `noglob`, ...) are looked through;
+  `dw run` refuses a guard entry that does not cover every tool or does not execute. Remaining
+  limits are listed in docs/explanation-control-point.md.
 - `install.sh` installs `dw` to `~/.dodocs-workflow/` with an absolute python3 (3.9+)
   shebang and never runs `dw setup`; `uninstall.sh` runs `dw setup --remove --yes` first
   and keeps `registry.json`, `runs/` and `dw.log`.

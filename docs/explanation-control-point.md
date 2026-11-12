@@ -35,14 +35,26 @@ It is **not**:
    command to `~/.claude/commands/`. If `~/.local/bin` exists, `dw` is linked there. The
    installer needs a `python3` 3.9 or newer; without one, the control point is skipped with a
    warning and the rest installs. It never edits your Claude Code settings or terminal hooks.
+   The installer installs the whole workflow, agents and commands included, at the version of
+   the repository you run it from, which may be newer than what you have installed. To install
+   only the control point, run this from a checkout of the repository, then copy
+   `claude/commands/control.md` to `~/.claude/commands/` yourself:
+
+   ```
+   DW_INSTALL_HOME="$HOME/.dodocs-workflow" HOME="$(mktemp -d)" bash install.sh
+   ```
+
+   `DW_INSTALL_HOME` keeps `dw` in your real `~/.dodocs-workflow`; the throwaway `HOME` takes
+   the agents and commands. It also means no `dw` link is made in `~/.local/bin`: use
+   `~/.dodocs-workflow/bin/dw` or link it yourself.
 2. **`dw setup`.** Shows the change it will make and asks before making it: one guard entry in
    `~/.claude/settings.json` and two lines in AGTerm's `hooks.conf`. It merges and never
    rewrites other entries. **Runs cannot start until this has been run**, and `dw run` and
-   `dw resume` test the guard entry once before each launch: an entry whose program is gone
-   or fails, or whose matcher does not cover all tools, refuses the run. Running `dw setup`
-   again repairs an entry whose program is missing or not executable, or whose matcher does
-   not cover all tools, and leaves exactly one guard entry. It does **not** repair an entry
-   whose program exists but fails: fix that one by hand. `dw doctor` checks the result;
+   `dw resume` test the guard entry once before each launch: the entry must exist, cover
+   every tool (matcher `*`, empty or absent) and actually execute, or the run is refused.
+   Running `dw setup` again repairs an entry whose program is missing or not executable, or
+   whose matcher does not cover all tools, and leaves exactly one guard entry. It does
+   **not** repair an entry whose program exists but fails: fix that one by hand. `dw doctor` checks the result;
    `dw setup --remove` takes it all out again.
 3. **Register projects.** `dw project add --name <name> --path <path> --group <AGTerm workspace>`, or
    `dw project import-legacy` to import the projects from the old `/workspace` registry
@@ -67,7 +79,12 @@ registry, run records and log in `~/.dodocs-workflow/` are kept.
 - **Nothing outside the checkout.** `/container-team` and any `--docker` command are refused,
   because the guard only reaches commands that work in the project directory.
 - A run that is interrupted (AGTerm restarted, session lost) is never re-run automatically.
-  `dw resume <run-id>` reopens its Claude conversation for you to continue.
+  `dw resume <run-id>` reopens its Claude conversation and tells the agent to continue the
+  task and finish it, with the same instructions for the result note. A finished note left
+  over from before the interruption is set aside first, so it cannot end the resumed run at once.
+- **Shell.** Claude Code on macOS runs commands in zsh. The guard looks through the zsh
+  words that go in front of a command (`repeat N`, `noglob`, `nocorrect`, `builtin`, `exec`,
+  `-`) and judges the command behind them.
 
 ## How approvals work
 
@@ -79,13 +96,30 @@ change the control point's own settings. Everything it does not recognise is all
 - **The dialog.** A held action opens a native AGTerm question on that run's session, marks
   the run `blocked` with the reason `awaiting approval`, and sends a notification. You can
   answer *approve once*, *approve this action for the rest of the run*, or *deny*. "For this
-  run" means the same action pattern, in that run only, until it ends.
+  run" means the rule that held it, in that run only, until it ends.
+- **What the question shows.** One line. The guarded action comes first and is never cut. After
+  it, when the action runs in another directory than the session's, comes `(in <directory>)`
+  (a very long directory is shortened in the middle). Then the surrounding command, with each
+  line break shown as `⏎`. If the command is too long it is trimmed at the end with a visible
+  `… (+N chars; full command in dw.log)`; the full text is in `dw.log`. The text is the
+  agent's own command, cleaned of control and invisible formatting characters, but not
+  otherwise interpreted. Do not take it as a description of what the command does.
+- **What one approval covers.** The guarded part of the command, in the directory it runs in,
+  and not the whole command line. If a run's first try is "commit, then push" and you approve
+  it, a later plain `git push origin main` in the same directory is the same action and goes
+  through once. This holds only for plain command sequences (commands joined with `;`, `&&`
+  or `||`). A command with a loop or `if`, a pipe, a wrapper (`xargs`, `sudo`, `timeout`,
+  `env` ...), a subshell or group, a background job, or inline code (`bash -c`,
+  `python -c` ...) is approved as a whole, by its exact text. Repeats count: `X && X` is not `X`. The same
+  action in another directory is a different action. File writes and other tools are approved
+  by their exact input.
 - **The 15-minute wait.** The guard waits up to about fifteen minutes for an answer. If none
   comes, it refuses for now, tells the agent to carry on with other work and retry, and the
   approval stays pending.
-- **From `/control`.** `dw approve <run-id>` lets the pending action through once, on the
-  retry; `dw deny <run-id>` refuses it. `/control` runs these only when you say so in that
-  conversation.
+- **From `/control`.** `dw approve <run-id>` lets the pending action through once;
+  `dw deny <run-id>` refuses it. Both work while the question is waiting (the waiting call is
+  let through or refused at once) and afterwards (the agent's retry is let through once, or
+  refused). `/control` runs these only when you say so in that conversation.
 - **Holds that cannot be approved from `dw`.** A run must not be able to change its own
   controls. A `dw` command that changes state, or a write to the control point's state
   directory, `~/.claude/settings.json` or AGTerm's hooks file, is held in a separate
@@ -97,6 +131,19 @@ change the control point's own settings. Everything it does not recognise is all
   interrupted or cancelled (or not started yet) keeps working until it is closed, but every
   action the guard would hold is refused outright, with no dialog. Do such an action by hand,
   or start a new run for it.
+- **The result note.** `dw` creates the run's note, `~/.dodocs-workflow/runs/<run-id>.result.md`,
+  as an empty file when the run is requested, and the launch instructions tell the agent to fill it
+  in when the work is finished or cannot go on. The agent may write it with its file-writing
+  tool, or with a plain redirect: `echo`, `printf` or `cat ... > note` (a here-document is
+  fine), or `tee`. Other ways of writing it (`cp` or `mv` onto it, a link, any other program) are
+  held like any other write into the state directory. An empty note means "not finished".
+  `dw` reads the note when the session reports it has finished or is closed. The first word of
+  its first line is the outcome: `DONE`, `BLOCKED` or `FAILED`. A leading `#`, `*`, `-`, `>`
+  or backquote is ignored, and the word may be followed by the end of the line or by `:`,
+  `-`, `.`, an en dash or an em dash, so `BLOCKED: need a key` and `- BLOCKED — need a key`
+  both count; `Failed to reproduce, all good` does not. A note that does not start with one
+  of the three words counts as `DONE`. A `BLOCKED` note blocks the run and is then set
+  aside, so the agent can write a new one.
 - **State directory.** Run records, the registry and the log live in `~/.dodocs-workflow/`.
   `DW_HOME` overrides that for tests only: launched sessions and the terminal hooks always use
   the default directory.
@@ -129,6 +176,8 @@ Things that pass although you might expect them to be held.
 - Content read from files: `psql -f drop.sql`, `expect -f`, `source ./x.sh`, `sed -f`, `awk -f`.
 - Shell aliases and functions, including one named like a read-only program; `tmux send-keys`,
   `screen -X stuff`.
+- An alias defined and then used inside one command (`alias gp='git push origin main'; gp`)
+  is not read.
 - A file named only inside program text: `sed -n 'w .git/hooks/pre-push' x`,
   `awk '{print > ".git/hooks/pre-push"}' x`, and paths built inside `python -c` or `node -e`.
 
@@ -156,6 +205,12 @@ Things that pass although you might expect them to be held.
 - A directory as the destination of `cp` or `mv`, where the file name comes from the source:
   `cp /tmp/config .git/`, `cp /tmp/settings.json .claude/`.
 - A symlink to a protected directory made earlier in the same command line.
+- Directory tracking that follows a `cd` which does not run, or guesses its target: after
+  `cd ~/.claude && command -v cd /tmp; echo x > settings.json` the guard believes the shell is
+  in `/tmp` (`command -v cd ...` only prints), and a `repeat` with a count that is not a plain
+  number is read by guess. The relative write is then judged in the wrong directory.
+- A relative write to a bare protected file name after a `cd` the guard cannot resolve: after
+  `cd $VAR`, `cd -` or `popd`, `echo x > settings.json` is not held.
 
 **Protected directories named as a whole**
 - `rm -rf .claude`, `rm -rf .git`, `mv .claude c`, `cp -r /tmp/x .claude`,
@@ -204,6 +259,10 @@ Things that pass although you might expect them to be held.
 - Your own sessions are guarded only while a run is active in that project.
 - Run records and the registry are plain files owned by the same user; only the `control`
   category protects them.
+- The text of the approval question is the agent's own command. It is cleaned of control
+  and invisible formatting characters and trimmed, but not otherwise interpreted, so it can
+  be misleading about what the command does. The held action shown first is the guard's own
+  description.
 - Reads are not held at all: a run can read `~/.claude/settings.json`, the registry and run
   records.
 
@@ -242,6 +301,14 @@ be approved for the run, unless noted.
   name (`find . -name config -delete`); a prune in an unusual shape; excluding `.git` and
   `.claude` but not `agterm`. Adding
   `-not -path '*/.git/*' -not -path '*/.claude/*' -not -path '*agterm/*'` makes it pass.
+
+- **The state directory and the result note**: `mkdir -p ~/.dodocs-workflow/runs`, or the
+  same with `$DW_HOME` (only the plain, existing path is spared); writing the note with
+  `cp`, `mv` or `git log > note` or any other program than `echo`, `printf`, `cat`, `tee` and
+  the file-writing tool.
+- **An approval question for the same words in another directory**: an approval covers one
+  directory, so `git push origin main` after `cd /tmp/other` asks again (an ordinary question,
+  not a `control` hold).
 
 If a hold is wrong for your work, deny it, or approve it once from the dialog where that is
 allowed, and ask the agent for a different form of the command.

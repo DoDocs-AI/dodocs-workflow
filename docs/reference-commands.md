@@ -425,14 +425,14 @@ launched sessions and the terminal hooks always use the default directory.)
 | `dw project list [--json]` | List registered projects |
 | `dw project remove <id>` | Unregister a project |
 | `dw project import-legacy [--from PATH] [--group NAME]` | Import projects from the old `/workspace` registry (asks for each group unless `--group` is given); the old files are not modified |
-| `dw run <project> "<command>"` | Start a run as a background AGTerm session, or queue it when a limit is reached (1 per project, 3 in total). Refuses unless the guard entry covers all tools, runs and allows a harmless call |
+| `dw run <project> "<command>"` | Start a run as a background AGTerm session, or queue it when a limit is reached (1 per project, 3 in total). Creates the run's result note as an empty file (`dw resume` does too). Refuses unless the guard entry exists, covers every tool (matcher `*`, empty or absent) and executes |
 | `dw queue [--json]` | List queued runs |
 | `dw status [project] [--json]` | Merged status: run record, live session state, pipeline progress |
 | `dw tail <run-id> [--lines N]` | Read-only tail of a live run's terminal |
-| `dw approve <run-id>` | Let the run's pending action through once (not for `control` holds) |
-| `dw deny <run-id>` | Refuse the pending action |
+| `dw approve <run-id>` | Let the run's pending action through once (not for `control` holds); works while the question is waiting and afterwards, covering the guarded part of the command in that directory, so a later plain `git push origin main` is the same action as "commit, then push" (plain command sequences only) |
+| `dw deny <run-id>` | Refuse the pending action, while the question is waiting or afterwards |
 | `dw dismiss <run-id>` | Acknowledge a finished run so it stops asking for attention |
-| `dw resume <run-id>` | Reopen an interrupted run's Claude conversation |
+| `dw resume <run-id>` | Reopen an interrupted run's Claude conversation and tell the agent to continue and finish; a finished note left from before the interruption is set aside |
 | `dw cancel <run-id>` | Close a queued or running run's session and mark it cancelled |
 
 ---

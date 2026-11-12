@@ -1945,6 +1945,32 @@ class UnquotedHereDocumentTests(GuardClassifyBase):
             with self.subTest(command=command):
                 self.assertEqual(self.category(self.bash(command)), category)
 
+    def test_arithmetic_and_line_continuations_in_a_body_do_not_hide_a_substitution(self):
+        home = os.path.realpath(str(self.paths.home()))
+        texts = {
+            "$(( $(rm %s/registry.json) ))" % home: "control",
+            "$(( a[$(touch %s/evil)] ))" % home: "control",
+            "$\\\n(git push origin main)": "merge",
+            "x\\\nEOF\n$(gh pr merge 3)": "merge",
+        }
+        for text, category in texts.items():
+            command = "cat <<EOF\n%s\nEOF" % text
+            with self.subTest(command=command):
+                self.assertEqual(self.category(self.bash(command)), category)
+            if "EOF" in text:
+                continue  # quoted, the body ends at the first EOF line: the rest is a command
+            literal = "cat <<'EOF'\n%s\nEOF" % text
+            with self.subTest(command=literal):
+                self.assertIsNone(self.bash(literal))
+        for command in ("echo $(( $(rm %s/registry.json) ))" % home,
+                        'echo "$(( a[$(touch %s/evil)] ))"' % home):
+            with self.subTest(command=command):
+                self.assertEqual(self.category(self.bash(command)), "control")
+        for command in ("cat <<EOF\ntotal=$((n*2))\nEOF", "echo $((1+2))", "i=$((i+1))",
+                        'echo "$((n*2))"'):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
     def test_a_quoted_body_is_literal_text(self):
         note = os.path.realpath(str(self.paths.result_note_path(self.run_id)))
         for command in ("cat > notes.txt <<'EOF'\n$(rm -rf /)\nEOF",

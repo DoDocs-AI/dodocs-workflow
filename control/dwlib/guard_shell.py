@@ -108,7 +108,9 @@ def _body_substitutions(body: str) -> list:
         if c == "\\":
             lexer.i += 2
         elif body.startswith("$((", lexer.i):
-            lexer.i = lexer.close_paren(lexer.i + 3, 2) + 1
+            j = lexer.close_paren(lexer.i + 3, 2)
+            lexer.arithmetic(lexer.i + 3, j)
+            lexer.i = j + 1
         elif body.startswith("$(", lexer.i):
             lexer.substitution(lexer.i + 2)
         elif c == "`":
@@ -205,6 +207,13 @@ class _Lexer:
                 j = self.s.find("\n", self.i)
                 line = self.s[self.i:] if j < 0 else self.s[self.i:j]
                 self.i = self.n if j < 0 else j + 1
+                # Unquoted, the shell deletes each backslash-newline pair while reading the
+                # body: an odd number of trailing backslashes joins the next line.
+                while not quoted and self.i < self.n and \
+                        (len(line) - len(line.rstrip("\\"))) % 2 == 1:
+                    j = self.s.find("\n", self.i)
+                    line = line[:-1] + (self.s[self.i:] if j < 0 else self.s[self.i:j])
+                    self.i = self.n if j < 0 else j + 1
                 if (line.lstrip("\t") if strip else line) == delim:
                     break
                 lines.append(line)
@@ -270,6 +279,7 @@ class _Lexer:
                 out.append(self.ansi_c())
             elif c == "$" and s.startswith("$((", self.i):
                 j = self.close_paren(self.i + 3, 2)
+                self.arithmetic(self.i + 3, j)
                 out.append(s[self.i:j + 1])
                 self.i = j + 1
             elif c == "$" and nxt == "(":
@@ -301,6 +311,7 @@ class _Lexer:
                 return "".join(out)
             elif c == "$" and s.startswith("$((", self.i):
                 j = self.close_paren(self.i + 3, 2)
+                self.arithmetic(self.i + 3, j)
                 out.append(s[self.i:j + 1])
                 self.i = j + 1
             elif c == "$" and nxt == "(":
@@ -410,6 +421,17 @@ class _Lexer:
                     return j
             j += 1
         raise _Unreadable("unterminated parameter expansion")
+
+    def arithmetic(self, start: int, close: int) -> None:
+        """An arithmetic expansion $(( ... )) between `start` and the closing `))` at `close`:
+        its command substitutions are classified like any other; a subscript holding one (the
+        shell evaluates it) cannot be read."""
+        text = self.s[start:close - 1]
+        if "$(" not in text and "`" not in text:
+            return
+        if "[" in text:
+            raise _Unreadable("a command substitution inside an arithmetic subscript")
+        self.subs += _body_substitutions(text)
 
     def placeholder(self, body: str) -> str:
         self.subs.append(body)

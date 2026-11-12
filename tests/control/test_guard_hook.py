@@ -1049,6 +1049,7 @@ class GuardApprovalSegmentTests(GuardHookBase):
         self.assertEqual(self.record(rid)["grants"], [])
 
 
+
 class NoteFixture(GuardHookBase):
     """An active run, its state directory and its result note path."""
 
@@ -1147,6 +1148,26 @@ class GuardApprovalDirectoryTests(GuardHookBase):
         self.assertIsNone(self.guard(self.payload(path, "cd . && git push origin main")))
         self.assertEqual(self.record(rid)["grants"], [])
 
+
+    def test_the_directory_note_survives_a_long_command_and_a_long_directory(self):
+        path, rid = self.start_run()
+        far = str(self.tmp.resolve()) + "/"
+        far += "/".join(["segment%02d" % i for i in range(40)])[:200 - len(far)].rstrip("/")
+        self.assertGreaterEqual(len(far), 190)
+        command = "cd %s && git push origin main && echo %s" % (far, "x" * 3000)
+        command = command[:3000]
+        self.held(path, command)
+        ask = self.ask_calls()[-1]
+        message = ask[ask.index("--message") + 1]
+        self.assertLessEqual(len(message), 240)
+        describe = "push to the default branch: git push origin main (in "
+        self.assertTrue(message.startswith(describe), message)
+        note = message[len(describe):message.index(")")]
+        self.assertIn("…", note)
+        self.assertTrue(far.startswith(note.split("…")[0]), note)
+        self.assertTrue(far.endswith(note.split("…")[1]), note)
+        self.assertLess(message.index(")"), message.index(" — Bash: "))
+        self.assertTrue(message.endswith("full command in dw.log)"), message)
 
 class GuardResultNoteLinkTests(NoteFixture):
     """A link at the note path must not turn the note exemption into a write elsewhere."""

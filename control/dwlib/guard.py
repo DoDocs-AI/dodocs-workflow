@@ -1745,6 +1745,16 @@ def _mcp_rule_matches(rule: dict, server: str, tool: str) -> bool:
 
 
 _UNKNOWN_DIR = "?unknown"  # never equal to a real (absolute) directory
+WHERE_MAX = 80  # a longer directory is shortened in the middle in the question
+
+
+def _middle(text: str, limit: int) -> str:
+    """`text` cut to `limit` characters in the middle, with a visible ellipsis: both the start
+    and the end of a path stay readable."""
+    if len(text) <= limit:
+        return text
+    head = (limit - 1) // 3
+    return text[:head] + "\u2026" + text[len(text) - (limit - 1 - head):]
 
 
 def _combine(matches: list) -> Optional[dict]:
@@ -1812,8 +1822,8 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
             if not straight:
                 m["segment"], m["dir"] = command.strip(), start
             m.setdefault("dir", start)
-            if m["dir"] != start:  # shown in the question
-                m["where"] = m["dir"] or "an unknown directory"
+            if m["dir"] != start:  # shown in the question, right after the describe text
+                m["where"] = _middle(m["dir"], WHERE_MAX) if m["dir"] else "an unknown directory"
         return _combine(matches)
     if tool_name in WRITE_TOOLS:
         target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""

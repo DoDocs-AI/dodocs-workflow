@@ -1050,11 +1050,30 @@ _INLINE_ROLLOUT_CHANGE_RE = re.compile(
     r"\s+(restart|undo|pause|resume|latest|cancel|retry)\b")
 
 
+_ROLLOUT_ACTION_WORD_RE = re.compile(r"\b(restart|undo|pause|resume|latest|cancel|retry)\b")
+_INLINE_SUBSTITUTION_RE = re.compile(r"\$\([^()]*\)|`[^`]*`|\$\{[^{}]*\}")
+
+
 def _inline_rollout_change(text: str) -> bool:
     """Whether inline code runs `kubectl|oc ... rollout` other than `rollout status` or
-    `rollout history` (read the same way as on the command line: `_kubectl_words`)."""
+    `rollout history` (read the same way as on the command line: `_kubectl_words`). Coarse
+    backstop: with `kubectl`/`oc` and `rollout` both in the text, any rollout action word
+    anywhere is a change, and every `rollout` must belong to an invocation read as a read once
+    substitutions are replaced by a placeholder word."""
     if _INLINE_ROLLOUT_CHANGE_RE.search(text):
         return True
+    if re.search(r"\b(kubectl|oc)\b", text) and re.search(r"\brollout\b", text):
+        if _ROLLOUT_ACTION_WORD_RE.search(text):
+            return True
+        neutral = _INLINE_SUBSTITUTION_RE.sub(" dwsubst ", text)
+        reads = 0
+        for m in re.finditer(r"(?=\b(kubectl|oc)\b([^\n'\";&|()]*))", neutral):
+            positional = _kubectl_words([m.group(1)] + m.group(2).split())
+            if positional is not None and positional[:1] == ["rollout"] and \
+                    positional[1:2] in (["status"], ["history"]):
+                reads += 1
+        if reads < len(re.findall(r"\brollout\b", neutral)):
+            return True
     # Each occurrence on its own (overlapping), up to a shell separator or closing quote.
     for m in re.finditer(r"(?=\b(kubectl|oc)\b([^\n'\";&|()]*))", text):
         words = m.group(2).split()

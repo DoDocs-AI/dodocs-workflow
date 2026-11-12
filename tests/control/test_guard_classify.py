@@ -2399,6 +2399,35 @@ class InlineRolloutTests(GuardClassifyBase):
             "kubectl rollout status deploy/a; kubectl get pods"))
 
 
+class InlineRolloutBackstopTests(GuardClassifyBase):
+    """A substitution between kubectl and rollout does not hide the action from the inline scan."""
+
+    def forms(self, code, shell=True):
+        out = ["python3 -c 'import os; os.system(\"%s\")'" % code,
+               "python3 - <<'PY'\nimport os\nos.system(\"%s\")\nPY" % code,
+               "node -e 'require(\"child_process\").execSync(`%s`)'" % code]
+        if shell:
+            out.append("bash -c '%s'" % code)
+        return out
+
+    def test_backstop(self):
+        held = [("kubectl $(ctx) rollout restart deploy/a", True),
+                ("kubectl `ctx` rollout undo deploy/a", False),
+                ("kubectl -n ${ns} rollout restart deploy/a", True),
+                # a comment is not run by a shell: only the inline forms over-hold it
+                ("kubectl rollout status deploy/a # then restart", False)]
+        for code, shell in held:
+            for command in self.forms(code, shell):
+                with self.subTest(command=command):
+                    self.assertEqual(self.category(self.bash(command)), "deploy")
+        for code in ("kubectl -n $(ns) rollout status deploy/a", "kubectl rollout history deploy/a"):
+            for command in self.forms(code):
+                with self.subTest(command=command):
+                    self.assertNotEqual(self.category(self.bash(command)), "deploy")
+        self.assertTrue(self.guard._inline_rollout_change("kubectl `ctx` rollout undo deploy/a"))
+        self.assertFalse(self.guard._inline_rollout_change("kubectl -n $(ns) rollout status d/a"))
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

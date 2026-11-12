@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1048,9 +1049,8 @@ class GuardApprovalSegmentTests(GuardHookBase):
         self.assertEqual(self.record(rid)["grants"], [])
 
 
-class GuardResultNoteTests(GuardHookBase):
-    """The agent's own result note must be writable the way agents write it; nothing else in
-    the control point's state directory is."""
+class NoteFixture(GuardHookBase):
+    """An active run, its state directory and its result note path."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -1070,6 +1070,11 @@ class GuardResultNoteTests(GuardHookBase):
         pending = self.record(self.rid)["pending_approval"]
         self.assertEqual(pending["category"], "control", command)
         self.assertEqual(self.dw("deny", self.rid).returncode, 0)
+
+
+class GuardResultNoteTests(NoteFixture):
+    """The agent's own result note must be writable the way agents write it; nothing else in
+    the control point's state directory is."""
 
     def test_the_observed_note_command_is_allowed_silently(self):
         self.allowed("mkdir -p %s && cat > %s <<'EOF'\nDONE\nAll good.\nEOF" % (self.runs, self.note))
@@ -1141,3 +1146,48 @@ class GuardApprovalDirectoryTests(GuardHookBase):
         self.assertEqual(self.dw("deny", rid).returncode, 0)
         self.assertIsNone(self.guard(self.payload(path, "cd . && git push origin main")))
         self.assertEqual(self.record(rid)["grants"], [])
+
+
+class GuardResultNoteLinkTests(NoteFixture):
+    """A link at the note path must not turn the note exemption into a write elsewhere."""
+
+    def test_creating_a_link_at_the_note_is_held(self):
+        registry = "%s/registry.json" % self.home
+        for command in ("ln -s ../registry.json %s && echo pwned > %s" % (self.note, self.note),
+                        "ln -sf /tmp/x %s" % self.note, "ln -s ../registry.json %s" % self.note,
+                        "ln %s %s" % (registry, self.note), "link %s %s" % (registry, self.note),
+                        "cp -s %s %s" % (registry, self.note), "cp -l %s %s" % (registry, self.note),
+                        "install %s %s" % (registry, self.note),
+                        "echo DONE > %s; ln -sf ../registry.json %s" % (self.note, self.note)):
+            with self.subTest(command=command):
+                self.held_as_control(command)
+        self.assertFalse(os.path.lexists(self.note))
+
+    def test_moving_or_copying_a_symlink_onto_the_note_is_held(self):
+        link = self.tmp / "link"
+        link.symlink_to(self.dw_home / "registry.json")
+        for command in ("mv %s %s" % (link, self.note), "cp -P %s %s" % (link, self.note),
+                        "cp -a %s %s" % (link, self.note)):
+            with self.subTest(command=command):
+                self.held_as_control(command)
+
+    def test_a_note_that_is_already_a_symlink_is_not_exempt(self):
+        os.symlink(str(self.dw_home / "registry.json"), self.note)
+        self.held_as_control("echo x > %s" % self.note)
+        out = self.guard(self.payload(self.path, tool="Write",
+                                      tool_input={"file_path": self.note, "content": "x"}))
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertEqual(self.record(self.rid)["pending_approval"]["category"], "control")
+
+    def test_plain_writes_of_a_regular_note_stay_allowed(self):
+        plain = self.tmp / "n"
+        plain.write_text("DONE\n")
+        for command in ("echo DONE > %s" % self.note, "cat > %s <<'EOF'\nDONE\nEOF" % self.note,
+                        "echo DONE | tee %s" % self.note, "cp %s %s" % (plain, self.note)):
+            with self.subTest(command=command):
+                self.allowed(command)
+        with open(self.note, "w") as fh:
+            fh.write("DONE\n")
+        self.allowed("echo DONE >> %s" % self.note)
+        self.assertIsNone(self.guard(self.payload(
+            self.path, tool="Write", tool_input={"file_path": self.note, "content": "DONE"})))

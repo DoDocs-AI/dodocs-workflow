@@ -1174,10 +1174,42 @@ def _loop_variants(word: str, ctx: _Ctx) -> Optional[list]:
     return out
 
 
+_LINK_PROGRAMS = ("ln", "link", "install", "rsync")
+_CP_LINK_RE = re.compile(r"-[A-Za-z]*[slPRrad][A-Za-z]*|--(symbolic-link|link|no-dereference|"
+                         r"archive|recursive|preserve.*)")
+
+
+def _makes_link_at_note(tokens: list, ctx: _Ctx) -> bool:
+    """Whether this command may put a link at the run's result note path: ln, link, install
+    or rsync naming it; cp with a link-making or link-copying option, or cp or mv of a
+    symlink, onto it."""
+    if not ctx.protected.note:
+        return False
+    name = os.path.basename(tokens[0])
+    if name not in _LINK_PROGRAMS + ("cp", "mv"):
+        return False
+    operands = [t for t in tokens[1:] if not _is_option(t)]
+    names = [ctx.protected.names_note(t, ctx.cwd, ctx.sub_bodies, ctx.marks) for t in operands]
+    if not any(names):
+        return False
+    if name in _LINK_PROGRAMS:
+        return True
+    if name == "cp" and any(_CP_LINK_RE.fullmatch(t) for t in tokens[1:] if _is_option(t)):
+        return True
+    for t in operands[:-1]:
+        if ctx.cwd is None and not t.startswith("/"):
+            return True  # a source nobody can look at
+        if os.path.islink(os.path.join(ctx.cwd or "/", t)):
+            return True
+    return False
+
+
 def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
                      wrapped: bool = False) -> list:
     out = []
     skip = None
+    if tokens and _makes_link_at_note(tokens, ctx):
+        ctx.protected.note_linked = True  # classify reads the command again without the exemption
     if not tokens:  # a wrapper: its suffixes were classified; spare a read-only dw program
         for i, t in enumerate(original):
             if os.path.basename(t) == "dw" and \
@@ -1762,6 +1794,13 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
         command = str(tool_input.get("command") or "")
         ctx.full_text = command
         matches = [dict(m) for m in _shell_matches(command, ctx)]
+        if ctx.protected.note_linked:
+            # A link is made at the note path somewhere in this command: read it all again
+            # with no write to the note spared, whatever order the parts run in.
+            ctx = _Ctx(cwd, project_path, rules, run_id)
+            ctx.full_text = command
+            ctx.protected.note_linked = True
+            matches = [dict(m) for m in _shell_matches(command, ctx)]
         # Segment-level identity only for a command positively known to be straight-line,
         # every match of which is about one of its own top-level simple commands. Otherwise
         # (a loop in any dialect, a pipe, a wrapper, inline code, a match about the whole line

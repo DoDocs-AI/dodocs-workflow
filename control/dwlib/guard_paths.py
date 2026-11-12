@@ -140,14 +140,53 @@ class _Protected:
                       os.path.realpath(str(settings_path())).lower(),
                       os.path.realpath(os.path.join(home, ".config", "agterm", "hooks.conf")).lower()}
         self.home = os.path.realpath(home).lower()
-        self.note = os.path.realpath(str(paths.result_note_path(run_id))).lower() if run_id else None
+        # The run's result note, its last component NOT followed: if the note is a symlink, a
+        # write to it is a write to wherever the link points, and that is judged instead.
+        note = str(paths.result_note_path(run_id)) if run_id else None
+        self.note_path = os.path.join(os.path.realpath(os.path.dirname(note)),
+                                      os.path.basename(note)) if note else None
+        self.note = self.note_path.lower() if note else None
+        # Set when the command being read makes a link at the note path: then no write to the
+        # note is spared in that command.
+        self.note_linked = False
         self.markers = [".dodocs-workflow", "agterm/hooks.conf"] + self.dirs + sorted(self.files)
+
+    def note_exempt(self, path: str) -> bool:
+        """Whether a write to `path` (a real path) is the run's own result note and spared: the
+        note is not a symlink and, when it exists, a regular file; and the command does not
+        also make a link at the note path."""
+        if not self.note or path.lower() != self.note or self.note_linked:
+            return False
+        if not os.path.lexists(self.note_path):
+            return True
+        return os.path.isfile(self.note_path) and not os.path.islink(self.note_path)
+
+    def names_note(self, word: str, cwd: Optional[str], bodies=(), marks=()) -> bool:
+        """Whether a word may name the note path itself (its last component not followed). A
+        pattern counts when its directory is the note's (it may name the note)."""
+        if not self.note:
+            return False
+        for skel in self._skeletons(word, list(bodies or []), marks):
+            if not skel or (not os.path.isabs(skel) and cwd is None):
+                continue
+            full = os.path.join(cwd or "/", skel)
+            head, tail = os.path.split(full)
+            if not tail:
+                continue
+            if _wild(skel):
+                if not _wild(head) and os.path.realpath(head).lower() == \
+                        os.path.dirname(self.note):
+                    return True
+                continue
+            if os.path.join(os.path.realpath(head), tail).lower() == self.note:
+                return True
+        return False
 
     def hit(self, path: str) -> bool:
         """A real path without wildcards."""
-        path = path.lower()
-        if path == self.note:
+        if self.note_exempt(path):
             return False
+        path = path.lower()
         if any(_inside(path, d) for d in self.dirs) or path in self.files:
             return True
         if os.path.basename(path) in ("settings.json", "settings.local.json") \
@@ -350,7 +389,7 @@ class _Protected:
                     continue
                 if not _wild(skel) and (os.path.isabs(skel) or cwd is not None):
                     resolved = os.path.realpath(os.path.join(cwd or "/", skel))
-                    if resolved.lower() == self.note:
+                    if self.note_exempt(resolved):
                         return False
                     if self.hit(resolved):
                         return True

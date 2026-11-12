@@ -997,16 +997,29 @@ class GuardApprovalSegmentTests(GuardHookBase):
         self.assertIsNone(self.guard(self.payload(path, "true && " + first)))
         self.assertEqual(self.record(rid)["grants"], [])
 
-    def test_i_a_grant_for_one_run_of_a_segment_does_not_cover_repeated_runs(self):
+    # Each is a different action from an approved plain `git push origin main`: it may run the
+    # segment more than once, under a wrapper or inline code, or apart from the line.
+    NOT_STRAIGHT = (
+        "git push origin main && git push origin main",
+        "for i in 1 2; do git push origin main; done",
+        "echo x | xargs -I{} git push origin main",
+        "foreach i (1 2); git push origin main; end",
+        "systemd-run --on-calendar=daily git push origin main",
+        "python3 -c 'import os; os.system(\"git push origin main\")'",
+        "bash -c 'git push origin main'",
+        "git push origin main | cat",
+        "(git push origin main)",
+        "git push origin main &",
+    )
+
+    def test_i_a_grant_for_one_run_of_a_segment_covers_only_straight_line_commands(self):
         path, rid = self.start_run()
         self.held(path, "git push origin main")
         self.assertEqual(self.dw("approve", rid).returncode, 0)
-        for repeated in ("git push origin main && git push origin main",
-                         "for i in 1 2; do git push origin main; done",
-                         "echo x | xargs -I{} git push origin main"):
-            with self.subTest(command=repeated):
+        for other in self.NOT_STRAIGHT:
+            with self.subTest(command=other):
                 self.dw("deny", rid)  # clear the previous hold, if any; the grant stays
-                self.held(path, repeated)
+                self.held(path, other)
                 self.assertEqual(len(self.record(rid)["grants"]), 1)
         self.dw("deny", rid)
         self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
@@ -1015,7 +1028,8 @@ class GuardApprovalSegmentTests(GuardHookBase):
 
     def test_j_a_straight_line_compound_still_matches_its_plain_segment(self):
         path, rid = self.start_run()
-        self.held(path, "if true; then git push origin main; fi")
+        self.held(path, "true; git push origin main")
         self.assertEqual(self.dw("approve", rid).returncode, 0)
-        self.assertIsNone(self.guard(self.payload(path, "timeout 60 git push origin main")))
+        self.assertIsNone(self.guard(self.payload(
+            path, 'git commit -qm "$(date)" && git push origin main')))
         self.assertEqual(self.record(rid)["grants"], [])

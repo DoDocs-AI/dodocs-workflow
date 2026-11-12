@@ -112,9 +112,10 @@ class _Lexer:
         self.subs: list = []
         self.seg = _new_segment(False)
         self.pending: list = []
-        # Whether the text may run a segment more than once or apart from the line: a
-        # background `&` or a function definition `name()`. (Loops are seen in the segments.)
-        self.repeats = False
+        # False once the text uses anything but simple commands joined by &&, ||, ; or
+        # newlines: a pipe, a background `&`, a subshell or group parenthesis (a function
+        # definition `name()` included) or a process substitution.
+        self.flat = True
 
     def run(self) -> "_Lexer":
         s = self.s
@@ -138,10 +139,12 @@ class _Lexer:
             elif c == "&" and nxt == ">":
                 self.redirect()
             elif c == "&":
-                self.repeats = True
+                self.flat = False
                 self.end()
                 self.i += 1
             elif c == "|":
+                if nxt != "|":
+                    self.flat = False
                 if nxt == "|":
                     self.end()
                     self.i += 2
@@ -149,10 +152,10 @@ class _Lexer:
                     self.end(pipe=True)
                     self.i += 2 if nxt == "&" else 1
             elif c in "<>" and nxt == "(":
+                self.flat = False
                 self.seg["words"].append(self.substitution(self.i + 2))
             elif c in "()":
-                if s[self.i:self.i + 2] == "()" or re.match(r"\(\s+\)", s[self.i:]):
-                    self.repeats = True
+                self.flat = False
                 self.end()
                 self.i += 1
             elif c == "#":

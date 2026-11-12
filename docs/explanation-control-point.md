@@ -218,10 +218,6 @@ Things that pass although you might expect them to be held.
   subshell: if that second reading cannot be parsed and names no guarded program, only the
   arithmetic reading counts, so a program hidden behind a variable passes
   (`x=git; echo $(($x push origin main); true)`, `echo $(("$G" push origin main); true)`).
-- The zsh clobber-override redirects written with a space before the target pass un-held, for
-  a protected path too: `echo x >! <state dir>/registry.json`, `echo x >! .git/config`,
-  `>>!`, `>&!`, `&>!` and `&>>!` (zsh writes the file; the guard reads `!` as the target).
-  `>|` and `>!file` without the space are held.
 
 **Protected directories named as a whole**
 - `rm -rf .claude`, `rm -rf .git`, `mv .claude c`, `cp -r /tmp/x .claude`,

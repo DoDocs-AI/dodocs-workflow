@@ -120,6 +120,14 @@ def _scan_body(target: "_Lexer", body: str) -> None:
     target.alt_subs += lexer.alt_subs
 
 
+# Every redirection operator of bash and zsh, longest first, after an optional fd number or
+# `&`: zsh's clobber overrides (>!, >>!, >&!, &>!, ...) included, so their targets are read as
+# targets (and checked as write positions) whether or not a space follows the operator.
+_REDIRECT_RE = re.compile(
+    r"(\d*)(&>>\||&>>!|>>&\||>>&!|&>>|>>&|&>\||&>!|>&\||>&!|>>\||>>!|&>|>&|>>|>\||>!|"
+    r"<<<|<<-|<<|<&|<>|>|<)")
+
+
 class _Lexer:
     """Splits a shell command into simple-command segments.
 
@@ -231,11 +239,11 @@ class _Lexer:
         self.pending = []
 
     def redirect(self) -> None:
-        m = re.match(r"(\d*|&)(>>|>&|>\||<<<|<<-|<<|<&|<>|>|<)", self.s[self.i:])
+        m = _REDIRECT_RE.match(self.s, self.i)
         if not m:
             raise _Unreadable("redirection")
         op = m.group(2)
-        self.i += m.end()
+        self.i = m.end()
         while self.i < self.n and self.s[self.i] in " \t":
             self.i += 1
         word = self.read_word()

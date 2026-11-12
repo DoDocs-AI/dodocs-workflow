@@ -2002,6 +2002,44 @@ class UnquotedHereDocumentTests(GuardClassifyBase):
                 self.assertIsNone(self.bash(command))
 
 
+class ClobberOverrideRedirectTests(GuardClassifyBase):
+    """zsh and bash output-redirection operators, written with or without a space before the
+    target and with or without an fd number: their targets are write positions."""
+
+    OPERATORS = (">", ">>", ">|", ">!", ">>|", ">>!", ">&", "&>", ">&|", ">&!", "&>|", "&>!",
+                 ">>&", "&>>", ">>&|", ">>&!", "&>>|", "&>>!", "<>")
+
+    def test_every_output_operator_targets_a_write_position(self):
+        registry = os.path.join(os.path.realpath(str(self.paths.home())), "registry.json")
+        for op in self.OPERATORS:
+            for command in ("echo x %s %s" % (op, registry), "echo x %s%s" % (op, registry)):
+                with self.subTest(command=command):
+                    self.assertEqual(self.category(self.bash(command)), "control")
+        for op in (">!", ">>!", ">|"):
+            for prefix in ("1", "2", "{fd}"):
+                command = "echo x %s%s %s" % (prefix, op, registry)
+                with self.subTest(command=command):
+                    self.assertEqual(self.category(self.bash(command)), "control")
+        for op in (">!", ">>!", "&>!"):
+            for target in (".git/config", "~/.claude/settings.json"):
+                command = "echo x %s %s" % (op, target)
+                with self.subTest(command=command):
+                    self.assertEqual(self.category(self.bash(command)), "control")
+
+    def test_ordinary_files_stay_allowed(self):
+        for command in ("echo x >! out.txt", "echo x >>! build.log", "make &>! build.log",
+                        "echo x >! notes/$NAME.txt", "echo x 2>&1", "echo x >&2"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
+    def test_the_note_is_spared_as_for_a_plain_redirect(self):
+        note = os.path.realpath(str(self.paths.result_note_path(self.run_id)))
+        for op in (">", ">>", ">|", ">!", ">>!"):
+            command = "echo DONE %s %s" % (op, note)
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

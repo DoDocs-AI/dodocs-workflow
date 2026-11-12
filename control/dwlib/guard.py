@@ -1084,43 +1084,33 @@ def _write_positions(tokens: list, ctx: _Ctx, incomplete: Optional[bool] = None)
     return [i for i in found if i not in skip]
 
 
-_MKDIR_SHORT_RE = re.compile(r"-[pv]*(m.*)?")
-
-
 def _makes_only_existing_state_dirs(tokens: list, ctx: _Ctx) -> bool:
-    """Inside a run: `mkdir -p` (or --parents; -v and -m MODE allowed) whose every operand is
-    the state directory itself or its runs directory, the directory the run's result note
-    goes in. They exist already, so the command changes nothing; agents run it before writing
+    """Inside a run: `mkdir -p` (or --parents; -v allowed; all options first) whose every
+    operand is the state directory itself or its runs directory, the directory the run's
+    result note goes in. They exist already, so the command changes nothing; agents run it before writing
     their note. Each operand must already exist and be the same directory (os.path.samefile).
     Anything else (another directory, no -p, an operand with a run-time part, glob, brace,
     "." or "..") is judged as usual."""
     if not ctx.protected.note:
         return False
+    # Every option before the first operand (BSD mkdir reads every later word as an operand,
+    # `-m` and its value included), and only -p, -v, --parents, --verbose or a cluster of
+    # p and v. A mode is never needed: the directories exist.
     parents = False
     operands: list = []
-    i, options = 1, True
-    while i < len(tokens):
-        t = tokens[i]
-        if options and t == "--":
-            options = False
-        elif options and t in ("--parents", "--verbose"):
-            parents = parents or t == "--parents"
-        elif options and t.startswith("--mode="):
-            pass
-        elif options and t == "--mode":
-            i += 1
-        elif options and t.startswith("-") and len(t) > 1 and not t.startswith("--"):
-            m = _MKDIR_SHORT_RE.fullmatch(t)
-            if not m:
+    for t in tokens[1:]:
+        if operands:
+            if t.startswith("-"):
                 return False
-            parents = parents or "p" in t[:m.start(1) if m.group(1) else len(t)]
-            if m.group(1) == "m":
-                i += 1  # -m MODE: the mode is the next word
-        elif options and t.startswith("-"):
-            return False
+            operands.append(t)
+        elif t in ("--parents", "--verbose"):
+            parents = parents or t == "--parents"
+        elif re.fullmatch(r"-[pv]+", t):
+            parents = parents or "p" in t
+        elif t.startswith("-"):
+            return False  # -m, --mode, -- or anything else
         else:
             operands.append(t)
-        i += 1
     if not parents or not operands:
         return False
     home = ctx.protected.dw_home

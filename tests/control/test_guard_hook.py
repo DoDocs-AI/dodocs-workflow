@@ -1077,7 +1077,8 @@ class GuardResultNoteTests(GuardHookBase):
     def test_mkdir_of_the_existing_state_directories_is_allowed(self):
         for command in ("mkdir -p %s" % self.runs, "mkdir -p %s" % self.home,
                         "mkdir -p %s/" % self.runs,
-                        "mkdir --parents %s" % self.runs, "mkdir -pv -m 700 %s %s" % (self.home, self.runs),
+                        "mkdir --parents %s" % self.runs, "mkdir -pv %s %s" % (self.home, self.runs),
+                        "mkdir --parents %s/" % self.runs,
                         "test -d %s" % self.runs, "[ -d %s ]" % self.runs, "ls %s" % self.runs,
                         "stat %s" % self.runs):
             with self.subTest(command=command):
@@ -1105,7 +1106,12 @@ class GuardResultNoteTests(GuardHookBase):
                         "echo x > %s/%s.json" % (self.runs, self.rid),
                         "mkdir -p %s/new/.." % self.runs, "mkdir -p %s/x/../runs" % self.home,
                         "mkdir -p %s/./sub" % self.runs, "mkdir -p %s/RUNS/../bin" % self.home,
-                        "mkdir -p %s/." % self.runs):
+                        "mkdir -p %s/." % self.runs,
+                        "mkdir -p %s -m %s/bin" % (self.runs, self.home),
+                        "mkdir -p %s --mode %s/bin" % (self.runs, self.home),
+                        "mkdir -p -m 700 %s" % self.runs, "mkdir -pm700 %s" % self.runs,
+                        "mkdir --mode=700 -p %s" % self.runs, "mkdir %s -p" % self.runs,
+                        "mkdir -p %s -v" % self.runs):
             with self.subTest(command=command):
                 self.held_as_control(command)
 

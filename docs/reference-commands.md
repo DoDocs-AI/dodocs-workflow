@@ -415,7 +415,9 @@ own `dw` commands are held by the guard.
 
 `install.sh` puts `dw` at `~/.dodocs-workflow/bin/dw` (linked into `~/.local/bin` when that
 directory exists). State lives in `~/.dodocs-workflow/`. (`DW_HOME` moves it for tests only;
-launched sessions and the terminal hooks always use the default directory.)
+launched sessions and the terminal hooks always use the default directory.) Inside a run
+(`DW_RUN_ID` set), every subcommand that changes something exits with status 2 and "dw cannot
+change the control point from inside a run"; reading subcommands work.
 
 | Subcommand | Effect |
 |---|---|
@@ -424,14 +426,17 @@ launched sessions and the terminal hooks always use the default directory.)
 | `dw project add --name N --path P --group G [--notes T]` | Register a project; `group` is the AGTerm workspace its runs appear in |
 | `dw project list [--json]` | List registered projects |
 | `dw project remove <id>` | Unregister a project |
+| `dw project auto-approve <project> --from-run <run-id> --action ID [--note T]` | Add an automatic approval that names the run's pending action (or its last held one) exactly: rule, full segment, directory. `ID` is the action id `dw status` shows, in full: random, new for every hold, so an id from an earlier hold (even of the same command) or a part of one is refused (without `--action`, a terminal is asked to confirm, anything else refused). Prints the entry; does not approve the pending action. Refuses `control` actions, and a segment with a control character (line break and tab included) or a format character (bidirectional, zero-width) |
+| `dw project auto-approve <project> --rule R --match REGEX [--in DIR] [--note T]` | Add a wider automatic approval by hand: the regex must match the whole segment. Refuses `control` rules, patterns that match every one of a fixed set of unrelated commands, any quantifier but `?` on a group (`*`, `+`, `{...}`), and "cannot be read" patterns that match the empty string or more than one of those commands. With `--in`, the entry applies only when the directory is known for certain (no `cd` into a path that does not exist yet, no `ln`/`mv`/`rename`/`mount` before the guarded part) |
+| `dw project auto-approve <project> --list` / `--remove N` | Show the entries, numbered (control and format characters shown as `?`, line breaks as `⏎`), or remove entry N |
 | `dw project import-legacy [--from PATH] [--group NAME]` | Import projects from the old `/workspace` registry (asks for each group unless `--group` is given); the old files are not modified |
-| `dw run <project> "<command>"` | Start a run as a background AGTerm session, or queue it when a limit is reached (1 per project, 3 in total). Creates the run's result note as an empty file (`dw resume` does too). Refuses unless the guard entry exists, covers every tool (matcher `*`, empty or absent) and executes |
+| `dw run [--keep-open] <project> "<command>"` | Start a run as a background AGTerm session, or queue it when a limit is reached (1 per project, 3 in total). Creates the run's result note as an empty file (`dw resume` does too). Refuses unless the guard entry exists, covers every tool (matcher `*`, empty or absent) and executes. A run that finishes as done has its session closed (ending anything still running in it) unless it was started with `--keep-open` or the registry sets `"close_done_sessions": false` |
 | `dw queue [--json]` | List queued runs |
-| `dw status [project] [--json]` | Merged status: run record, live session state, pipeline progress |
+| `dw status [project] [--json]` | Merged status: run record, live session state, pipeline progress; for a run awaiting approval, the rule id and action id next to the describe text (for a finished run, its last held action), with control and format characters shown as `?` and line breaks as `⏎`; a finished run whose session is still open is marked `session still open` |
 | `dw tail <run-id> [--lines N]` | Read-only tail of a live run's terminal |
-| `dw approve <run-id>` | Let the run's pending action through once (not for `control` holds); works while the question is waiting and afterwards, covering the guarded part of the command in that directory, so a later plain `git push origin main` is the same action as "commit, then push" (plain command sequences only) |
+| `dw approve <run-id>` | Let the run's pending action through once (not for `control` holds, which include "command cannot be read and may change the control point"; plain "command cannot be read" holds, category `unreadable`, can be approved); works while the question is waiting and afterwards, covering the guarded part of the command in that directory, so a later plain `git push origin main` is the same action as "commit, then push" (plain command sequences only) |
 | `dw deny <run-id>` | Refuse the pending action, while the question is waiting or afterwards |
-| `dw dismiss <run-id>` | Acknowledge a finished run so it stops asking for attention |
+| `dw dismiss <run-id>` | Acknowledge a finished run so it stops asking for attention, and close its session if it is still open |
 | `dw resume <run-id>` | Reopen an interrupted run's Claude conversation and tell the agent to continue and finish; a finished note left from before the interruption is set aside |
 | `dw cancel <run-id>` | Close a queued or running run's session and mark it cancelled |
 

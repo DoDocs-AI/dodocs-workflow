@@ -13,7 +13,7 @@
     {"id": "gh-api-write", "category": "publish", "describe": "write through the GitHub API", "tool": "Bash", "program": ["gh"], "check": "gh_api_write"},
 
     {"id": "kubectl-delete", "category": "destroy", "describe": "delete Kubernetes resources", "tool": "Bash", "program": ["kubectl", "oc", "k"], "subcommand": ["delete"]},
-    {"id": "kubectl-change", "category": "deploy", "describe": "change a Kubernetes cluster", "tool": "Bash", "program": ["kubectl", "oc", "k"], "subcommand": ["apply", "create", "replace", "patch", "rollout", "scale", "set", "edit", "label", "annotate", "expose", "run", "drain", "cordon", "uncordon", "taint", "autoscale"]},
+    {"id": "kubectl-change", "category": "deploy", "describe": "change a Kubernetes cluster", "tool": "Bash", "program": ["kubectl", "oc", "k"], "subcommand": ["apply", "create", "replace", "patch", "rollout", "scale", "set", "edit", "label", "annotate", "expose", "run", "drain", "cordon", "uncordon", "taint", "autoscale"], "check": "kubectl_change"},
     {"id": "helm-change", "category": "deploy", "describe": "change a Helm release", "tool": "Bash", "program": ["helm"], "subcommand": ["install", "upgrade", "uninstall", "delete", "rollback", "push"]},
     {"id": "docker-push", "category": "deploy", "describe": "push a container image", "tool": "Bash", "program": ["docker", "podman", "nerdctl"], "subcommand": ["push", "image push", "manifest push", "compose push", "buildx imagetools create"]},
     {"id": "docker-build-push", "category": "deploy", "describe": "build and push a container image", "tool": "Bash", "program": ["docker", "podman"], "subcommand": ["build", "buildx build", "buildx bake", "compose build", "compose up"], "args_any": ["--push"]},

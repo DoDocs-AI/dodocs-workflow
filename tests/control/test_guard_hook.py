@@ -649,15 +649,18 @@ class GuardInstalledTests(GuardHookBase):
         probe = self.write_dw_script(self.tmp / "probe", 'cat > %s/stdin; env > %s/env; echo "$1" > %s/argv'
                                      % (seen, seen, seen))
         env = self.guard_entry(probe)
-        env["DW_RUN_ID"] = "r-outer"
         r = self.dw("run", "slotme", "/scrum-team", "x", env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         payload = json.loads((seen / "stdin").read_text())
         self.assertEqual((payload["hook_event_name"], payload["tool_name"]), ("PreToolUse", "Read"))
         self.assertTrue(payload["tool_input"]["file_path"].startswith(payload["cwd"]))
         self.assertNotIn(str(self.tmp / "checkouts"), payload["cwd"])
-        self.assertNotIn("DW_RUN_ID=", (seen / "env").read_text())
         self.assertEqual((seen / "argv").read_text(), "guard\n")
+        # `dw run` itself refuses inside a run; the probe drops DW_RUN_ID all the same.
+        from dwlib import runs
+        os.environ["DW_RUN_ID"] = "r-outer"
+        self.assertIsNone(runs._guard_entry_problem([str(probe), "guard"]))
+        self.assertNotIn("DW_RUN_ID=", (seen / "env").read_text())
 
 
 class GuardEntryPointTests(GuardHookBase):
@@ -967,7 +970,8 @@ class GuardApprovalSegmentTests(GuardHookBase):
         asks = len(self.ask_calls())
         self.held(path, "$X two")  # a different action while one is pending: no dialog
         self.assertEqual(len(self.ask_calls()), asks)
-        self.assertEqual(self.record(rid)["pending_approval"]["describe"], "command cannot be read")
+        self.assertEqual(self.record(rid)["pending_approval"]["describe"],
+                         "command cannot be read and may change the control point")
         self.script_ask("once")
         self.assertIsNone(self.guard(self.payload(path, "$X one")))  # the same action: asked
         self.assertEqual(len(self.ask_calls()), asks + 1)
@@ -1274,3 +1278,455 @@ class GuardResultNoteLiteralTargetTests(NoteFixture):
                         "cat > %s <<'EOF'\nDONE\nEOF" % self.note):
             with self.subTest(command=command):
                 self.allowed(command)
+
+
+class UnreadableApprovalTests(GuardHookBase):
+    """`unreadable` can be approved once, by `dw approve`, or for the rest of the run; a
+    run-wide approval of it never lets another category through, and an ended run's session
+    still refuses it."""
+
+    def buttons(self, ask):
+        return [ask[i + 1] for i, a in enumerate(ask) if a == "--button"]
+
+    def held(self, path, command, env=None):
+        out = self.guard(self.payload(path, command), env=env)
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+
+    def test_the_dialog_offers_a_run_wide_approval_named_for_its_scope(self):
+        path, rid = self.start_run()
+        self.held(path, "kubectl $VERB one")
+        ask = self.ask_calls()[-1]
+        self.assertEqual(self.buttons(ask), ["once=Approve once",
+                                             "run=Approve unreadable commands for this run",
+                                             "deny=Deny"])
+        self.assertIn("approve unreadable", ask[2])
+        pending = self.record(rid)["pending_approval"]
+        self.assertEqual((pending["rule"], pending["category"]), ("control-unreadable", "unreadable"))
+
+    def test_approved_for_the_run_later_unreadable_commands_pass_silently(self):
+        path, rid = self.start_run()
+        self.script_ask("run")
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
+        self.assertEqual(self.record(rid)["approvals"], ["control-unreadable"])
+        self.clear_answer()
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
+        self.assertEqual(len(self.ask_calls()), asks)
+        # Never another category: a push next to an unreadable command is asked for.
+        self.held(path, "kubectl $VERB one; git push origin main")
+        self.assertEqual(len(self.ask_calls()), asks + 1)
+        self.assertEqual(self.record(rid)["pending_approval"]["category"], "merge")
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        self.held(path, "kubectl $VERB one; dw approve %s" % rid)
+        self.assertEqual(self.record(rid)["pending_approval"]["category"], "control")
+
+    def test_dw_approve_grants_an_unreadable_command_once(self):
+        path, rid = self.start_run()
+        self.held(path, "kubectl $VERB one")
+        r = self.dw("approve", rid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("command cannot be read", r.stdout)
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.held(path, "kubectl $VERB one")
+        self.assertEqual(self.record(rid)["approvals"], [])
+
+    def test_dw_approve_of_a_push_next_to_an_unreadable_command(self):
+        path, rid = self.start_run()
+        self.held(path, "kubectl $VERB one; git push origin main")
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one; git push origin main")))
+
+    def test_control_next_to_unreadable_stays_control(self):
+        path, rid = self.start_run()
+        self.held(path, "kubectl $VERB one; dw approve %s" % rid)
+        self.assertEqual(self.buttons(self.ask_calls()[-1]), ["once=Approve once", "deny=Deny"])
+        self.assertEqual(self.dw("approve", rid).returncode, 2)
+
+    def test_run_wide_answer_to_a_mixed_question_leaves_unreadable_out(self):
+        # The question is about the push (merge decides the dialog); answering it for the run
+        # remembers the push rule only, never the unreadable class.
+        path, rid = self.start_run()
+        self.script_ask("run")
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one; git push origin main")))
+        self.assertEqual(self.record(rid)["approvals"], ["git-push-default"])
+        self.clear_answer()
+        asks = len(self.ask_calls())
+        self.held(path, "kubectl $VERB two")
+        self.assertEqual(len(self.ask_calls()), asks + 1)
+
+    def test_an_ended_runs_session_refuses_unreadable_commands(self):
+        path, rid = self.start_run()
+        self.script_ask("run")
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))  # approved for the run
+        from dwlib import runs
+        runs.finish_run(rid, "done", None)
+        asks = len(self.ask_calls())
+        out = self.guard(self.payload(path, "kubectl $VERB two"), env={"DW_RUN_ID": rid})
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", INACTIVE_REASON % (rid, "done")))
+        self.assertEqual(len(self.ask_calls()), asks)
+
+
+class UnreadableStateApprovalTests(GuardHookBase):
+    def test_a_run_wide_unreadable_approval_does_not_cover_state_unreadable(self):
+        path, rid = self.start_run()
+        self.script_ask("run")
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
+        self.clear_answer()
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
+        asks = len(self.ask_calls())
+        for command in ("$(echo dw) approve %s" % rid, 'bash -c "$CMD"', 'python3 "$SCRIPT"',
+                        'node -r "$X" a.js', "f(){ a | b; }; f", "$CMD"):
+            with self.subTest(command=command):
+                out = self.guard(self.payload(path, command))
+                self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+                ask = self.ask_calls()[-1]
+                self.assertEqual([ask[i + 1] for i, a in enumerate(ask) if a == "--button"],
+                                 ["once=Approve once", "deny=Deny"])
+                pending = self.record(rid)["pending_approval"]
+                self.assertEqual(pending["category"], "control")
+                self.assertIn("control-unreadable-state", pending["rule"].split("+"))
+                self.assertEqual(self.dw("approve", rid).returncode, 2)
+                self.assertEqual(self.dw("deny", rid).returncode, 0)
+        self.assertEqual(len(self.ask_calls()), asks + 6)
+
+    def test_a_run_wide_unreadable_approval_does_not_cover_inline_code_that_spawns(self):
+        path, rid = self.start_run()
+        self.script_ask("run")
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
+        self.clear_answer()
+        for command in (
+                "python3 -c \"import subprocess; subprocess.run(['git','push','origin','main'])\"",
+                "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['kubectl','delete','ns','prod'])"
+                "\nPY",
+                "python3 - <<'PY'\nimport subprocess as s\ns.call(['npm','publish'])\nPY",
+                "node -e \"require('child_process').execFileSync('git',['push','origin','main'])\"",
+                "python3 - \"$(cat f)\" <<'PY'\nimport sys,os\nos.system(sys.argv[1])\nPY"):
+            with self.subTest(command=command):
+                out = self.guard(self.payload(path, command))
+                self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+                pending = self.record(rid)["pending_approval"]
+                self.assertEqual(pending["category"], "control")
+                self.assertEqual(self.dw("deny", rid).returncode, 0)
+
+
+class AutoApproveTests(GuardHookBase):
+    """Per-project automatic approvals: an entry naming the rule and the exact segment lets the
+    call through silently; anything else is handled as before."""
+
+    def set_entries(self, project_id, entries):
+        from dwlib import paths, store
+
+        def fn(reg):
+            for p in reg["projects"]:
+                if p["id"] == project_id:
+                    p["auto_approve"] = entries
+            return reg
+        store.update_json(paths.registry_path(), fn, store.default_registry())
+
+    def entry(self, rule, match, where=None):
+        out = {"rule": rule, "match": match, "note": "t", "added_at": 1}
+        if where is not None:
+            out["in"] = where
+        return out
+
+    def log(self):
+        from dwlib import paths
+        p = paths.home() / "dw.log"
+        return p.read_text() if p.exists() else ""
+
+    def held(self, path, command, env=None):
+        out = self.guard(self.payload(path, command), env=env)
+        self.assertIsNotNone(out, command)
+        self.assertEqual(out["permissionDecision"], "deny")
+        return out
+
+    def test_an_entry_lets_the_named_action_through_silently(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main",
+                                               str(path))])
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.assertIn("auto-approved run %s rule git-push-default" % rid, self.log())
+        self.assertIsNone(self.record(rid)["pending_approval"])
+        # Another action, another directory, or another match on the same call: asked.
+        self.held(path, "git push origin master")
+        self.dw("deny", rid)
+        other = path / "sub"
+        other.mkdir()
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main",
+                                               str(other))])
+        self.held(path, "git push origin main")
+        self.dw("deny", rid)
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main")])
+        self.held(path, "git push origin main && kubectl apply -f k8s/")
+
+    def test_control_is_never_auto_approved(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("control-dw", r".+"),
+                                    self.entry("control-state", r".+"),
+                                    self.entry("git-push-default", r"git push origin main")])
+        self.held(path, "dw approve %s" % rid)
+        self.dw("deny", rid)
+        self.held(path, "git push origin main; dw approve %s" % rid)
+
+    def test_unreadable_entries_must_be_narrow(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("control-unreadable", ".*"),
+                                    self.entry("control-unreadable", ""),
+                                    self.entry("control-unreadable", "(?s).*"),
+                                    self.entry("control-unreadable", "[^\\n]*|.*")])
+        self.held(path, "kubectl $VERB pods")
+        self.assertIn("guard auto-approve", self.log())
+        self.dw("deny", rid)
+        self.set_entries("slotme", [self.entry("control-unreadable", r"kubectl \$VERB pods")])
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
+
+    def test_match_everything_and_unbounded_group_entries_are_ignored_at_load(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("control-unreadable", "..*"),
+                                    self.entry("control-unreadable", "(.+)"),
+                                    self.entry("control-unreadable", "(kubectl|gh) .*"),
+                                    self.entry("kubectl-change", "\\S.*"),
+                                    self.entry("kubectl-change", "kubectl (apply|a)* -f k8s/"),
+                                    self.entry("kubectl-change", "kubectl (apply|a){1,99} -f k8s/")])
+        for command in ("kubectl $(cat v) ns prod", 'gh pr "$(cat v)" 12', "kubectl apply -f k8s/"):
+            with self.subTest(command=command):
+                self.held(path, command)
+                self.dw("deny", rid)
+        self.assertIn("must not match", self.log())
+        self.assertIn("quantifier", self.log())
+        self.assertIn("on a group", self.log())
+
+    def test_an_entry_with_in_needs_a_directory_known_for_certain(self):
+        path, rid = self.start_run()
+        sub = path / "sub"
+        sub.mkdir()
+        (sub / "k8s").mkdir()
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        self.set_entries("slotme", [self.entry("kubectl-change", "kubectl apply -f k8s/",
+                                               os.path.realpath(str(sub)))])
+        asks = len(self.ask_calls())
+        for command in ("kubectl apply -f k8s/", "cd k8s && cd .. && kubectl apply -f k8s/"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.guard(self.payload(sub, command)))
+        self.assertEqual(len(self.ask_calls()), asks)
+        for command in ("ln -s %s l2 && cd l2 && kubectl apply -f k8s/" % outside,
+                        "ln -sfn %s l3; cd l3; kubectl apply -f k8s/" % outside,
+                        "mkdir -p x && mv x y && ln -sfn %s y && cd y && kubectl apply -f k8s/"
+                        % outside,
+                        "mkdir new && cd new && kubectl apply -f k8s/",
+                        "python3 -c 'import os; os.symlink(\"%s\", \"k9\")' && cd k9 && "
+                        "kubectl apply -f k8s/" % outside,
+                        "(ln -s %s l4 && cd l4 && kubectl apply -f k8s/)" % outside):
+            with self.subTest(command=command):
+                self.held(sub, command)
+                self.dw("deny", rid)
+        # An entry without `in` is unaffected.
+        self.set_entries("slotme", [self.entry("kubectl-change", "kubectl apply -f k8s/")])
+        self.assertIsNone(self.guard(self.payload(
+            sub, "ln -s %s l5 && cd l5 && kubectl apply -f k8s/" % outside)))
+
+    def test_malformed_entries_are_ignored(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [{"rule": 3}, "x", self.entry("git-push-default", "(a+)+"),
+                                    self.entry("git-push-default", "git push ("),
+                                    self.entry("git-push-default", "git.*", where="relative/dir")])
+        self.held(path, "git push origin main")
+        self.dw("deny", rid)
+        self.set_entries("slotme", "not a list")
+        self.held(path, "git push origin main")
+
+    def test_an_ended_runs_session_gets_no_auto_approval(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main")])
+        from dwlib import runs
+        runs.finish_run(rid, "done", None)
+        out = self.guard(self.payload(path, "git push origin main"), env={"DW_RUN_ID": rid})
+        self.assertEqual(out["permissionDecisionReason"], INACTIVE_REASON % (rid, "done"))
+
+    def action_id(self, rid):
+        data = json.loads(self.dw("status", "--json").stdout)
+        view = [v for v in data["needs_owner"] if v["id"] == rid]
+        if view and view[0].get("pending"):
+            return view[0]["pending"]["action"]
+        for p in data["projects"]:
+            for v in p["active"] + p["recent"]:
+                if v["id"] == rid:
+                    return (v.get("pending") or v.get("last_held"))["action"]
+        raise AssertionError("no action id for %s" % rid)
+
+    def test_from_run_adds_the_exact_entry_without_approving(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        action = self.action_id(rid)
+        self.assertEqual(action, self.record(rid)["pending_approval"]["action_id"])
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{16}", action), action)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--note", "ok")
+        self.assertEqual(r.returncode, 2)  # no --action, no terminal: refused
+        self.assertIn("--action %s" % action, r.stdout + r.stderr)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", action,
+                    "--note", "ok")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = json.loads(r.stdout)
+        self.assertEqual((entry["rule"], entry["in"], entry["from_run"]),
+                         ("git-push-default", os.path.realpath(str(path)), rid))
+        self.assertIn("ok", entry["note"])
+        self.assertIn(action, entry["note"])
+        self.assertTrue(re.fullmatch(entry["match"], "git push origin main"))
+        self.assertIsNotNone(self.record(rid)["pending_approval"])  # still the owner's to answer
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.held(path, "git push origin main --force")  # exact by default
+
+    def test_from_run_uses_the_last_held_action_and_refuses_control(self):
+        path, rid = self.start_run()
+        self.held(path, "kubectl apply -f k8s/")
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        held = self.record(rid)["last_held"]
+        self.assertEqual((held["rule"], held["category"]), ("kubectl-change", "deploy"))
+        old = self.action_id(rid)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", old)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["rule"], "kubectl-change")
+        # The run has since been held on another action: the old id is stale.
+        self.held(path, "git push origin main")
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        before = json.loads(self.dw("project", "list", "--json").stdout)[0]["auto_approve"]
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", old)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn(self.action_id(rid), r.stderr)
+        self.assertIn("git-push-default", r.stderr)
+        self.assertEqual(json.loads(self.dw("project", "list", "--json").stdout)[0]["auto_approve"],
+                         before)
+        self.held(path, "dw approve %s" % rid)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                    "--action", self.action_id(rid))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("control", r.stderr)
+
+    def test_status_shows_the_rule_of_a_pending_approval(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        r = self.dw("status")
+        self.assertIn("git-push-default", r.stdout)
+        self.assertIn("action %s)" % self.record(rid)["pending_approval"]["action_id"], r.stdout)
+        self.assertIn("push to the default branch", r.stdout)
+        data = json.loads(self.dw("status", "--json").stdout)
+        pending = [v for v in data["needs_owner"] if v["id"] == rid][0]["pending"]
+        self.assertEqual(pending["rule"], "git-push-default")
+
+    def test_each_hold_gets_a_new_random_action_id(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        first = self.action_id(rid)
+        rec = self.record(rid)
+        self.assertEqual(rec["last_held"]["action_id"], first)
+        # The fingerprint is unchanged and is not what the owner names.
+        self.assertNotEqual(rec["pending_approval"]["action"][:len(first)], first)
+        # A second agent call on the same pending action is the same hold: same id.
+        self.held(path, "git push origin main")
+        self.assertEqual(self.record(rid)["last_held"]["action_id"], first)
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        # The identical command held again later is a new hold with a new id.
+        self.held(path, "git push origin main")
+        second = self.action_id(rid)
+        self.assertNotEqual(second, first)
+        self.assertEqual(self.record(rid)["last_held"]["action_id"], second)
+        before = json.loads(self.dw("project", "list", "--json").stdout)[0].get("auto_approve")
+        for stale in (first, second[:8], second[:-1], second.upper(), second + "0"):
+            with self.subTest(action=stale):
+                r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                            "--action", stale)
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn(second, r.stderr)
+        self.assertEqual(
+            json.loads(self.dw("project", "list", "--json").stdout)[0].get("auto_approve"), before)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", second)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_hold_recorded_without_an_action_id_cannot_be_named(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        from dwlib import store
+        store.update_run(rid, lambda r: {
+            **r, "pending_approval": {k: v for k, v in r["pending_approval"].items()
+                                      if k != "action_id"},
+            "last_held": {k: v for k, v in r["last_held"].items() if k != "action_id"}})
+        fingerprint = self.record(rid)["pending_approval"]["action"]
+        for action in (fingerprint, fingerprint[:8], ""):
+            with self.subTest(action=action):
+                r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                            "--action", action)
+                self.assertEqual(r.returncode, 2, r.stdout)
+
+    def crafted_hold(self, path, rid, segment, describe="push to the default branch"):
+        from dwlib import store
+        held = {"rule": "git-push-default", "category": "merge", "describe": describe,
+                "tool": "Bash", "keys": [["git-push-default", segment, os.path.realpath(str(path))]],
+                "action": "f" * 20, "action_id": "0123456789abcdef", "at": 1, "since": 1}
+        store.update_run(rid, lambda r: {**r, "state": "blocked", "pending_approval": held,
+                                         "last_held": held, "reason": "awaiting approval: " + describe})
+
+    def test_what_dw_prints_from_the_agents_command_is_shown_with_visible_marks(self):
+        path, rid = self.start_run()
+        segment = "git push origin main\x1b[2K\u202e#x\nrm -rf ~"
+        self.crafted_hold(path, rid, segment, describe="push\x1b]0;t\x07 to\u2066 main\nnow")
+        out = self.dw("status").stdout
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("\u202e", out)
+        self.assertNotIn("\u2066", out)
+        self.assertIn("push?]0;t? to? main\u23cenow (rule git-push-default, action 0123456789abcdef)",
+                      out)
+        # The JSON keeps the exact text.
+        data = json.loads(self.dw("status", "--json").stdout)
+        view = [v for v in data["needs_owner"] if v["id"] == rid][0]
+        self.assertEqual(view["pending"]["describe"], "push\x1b]0;t\x07 to\u2066 main\nnow")
+        # The confirmation details (printed before the terminal check) are marked too, and an
+        # automatic approval for such a segment is refused outright.
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid)
+        self.assertEqual(r.returncode, 2)
+        printed = r.stdout + r.stderr
+        for raw in ("\x1b", "\u202e", "\x07", "\u2066"):
+            self.assertNotIn(raw, printed)
+        self.assertIn("segment: git push origin main?[2K?#x\u23cerm -rf ~", printed)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                    "--action", "0123456789abcdef")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("control character", r.stderr)
+        self.assertNotIn("\x1b", r.stderr)
+        self.assertIsNone(json.loads(self.dw("project", "list", "--json").stdout)[0]
+                          .get("auto_approve"))
+
+    def test_segments_with_a_tab_line_break_or_format_character_are_refused(self):
+        path, rid = self.start_run()
+        for segment in ("git push origin main\t", "git push\norigin main",
+                        "git push origin\u200b main", "git push origin main\x7f"):
+            with self.subTest(segment=segment):
+                self.crafted_hold(path, rid, segment)
+                r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                            "--action", "0123456789abcdef")
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn("control character", r.stderr)
+        self.assertIsNone(json.loads(self.dw("project", "list", "--json").stdout)[0]
+                          .get("auto_approve"))
+
+    def test_the_list_shows_entries_with_visible_marks(self):
+        self.start_run()
+        self.set_entries("slotme", [self.entry("git-push-default", "git push\x1b[2K origin\nmain",
+                                               "/w/\u202eapp")])
+        r = self.dw("project", "auto-approve", "slotme", "--list")
+        self.assertEqual(r.returncode, 0)
+        for raw in ("\x1b", "\u202e", "\n" + "main"):
+            self.assertNotIn(raw, r.stdout)
+        self.assertIn("git push?[2K origin\u23cemain", r.stdout)
+        self.assertIn("/w/?app", r.stdout)
+        stored = json.loads(self.dw("project", "list", "--json").stdout)[0]["auto_approve"][0]
+        self.assertEqual(stored["match"], "git push\x1b[2K origin\nmain")

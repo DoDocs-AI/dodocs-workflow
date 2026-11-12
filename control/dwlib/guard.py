@@ -9,12 +9,29 @@ is refused every matching action outright, without asking.
 Classification rule for what the parser does not understand: a command whose program is
 SENSITIVE (see `sensitive_programs`: every program a rule names, git, gh, ssh, scp, rsync,
 curl, wget, osascript, dw, the shells, interpreters given inline code, and every wrapper this
-module unwraps) is held as `control` ("command cannot be read") when anything that decides
+module unwraps) is held as `unreadable` ("command cannot be read") when anything that decides
 its classification cannot be read: an unknown option shape of a wrapper or interpreter, a
 word only known at run time (substitution, variable, glob, or brace too large to expand) in
 the subcommand, remote, branch or refspec, URL, target path or HTTP-method position, or
 quoting the lexer cannot follow. For any other program, unknown syntax is allowed. Control
 checks (dw, the control point's files, agtermctl, other agent CLIs) always apply.
+
+`unreadable` is its own category (rule id `control-unreadable`, kept for existing records): the
+owner can approve it once, with `dw approve`, or for the rest of the run, which turns this
+fail-closed reading off for that run. It means one thing only: a known program with a computed
+ARGUMENT (`kubectl $VERB pods`, `git push origin "$B"`). Anything where the program or the code
+itself is computed (a run-time program word, loader, script operand, `-c`/`eval` value, an
+unresolved same-command function call, unscannable code), or that may change the control point,
+is `control-unreadable-state` (category `control`). So is inline interpreter code (any
+interpreter; `-c`/`-e` code or a here-document on stdin) that visibly starts a process (a
+spawning primitive of its family: python subprocess, os.system/popen/exec*/spawn*, pty,
+`__import__`, exec/eval, importlib; node child_process and its exec/spawn/execFile calls;
+perl/ruby system, exec, backticks, qx, open with a pipe) when its verdict would otherwise be
+plain `unreadable` (a quoted rule program name counts next to a spawning primitive), when an
+argument after `-` or after the code is computed, or when double-quoted code that spawns or
+evaluates has a run-time expansion: plain `unreadable` is only for inline code where no spawn is visible. When
+the same call also matches another category, that category decides the question, and an
+unreadable approval never lets it through.
 
 This catches direct and lightly wrapped risky commands from a cooperative agent. It is not
 a sandbox: a script the agent writes and then runs is not read.
@@ -28,13 +45,14 @@ import json
 import os
 import posixpath
 import re
+import secrets
 import shlex
 import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
-from . import agterm, events, paths, runs, store
+from . import agterm, autoapprove, events, paths, runs, store
 from .guard_shell import (  # noqa: F401
     ANALYSIS_BUDGET,
     _ASSIGNMENT_RE,
@@ -51,12 +69,18 @@ from .guard_shell import (  # noqa: F401
     _RUNNERS,
     _SHELL_STARTERS,
     _UNREADABLE_RULE,
+    UNREADABLE_ID,
+    UNREADABLE_STATE_ID,
     _Unreadable,
+    _is_unreadable,
+    _unreadable_state_match,
     _bounded_glob,
     _command_strings,
     _dynamic,
     _expand,
     _flags_values,
+    _function_plan,
+    _shell_word_lists,
     _home,
     _inside,
     _new_segment,
@@ -64,7 +88,9 @@ from .guard_shell import (  # noqa: F401
     _run_time_text,
     _short,
     _starts_shell_without_command,
+    _static_variables,
     _strip_prefix,
+    _substituted_segment,
     _tokens,
     _unquote,
     _unreadable_match,
@@ -116,7 +142,9 @@ from .guard_git import (  # noqa: F401
     _git_control_matches,
 )
 
-CATEGORIES = ("control", "destroy", "spend", "send", "deploy", "merge", "publish")
+# In the order a call matching several decides its question: the first one present wins, so
+# `unreadable` (last) decides only when nothing else matched.
+CATEGORIES = ("control", "destroy", "spend", "send", "deploy", "merge", "publish", "unreadable")
 # Spike B: a hook may wait at least this long (entry timeout 3600 s; 900 s was the longest probe).
 HOOK_MAX_WAIT_SECONDS = 900
 ASK_TIMEOUT = min(HOOK_MAX_WAIT_SECONDS - 30, 3000)
@@ -206,14 +234,30 @@ class _Ctx:
         self.loop_words: dict = {}  # loop variable -> the words it runs over
         self.stdin_commands: list = []  # the commands piped into the one being read, as words
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
+        # Set once the command may have made the tracked directory differ from the real one
+        # (a `cd` into a path that does not exist yet, a link, move or mount): an automatic
+        # approval limited to a directory no longer applies. Shared by every fork.
+        self.dir_doubt = {"set": False}
         # Whether this Bash command may write the run's result note at all (classify sets it:
         # see _plain_note_write); which words are spared is decided in _control_matches.
         self.note_plain = False
+        # Static variables of the Bash command (see guard_shell._static_variables), read in
+        # the same shell (its substitutions included) but not in a shell it starts.
+        self.vars: dict = {}
+        # (command text, {segment index: segment it runs, or None}, {indexes to skip}) for the
+        # small functions the command defines and calls (guard_shell._function_plan).
+        self.plan: Optional[tuple] = None
 
     def fork(self) -> "_Ctx":
         other = _Ctx.__new__(_Ctx)
         other.__dict__.update(self.__dict__)
         other.incomplete = False
+        return other
+
+    def new_shell(self) -> "_Ctx":
+        """A fork for text another shell or interpreter reads: the variables are not there."""
+        other = self.fork()
+        other.vars = {}
         return other
 
 
@@ -238,9 +282,9 @@ def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
             _Lexer(text).run()
         except _Unreadable as exc:
             if not _prose_with_apostrophe(re.sub(r"__dwsub\w*?__", "", text), exc):
-                out.append(_unreadable_match())
+                out.append(_unreadable_state_match())  # code that could not be scanned
             continue
-        out += _shell_matches(text, ctx.fork(), depth + 1)
+        out += _shell_matches(text, ctx.new_shell(), depth + 1)
     return out
 
 
@@ -413,14 +457,14 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
                      "describe": "run commands on remote hosts: %s" % _short(" ".join(tokens)),
                      "segment": _segment_text(tokens)}]
         if all(t.startswith("-") or t.startswith(":::") for t in tokens[1:]):
-            return [_unreadable_match()]  # the commands come from standard input
+            return [_unreadable_state_match()]  # the commands come from standard input
     if name in _SHELL_STARTERS:
         for body in seg["heredocs"]:
-            out += _shell_matches(body, ctx.fork(), depth + 1)
+            out += _shell_matches(body, ctx.new_shell(), depth + 1)
         if seg["pipe_in"] and not seg["heredocs"]:
-            out.append(_unreadable_match())  # its input comes from another command
+            out.append(_unreadable_state_match())  # its input comes from another command
         elif not seg["heredocs"] and _starts_shell_without_command(name, tokens):
-            out.append(_unreadable_match())  # an interactive shell this guard cannot see
+            out.append(_unreadable_state_match())  # an interactive shell this guard cannot see
     sub = ctx.fork()
     if name in ("env", "sudo", "doas", "su", "runuser", "nsenter", "chroot", "unshare") and \
             any(t in ("-C", "-D", "--chdir", "-w", "--wd") or t.startswith("--chdir=") or
@@ -470,13 +514,29 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
         return [_unreadable_match()]
     try:
         lexed = _Lexer(text).run()
-    except _Unreadable:
+    except _Unreadable as exc:
+        # Nested text (a here-document or string a shell runs) that cannot be scanned, or an
+        # arithmetic subscript the shell evaluates, may do anything: held as control.
+        if depth > 0 or "arithmetic subscript" in str(exc):
+            return [_unreadable_state_match()]
         return [_unreadable_match()]
     matches: list = []
     ctx.sub_bodies = lexed.subs
     start = ctx.fork()
     before = None
-    for seg in lexed.segments:
+    calls, skip = {}, set()
+    if depth == 0 and ctx.plan is not None and ctx.plan[0] == text:
+        _text, calls, skip = ctx.plan
+    for index, seg in enumerate(lexed.segments):
+        if index in skip:
+            continue  # the definition of a function read at its calls
+        if index in calls:
+            if calls[index] is None:
+                # A function call not read: what runs is unknown (still read by its words).
+                matches.append(_unreadable_state_match())
+            else:
+                seg = calls[index]
+        seg = _substituted_segment(seg, ctx.vars)
         # Everything upstream in the same pipeline may put file names on standard input.
         upstream = list(ctx.stdin_commands) if seg["pipe_in"] else []
         if seg["pipe_in"] and before is not None:
@@ -494,7 +554,7 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
         # an unreadable reading only when it names a guarded program (plain arithmetic such
         # as `$(( (a+b)*2 ))` does not read as a command).
         matches += [m for m in _shell_matches(body, start.fork(), depth + 1)
-                    if m["id"] != "control-unreadable" or _GUARDED_NAME_RE.search(body)]
+                    if not _is_unreadable(m) or _GUARDED_NAME_RE.search(body)]
     return matches
 
 
@@ -537,8 +597,11 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     ctx.incomplete = incomplete
     matches: list = []
     tokens = original
+    inline_spawn = False  # inline interpreter code of this command visibly starts a process
+    if _MOVES_PATHS_RE.search(" ".join(list(original) + list(seg.get("heredocs") or []))):
+        ctx.dir_doubt["set"] = True
     if any(_GIT_ENV_RE.match(t) for t in original):
-        matches.append(_unreadable_match())
+        matches.append(_unreadable_state_match())  # a git environment override
     matches += _loader_env_matches(original, ctx, depth)
     wrapped = False
     for _ in range(16):
@@ -547,12 +610,15 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             break
         prog = tokens[0]
         if _dynamic(prog):
-            matches.append(_unreadable_match())
+            # A computed program word may be anything, the control point included: never
+            # approvable for the run (variables and functions of the same command are
+            # already read by now).
+            matches.append(_unreadable_state_match())
             tokens = []
             break
         name = os.path.basename(prog)
         if name in _TEST_PROGRAMS and _arithmetic_subscript(tokens):
-            matches.append(_unreadable_match())  # an arithmetic operand runs its substitutions
+            matches.append(_unreadable_state_match())  # an arithmetic operand runs its substitutions
         if name in SHELLS:
             # The -c value (or the first operand, the script file) is the code. A run-time
             # value there cannot be read; later operands are data for the script.
@@ -561,16 +627,17 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             operands = [a for a in args if not a.startswith(("-", "+"))]
             for code in codes:
                 if _run_time_text(code) or "__dwsub" in code:
-                    matches.append(_unreadable_match())
+                    matches.append(_unreadable_state_match())  # code that cannot be scanned
                 else:
                     matches += _string_matches([code], ctx, depth)
-            if not codes and operands and _run_time_text(operands[0]):
-                matches.append(_unreadable_match())  # the script itself is computed
+            if not codes and operands and _run_time_text(operands[0]) and "-s" not in args:
+                # The script itself is computed: what runs is unknown.
+                matches.append(_unreadable_state_match())
             stdin_program = not operands or operands[0] in ("-", "/dev/stdin") or "-s" in args
             if stdin_program and seg["pipe_in"]:
-                matches.append(_unreadable_match())
+                matches.append(_unreadable_state_match())
             for body in seg["heredocs"]:
-                matches += _shell_matches(body, ctx.fork(), depth + 1)
+                matches += _shell_matches(body, ctx.new_shell(), depth + 1)
             tokens = []
             break
         if _INTERPRETER_RE.match(name):
@@ -589,15 +656,30 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                                stop=_LOADER_LETTERS.get(family, ""))
             for loader in _loader_args(rest, family):
                 if _expand(loader) is None or "__dwsub" in loader:
-                    matches.append(_unreadable_match())  # code loaded from a run-time name
+                    matches.append(_unreadable_state_match())  # code loaded from a run-time name
                 else:
                     matches += _inline_matches(loader, ctx, depth)
             operands = [a for a in rest if not a.startswith("-")]
             for code in codes:
-                if _run_time_text(code) or "__dwsub" in code:
-                    matches.append(_unreadable_match())
-            if not codes and operands and _run_time_text(operands[0]):
-                matches.append(_unreadable_match())  # the script itself is computed
+                if _run_time_text(code) or "__dwsub" in code or (
+                        _double_quoted_run_time(code, seg["words"]) and
+                        (_code_spawns(code, family) or _EVAL_CALL_RE.search(code))):
+                    # code that cannot be scanned: computed, or a run-time expansion in code
+                    # that starts a process or runs code
+                    matches.append(_unreadable_state_match())
+            # `python3 - ARG...`: the program is read from standard input, the words after `-`
+            # are data for it. With a here-document the body is the code (scanned below).
+            stdin_script = not codes and _script_word(rest) in ("-", "/dev/stdin")
+            if stdin_script and not seg["heredocs"] and not seg["pipe_in"]:
+                matches.append(_unreadable_match())  # the code comes from somewhere unseen
+            if not codes and not stdin_script and operands and _run_time_text(operands[0]):
+                matches.append(_unreadable_state_match())  # the script itself is computed
+            # Code that visibly starts a process is never plain unreadable: what it runs cannot
+            # be read (a computed argument may be the very command it runs).
+            code_texts = list(codes) + (list(seg["heredocs"]) if stdin_script else [])
+            inline_spawn = any(_code_spawns(t, family) for t in code_texts)
+            if inline_spawn and any(_computed_word(a) for a in rest if a not in codes):
+                matches.append(_unreadable_state_match())
             for arg in rest:
                 matches += _inline_matches(arg, ctx, depth)
             for body in seg["heredocs"]:
@@ -606,13 +688,13 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                 for text in rest + list(seg["heredocs"]):
                     found = []
                     for m in re.finditer(r"\b(spawn|system|exec)\s+((?:-\w+\s+)*)([^;\n}\]]+)", text):
-                        found += _shell_matches(m.group(3), ctx.fork(), depth + 1)
+                        found += _shell_matches(m.group(3), ctx.new_shell(), depth + 1)
                     if not found and re.search(r"\b(spawn|system|exec)\b", text) and \
                             _GUARDED_NAME_RE.search(text):
-                        found.append(_unreadable_match())
+                        found.append(_unreadable_state_match())
                     matches += found
-            if seg["pipe_in"] and (not operands or operands[0] in ("-", "/dev/stdin")):
-                matches.append(_unreadable_match())
+            if seg["pipe_in"] and not codes and (not operands or stdin_script):
+                matches.append(_unreadable_state_match())  # code from another command
             if operands and os.path.basename(operands[0]) == "dw":
                 tokens = rest[rest.index(operands[0]):]
                 continue
@@ -630,15 +712,16 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
         if name == "eval":
             body = " ".join(tokens[1:])
             if "$" in body or "`" in body or "__dwsub" in body:
-                matches.append(_unreadable_match())
+                matches.append(_unreadable_state_match())  # text the shell runs, unscanned
             else:
                 matches += _shell_matches(body, ctx.fork(), depth + 1)
             tokens = []
             break
         if name in ("source", "."):
             target = tokens[1] if len(tokens) > 1 else ""
-            if "__dwsub" in target or target in ("-", "/dev/stdin") or \
-                    target.startswith("/dev/fd") or "://" in target or "$" in target:
+            if "__dwsub" in target or target in ("-", "/dev/stdin") or target.startswith("/dev/fd"):
+                matches.append(_unreadable_state_match())  # code from a stream, unscanned
+            elif "://" in target or "$" in target:
                 matches.append(_unreadable_match())
             break
         if name in WRAPPERS:
@@ -668,7 +751,14 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             match = _render(rule, " ".join(original), _segment_text(original))
             if "segment" in match:
                 match["dir"] = ctx.cwd  # where it runs: part of an approval's identity
+                if ctx.dir_doubt["set"]:
+                    match["dir_doubt"] = True
             matches.append(match)
+    if inline_spawn and all(m.get("category") in ("unreadable", "control") for m in matches):
+        # Plain `unreadable` is only for inline code where no process start is in sight. (When
+        # another category matched, that one decides the question anyway.)
+        matches = [_unreadable_state_match() if m.get("id") == UNREADABLE_ID else m
+                   for m in matches]
     return matches
 
 
@@ -681,6 +771,16 @@ def _change_dir(tokens: list, ctx: _Ctx) -> None:
         ctx.cwd = None
     else:
         ctx.cwd = _resolve(target, ctx.cwd)
+        if ctx.cwd is not None and not os.path.isdir(ctx.cwd):
+            ctx.dir_doubt["set"] = True  # made (or linked) by the command itself, if at all
+
+
+# A command that may make a directory or link appear where a path pointed to something else:
+# ln, mv, rename, mount, link, cp making links, and inline code that links or renames.
+_MOVES_PATHS_RE = re.compile(
+    r"(?<![\w.-])(ln|gln|mv|gmv|rename|renameat|mount|link|mount_\w+)(?![\w.-])|symlink|"
+    r"(?<![\w.-])g?cp(?![\w.-])[^;&|\n]*\s-(\w*[sl]\w*|-symbolic-link|-link)(?![\w-])|"
+    r"\b(os|shutil|fs|File|FileUtils)\s*\.\s*(rename\w*|replace|move|link\w*|ln\w*|mv)\b")
 
 
 # Wrappers that run their command in the CURRENT shell, so a `cd` through them moves it.
@@ -949,8 +1049,8 @@ _INLINE_PATTERNS = [
     (re.compile(r"\bgit\s+push\b"), "inline-git-push", "merge", "push from inline code"),
     (re.compile(r"\b(gh\s+pr|glab\s+mr)\s+merge\b"), "inline-pr-merge", "merge",
      "merge a pull request from inline code"),
-    (re.compile(r"\b(kubectl|oc)\b[^\n'\"]*\b(apply|create|replace|patch|delete|rollout|scale|"
-                r"set|edit|drain)\b"), "inline-kubectl", "deploy", "change a cluster from inline code"),
+    (re.compile(r"\b(kubectl|oc)\b[^\n'\"]*\b(apply|create|replace|patch|delete|scale|set|edit|"
+                r"drain)\b"), "inline-kubectl", "deploy", "change a cluster from inline code"),
     (re.compile(r"\bhelm\s+(install|upgrade|uninstall|delete|rollback|push)\b"), "inline-helm",
      "deploy", "change a Helm release from inline code"),
     (re.compile(r"\b(docker|podman)\s+((image|manifest|compose)\s+)?push\b"), "inline-docker-push",
@@ -986,21 +1086,156 @@ _DW_REF_RE = re.compile(
     r"project['\"]?\s*,?\s*['\"]?\s*(add|remove))\b|(bin|control)/dw\b")
 _LITERAL_RE = re.compile(r"'([^'\n]{1,2000})'|\"([^\"\n]{1,2000})\"")
 _URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+")
+# A process-spawning primitive in inline code, per interpreter family (a family-blind
+# `system(`/`exec(` would also hit `platform.system()` or a JavaScript `re.exec()`).
+_FAMILY_SPAWN_RE = {
+    "python": re.compile(r"subprocess|\bos\s*\.\s*(system|popen|exec\w*|spawn\w*|posix_spawn\w*)\b|"
+                         r"\bfrom\s+os\s+import\b|\bpty\b|__import__|\bimportlib\b|"
+                         r"(?<![.\w])(exec|eval)\s*\("),
+    "node": re.compile(r"child_process|(?<![.\w])(exec|execSync|execFile|execFileSync|spawn|spawnSync|"
+                       r"fork)\s*\(|\.\s*(execSync|execFile|execFileSync|spawn|spawnSync)\s*\(|"
+                       r"Bun\.spawn|Deno\.(run|Command)|spawn_sync"),
+    "perl": re.compile(r"\b(system|exec)\b|`|\bqx\s*\W|%x\W|\bopen\s*\(?[^;\n]*['\"][^'\"\n]*\|"),
+}
+_FAMILY_SPAWN_RE["pypy"] = _FAMILY_SPAWN_RE["python"]
+_FAMILY_SPAWN_RE["bun"] = _FAMILY_SPAWN_RE["deno"] = _FAMILY_SPAWN_RE["node"]
+_FAMILY_SPAWN_RE["ruby"] = re.compile(_FAMILY_SPAWN_RE["perl"].pattern +
+                                      r"|\bspawn\b|IO\s*\.\s*popen|\bOpen3\b|\bKernel\s*\.")
+_QUOTED_WORD_RE = re.compile(r"'([\w./+-]{1,64})'|\"([\w./+-]{1,64})\"")
+# Rule program names that are also ordinary words in code (`ws.on('open')`, `d['k']`), and
+# interpreters (which run code themselves): as a quoted word they say nothing.
+_RULE_NAME_EXEMPT = {"open", "k", "http", "https", "mail", "np", "pod", "cap", "ko", "sam", "mina"}
+
+
+def _names_rule_program(text: str, ctx: _Ctx) -> bool:
+    """Whether a whole quoted string literal in inline code is the name of a program a guard
+    rule names (`'npm'` in `['npm','publish']`), other than an interpreter or an ordinary word."""
+    names = {p for r in ctx.rules for p in (r.get("program") or ())}
+    for m in _QUOTED_WORD_RE.finditer(text):
+        word = m.group(1) if m.group(1) is not None else m.group(2)
+        if word in names and word not in _RULE_NAME_EXEMPT and not _INTERPRETER_RE.match(word):
+            return True
+    return False
+
+
+def _code_spawns(text: str, family: Optional[str]) -> bool:
+    """Whether inline code visibly starts a process: a spawning primitive of its interpreter
+    family (any known one when the family is not known). A quoted program name alone is not
+    one (`d['docker']`); it counts only next to a spawning primitive (see _inline_matches)."""
+    rx = _FAMILY_SPAWN_RE.get(family or "")
+    if rx is not None:
+        return bool(rx.search(text))
+    return bool(_SPAWN_RE.search(text)) or any(r.search(text) for r in _FAMILY_SPAWN_RE.values())
+
+
+# Code that runs other code it is given: exec/eval-style calls in any interpreter family.
+_EVAL_CALL_RE = re.compile(r"(?<![.\w])(exec|eval|compile|Function)\s*\(|\bnew\s+Function\b|"
+                           r"\bvm\s*\.|(?<![.\w$@%])eval\b")
+
+
+_EXPANSION_START_RE = re.compile(r"\$(?:[A-Za-z_0-9@*#?!$-]|\{|\()")
+
+
+def _unquoted_expansion(raw: str) -> bool:
+    """Whether a raw shell word has an expansion the shell performs (`$VAR`, `${...}`,
+    `$(...)`, backticks) outside single quotes, other than $HOME."""
+    raw = raw.replace("${HOME}", "").replace("$HOME", "")
+    i, single = 0, False
+    while i < len(raw):
+        ch = raw[i]
+        if single:
+            if ch == "'":
+                single = False
+        elif ch == "\\":
+            i += 2
+            continue
+        elif ch == "'" and raw[:i].count('"') % 2 == 0:
+            single = True
+        elif ch == "`" or (ch == "$" and _EXPANSION_START_RE.match(raw, i)):
+            return True
+        i += 1
+    return False
+
+
+def _double_quoted_run_time(code: str, raw_words: list) -> bool:
+    """Whether inline code given as a value (`-c`/`-e`) comes from a raw word in which the
+    shell expands something at run time (a double-quoted `"...$X..."`): the code is computed.
+    Same-command literal variables are already resolved in the words."""
+    for raw in raw_words:
+        try:
+            if _tokens([raw]) != [code]:
+                continue
+        except _Unreadable:
+            continue
+        if _unquoted_expansion(raw):
+            return True
+    return False
+
+
+def _computed_word(word: str) -> bool:
+    """A word whose text is only known at run time, in whole or in part."""
+    return "__dwsub" in word or _expand(word) is None
+
+
+_INLINE_ROLLOUT_CHANGE_RE = re.compile(
+    r"\b(kubectl|oc)\b[^\n'\";&|()]*\brollout\b(\s+-\S+(\s+[^\s\-]\S*)?)*?"
+    r"\s+(restart|undo|pause|resume|latest|cancel|retry)\b")
+
+
+_ROLLOUT_ACTION_WORD_RE = re.compile(r"\b(restart|undo|pause|resume|latest|cancel|retry)\b")
+_INLINE_SUBSTITUTION_RE = re.compile(r"\$\([^()]*\)|`[^`]*`|\$\{[^{}]*\}")
+
+
+def _inline_rollout_change(text: str) -> bool:
+    """Whether inline code runs `kubectl|oc ... rollout` other than `rollout status` or
+    `rollout history` (read the same way as on the command line: `_kubectl_words`). Coarse
+    backstop: with `kubectl`/`oc` and `rollout` both in the text, any rollout action word
+    anywhere is a change, and every `rollout` must belong to an invocation read as a read once
+    substitutions are replaced by a placeholder word."""
+    if _INLINE_ROLLOUT_CHANGE_RE.search(text):
+        return True
+    if re.search(r"\b(kubectl|oc)\b", text) and re.search(r"\brollout\b", text):
+        if _ROLLOUT_ACTION_WORD_RE.search(text):
+            return True
+        neutral = _INLINE_SUBSTITUTION_RE.sub(" dwsubst ", text)
+        reads = 0
+        for m in re.finditer(r"(?=\b(kubectl|oc)\b([^\n'\";&|()]*))", neutral):
+            positional = _kubectl_words([m.group(1)] + m.group(2).split())
+            if positional is not None and positional[:1] == ["rollout"] and \
+                    positional[1:2] in (["status"], ["history"]):
+                reads += 1
+        if reads < len(re.findall(r"\brollout\b", neutral)):
+            return True
+    # Each occurrence on its own (overlapping), up to a shell separator or closing quote.
+    for m in re.finditer(r"(?=\b(kubectl|oc)\b([^\n'\";&|()]*))", text):
+        words = m.group(2).split()
+        if "rollout" not in words:
+            continue
+        positional = _kubectl_words([m.group(1)] + words)
+        if positional is None or positional[:1] != ["rollout"] or \
+                positional[1:2] not in (["status"], ["history"]):
+            return True
+    return False
 
 
 def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> list:
-    """Matches for code given inline to an interpreter (python -c, node -e, a here-document...)."""
+    """Matches for code given inline to an interpreter (python -c, node -e, a here-document...).
+
+    Code that starts a process where a guarded program or a remote address is in sight, and
+    that is not read as anything more precise, is `control-unreadable-state`: what it runs
+    cannot be read, and a run-wide approval of unreadable commands must not cover it."""
     out: list = []
     if depth > 6:
         return [_unreadable_match()]
     for m in _LITERAL_RE.finditer(text):
         literal = m.group(1) if m.group(1) is not None else m.group(2)
         if len(literal.split()) >= 2:
-            out += [x for x in _shell_matches(literal, ctx.fork(), depth + 1)
-                    if x["id"] != "control-unreadable"]
+            out += [x for x in _shell_matches(literal, ctx.new_shell(), depth + 1)
+                    if not _is_unreadable(x)]
     found = {x["category"] for x in out}
     for rx, rid, category, describe in _INLINE_PATTERNS:
-        if category not in found and rx.search(text):
+        if category not in found and (rx.search(text) or
+                                      (rid == "inline-kubectl" and _inline_rollout_change(text))):
             out.append({"id": rid, "category": category, "describe": "%s: %s" % (describe, _short(text)),
                         "segment": text})
             found.add(category)
@@ -1011,8 +1246,8 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
         out.append(_state_match(text))
     if not out and (spawn or _SPAWN_RE.search(text)):
         remote = any(not _is_local_host(_url_host(u)) for u in _URL_RE.findall(text))
-        if remote or _GUARDED_NAME_RE.search(text):
-            out.append(_unreadable_match())
+        if remote or _GUARDED_NAME_RE.search(text) or _names_rule_program(text, ctx):
+            out.append(_unreadable_state_match())
     return out
 
 
@@ -1155,7 +1390,9 @@ def _loop_words(original: list, ctx: _Ctx) -> bool:
     if words[:1] not in (["for"], ["select"]) or len(words) < 2:
         return False
     values = words[3:] if words[2:3] == ["in"] else []
-    ctx.loop_words[words[1]] = values if len(values) <= MAX_LOOP_WORDS else None  # None: not read
+    readable = len(values) <= MAX_LOOP_WORDS and \
+        not any("__dwsub" in v or "$" in v or "`" in v for v in values)
+    ctx.loop_words[words[1]] = values if readable else None  # None: not read
     return True
 
 
@@ -1271,8 +1508,11 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
     every = list(original) + list(redirects)
     variants = [(i, _loop_variants(every[i], ctx)) for i in indexes]
     if any(found is None for _, found in variants):
-        out.append(_unreadable_match())  # a write position uses a loop variable too long to read
-    if any(_word_hits(w, ctx, i in spared) for i, found in variants for w in found or ()):
+        # A write position uses a loop variable whose words cannot be read (too many, or
+        # only known at run time): the target cannot be resolved.
+        out.append(_unreadable_state_match())
+    if any(_word_hits(w, ctx, i in spared) for i, found in variants
+           for w in (found if found is not None else [every[i]])):
         out.append(_state_match(" ".join(original)))
     return out
 
@@ -1341,7 +1581,7 @@ def _plain_note_write(command: str, ctx: _Ctx, depth: int = 0) -> bool:
     sub.sub_bodies = lexed.subs
     for seg in lexed.segments:
         try:
-            words = _tokens(seg["words"])
+            words = _tokens(_substituted_segment(seg, ctx.vars)["words"])
         except _Unreadable:
             return False
         while words and _ASSIGNMENT_RE.match(words[0]):
@@ -1451,9 +1691,16 @@ def _unreadable_deciding_word(rule: dict, nonflags: list) -> bool:
     return False
 
 
+def _script_word(args: list) -> Optional[str]:
+    """An interpreter's script word: the first argument that is `-` or not an option."""
+    return next((a for a in args if a == "-" or not a.startswith("-")), None)
+
+
 def _first_rule(tokens: list, seg: dict, ctx: _Ctx) -> Optional[dict]:
     name = os.path.basename(tokens[0])
     nonflags = [t for t in tokens[1:] if not t.startswith("-")]
+    if _INTERPRETER_RE.match(name) and _script_word(tokens[1:]) in ("-", "/dev/stdin"):
+        nonflags = []  # a program on standard input: the words after `-` are its data
     undecided = None
     for rule in ctx.rules:
         if rule.get("tool") != "Bash":
@@ -1738,6 +1985,53 @@ def _check_osascript_beyond_notification(tokens, seg, ctx) -> bool:
                         r'(\s+subtitle\s+"[^"\\]*")?\s*$', code)
 
 
+# kubectl's own options that take a separate value, and those that take none. An option in
+# neither list (and not --name=value or a short option with its value attached) has an
+# unknown arity: the command is then read as a change.
+_KUBECTL_VALUE_OPTIONS = {
+    "-n", "--namespace", "--context", "--kubeconfig", "-o", "--output", "--cluster", "--user",
+    "-l", "--selector", "-f", "--filename", "-c", "--container", "-s", "--server", "--token",
+    "--as", "--as-group", "--as-uid", "--request-timeout", "--cache-dir",
+    "--certificate-authority", "--client-certificate", "--client-key", "--tls-server-name",
+    "--field-selector", "--timeout", "--revision", "-L", "--label-columns", "--template",
+    "--username", "--password", "-v", "--v"}
+_KUBECTL_FLAG_OPTIONS = {"-A", "--all-namespaces", "-w", "--watch", "--insecure-skip-tls-verify",
+                         "-R", "--recursive", "--no-headers", "--show-labels", "--all"}
+
+
+def _kubectl_words(tokens: list) -> Optional[list]:
+    """The non-option words of a kubectl command, options and their values skipped wherever
+    they are; None when an option's arity is unknown."""
+    out: list = []
+    i = 1
+    while i < len(tokens):
+        t = tokens[i]
+        if t == "--":
+            return out + tokens[i + 1:]
+        if t.startswith("-") and len(t) > 1:
+            if t.startswith("--") and "=" in t:
+                i += 1
+            elif t in _KUBECTL_VALUE_OPTIONS:
+                i += 2
+            elif t in _KUBECTL_FLAG_OPTIONS or re.fullmatch(r"-[nocsflLv]=?\S+", t):
+                i += 1
+            else:
+                return None
+            continue
+        out.append(t)
+        i += 1
+    return out
+
+
+def _check_kubectl_change(tokens, seg, ctx) -> bool:
+    """The kubectl-change rule matched a subcommand: a change, unless it is exactly
+    `rollout status` or `rollout history` (deny by default)."""
+    words = _kubectl_words(tokens)
+    if words is None or words[:1] != ["rollout"]:
+        return True
+    return words[1:2] not in (["status"], ["history"])
+
+
 def _check_open_mail_app(tokens, seg, ctx) -> bool:
     apps = ("mail", "messages", "microsoft outlook", "outlook", "slack", "telegram", "whatsapp")
     for i, t in enumerate(tokens[1:], 1):
@@ -1752,6 +2046,7 @@ def _check_open_mail_app(tokens, seg, ctx) -> bool:
 
 _CHECKS = {
     "open_mail_app": _check_open_mail_app,
+    "kubectl_change": _check_kubectl_change,
     "osascript_beyond_notification": _check_osascript_beyond_notification,
     "git_push_default_branch": _check_git_push_default_branch,
     "git_push_tags": _check_git_push_tags,
@@ -1872,11 +2167,31 @@ def _combine(matches: list) -> Optional[dict]:
         unique.sort(key=lambda m: CATEGORIES.index(m["category"]))
         out = {"id": "+".join(m["id"] for m in unique), "category": unique[0]["category"],
                "describe": "; ".join(m["describe"] for m in unique), "pairs": pairs}
-    for internal in ("segment", "dir", "where"):
+    for internal in ("segment", "dir", "where", "dir_doubt"):
         out.pop(internal, None)
     if all("segment" in m for m in matches):
         out["keys"] = keys
+    if any(m.get("dir_doubt") for m in matches):
+        # A directory of the keys may not be where the command really runs: automatic
+        # approvals limited to a directory do not apply (see _auto_approved).
+        out["dir_doubt"] = True
     return out
+
+
+_CONTROL_TEXT_RE = re.compile(
+    r"(?<![\w.-])(?:[\w.~-]*/)*dw(?![\w.-])|\.dodocs-workflow|dw_home|dw_run_id|\.claude/settings|"
+    r"settings\.local\.json|hooks\.conf|agtermctl|\.git/config|\.git/hooks|"
+    r"\.git/info/attributes|git_dir|core\.hookspath|node_options|perl5opt|rubyopt|"
+    r"pythonstartup|bash_env|ld_preload|dyld_insert_libraries|lessopen|lessclose")
+
+
+def _names_control_point(text: str) -> bool:
+    """Whether a command's raw text, read loosely (any case; also with quotes and backslashes
+    removed), mentions the control point or a file or variable that protects it."""
+    low = text.lower()
+    loose = re.sub(r"[\\'\"]", "", low)
+    home = os.path.realpath(str(paths.home())).lower()
+    return any(_CONTROL_TEXT_RE.search(t) or home in t for t in (low, loose))
 
 
 def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
@@ -1895,18 +2210,31 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
     if tool_name == "Bash" or (shell_like and tool_name not in WRITE_TOOLS):
         command = str(tool_input.get("command") or "")
         ctx.full_text = command
+        try:
+            lexed = _Lexer(command).run()
+            segments, word_lists = lexed.segments, _shell_word_lists(lexed)
+        except _Unreadable:
+            segments, word_lists = [], None
+        ctx.vars = _static_variables(command, segments, word_lists)
+        calls, skip = _function_plan(command, segments, word_lists)
+        ctx.plan = (command, calls, skip)
         ctx.note_plain = _plain_note_write(command, ctx)
         matches = [dict(m) for m in _shell_matches(command, ctx)]
         # Segment-level identity only for a command positively known to be straight-line,
         # every match of which is about one of its own top-level simple commands. Otherwise
         # (a loop in any dialect, a pipe, a wrapper, inline code, a match about the whole line
         # or an unreadable one) each match is about the whole command: its exact text.
+        if any(m["id"] == UNREADABLE_ID for m in matches) and _names_control_point(command):
+            matches = [_unreadable_state_match() if m["id"] == UNREADABLE_ID else m
+                       for m in matches]
         flat = _straight_line_segments(command)
         straight = flat is not None and all(m.get("segment") in flat for m in matches)
         start = os.path.realpath(cwd) if cwd else None
         for m in matches:
             if not straight:
                 m["segment"], m["dir"] = command.strip(), start
+                if ctx.dir_doubt["set"]:
+                    m["dir_doubt"] = True  # the whole command is the action
             m.setdefault("dir", start)
             if m["dir"] != start:  # shown in the question, right after the describe text
                 m["where"] = _middle(m["dir"], WHERE_MAX) if m["dir"] else "an unknown directory"
@@ -2159,8 +2487,16 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
     pairs = _pairs(match)
     parts = match["id"].split("+")
     control = match["category"] == "control"
+    # What "for this run" remembers: every rule of the question, except that the unreadable
+    # class is remembered only from a question about it alone (never from one another
+    # category decides).
+    remembered = parts if match["category"] == "unreadable" else \
+        [p for p in parts if p != UNREADABLE_ID]
     describe = "; ".join(d for _, d in pairs)
     now = time.time()
+    # The id the owner names (`dw status`, `--from-run --action`): random, new for each hold,
+    # so it says "the action I checked", never just "a command that looks like it".
+    new_action_id = secrets.token_hex(8)
     outcome: dict = {}
 
     def claim(r):
@@ -2183,9 +2519,18 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         outcome["kind"] = "ask"
         if not pending:
             pending = {"rule": match["id"], "category": match["category"], "describe": describe,
-                       "tool": tool, "action": action, "since": now}
+                       "tool": tool, "action": action, "action_id": new_action_id, "since": now}
+            if match.get("keys"):
+                pending["keys"] = match["keys"]
+        elif not pending.get("action_id"):
+            pending = {**pending, "action_id": new_action_id}
+        # What `dw project auto-approve --from-run` names when nothing is pending any more:
+        # the same hold as the pending one, so the same action id.
+        held = {"rule": match["id"], "category": match["category"], "describe": describe,
+                "tool": tool, "keys": match.get("keys") or [], "action": action,
+                "action_id": pending["action_id"], "at": now}
         return runs._moved(r, now, state="blocked", reason="awaiting approval: " + describe,
-                           pending_approval=pending)
+                           pending_approval=pending, last_held=held)
 
     run = store.update_run(run_id, claim)
     kind = outcome["kind"]
@@ -2208,7 +2553,8 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
                  "%s: %s" % (name, describe))
         buttons = [("once", "Approve once")]
         if not control:
-            buttons.append(("run", "Approve for this run"))
+            buttons.append(("run", "Approve unreadable commands for this run"
+                            if match["category"] == "unreadable" else "Approve for this run"))
         buttons.append(("deny", "Deny"))
         # One line: AGTerm refuses control characters, and agterm sanitises the rest.
         count = "%d guarded actions: " % len(pairs) if len(pairs) > 1 else ""
@@ -2275,7 +2621,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             out = runs._moved(out, time.time(), state="running", reason=None)
         if answer == "run":
             out["approvals"] = list(r.get("approvals") or []) + \
-                [p for p in parts if p not in (r.get("approvals") or [])]
+                [p for p in remembered if p not in (r.get("approvals") or [])]
         if answer == "deny":
             grant = _matching_grant(grants, action)
             if grant is not None:
@@ -2381,7 +2727,35 @@ def decide(payload: dict) -> Optional[dict]:
     match = classify(tool, tool_input, cwd, project.get("path") or cwd, rules)
     if match is None:
         return None
+    if _auto_approved(project, run, match, tool):
+        return None
     return _hold(project, run, match, tool, tool_input)
+
+
+def _auto_approved(project: dict, run: dict, match: dict, tool: str) -> bool:
+    """Whether every match of an active run's shell call is covered by an automatic approval of
+    the run's project (see autoapprove). Never for a call with a `control` match. Malformed
+    entries are ignored and logged once per call. A covered call is logged to dw.log."""
+    if tool != "Bash" or match["category"] == "control" or \
+            any(autoapprove.is_control_rule(p) for p in match["id"].split("+")):
+        return False
+    keys = match.get("keys")
+    if not keys or run.get("state") not in runs.ACTIVE_STATES:
+        return False
+    entries, problems = autoapprove.valid_entries(project)
+    if problems:
+        events.log_error("guard auto-approve", GuardError("ignored: " + "; ".join(problems)))
+    if not entries:
+        return False
+    # An entry limited to a directory applies only when the directory is known for certain.
+    doubt = bool(match.get("dir_doubt"))
+    if not all(autoapprove.covers(entries, str(rule), str(segment),
+                                  None if doubt or directory == _UNKNOWN_DIR else directory)
+               for rule, segment, directory in keys):
+        return False
+    events.log_text("auto-approved run %s rule %s" % (run["id"], match["id"]),
+                    " ; ".join(str(k[1]) for k in keys))
+    return True
 
 
 def run_hook(stdin_text: str) -> Optional[dict]:
@@ -2411,9 +2785,9 @@ def _resolve_pending(run_id: str, grant: bool) -> dict:
         pending = r.get("pending_approval")
         if not pending:
             raise NothingPending("run %s has no pending approval" % run_id)
+        rules = str(pending.get("rule") or "").split("+")
         if grant and (pending.get("category") == "control" or
-                      str(pending.get("rule") or "").startswith("control-") or
-                      "+control-" in str(pending.get("rule") or "")):
+                      any(p.startswith("control-") and p != UNREADABLE_ID for p in rules)):
             raise ApprovalRefused(
                 "%s changes the control point; it can be approved only in the run's own dialog"
                 % pending.get("describe"))

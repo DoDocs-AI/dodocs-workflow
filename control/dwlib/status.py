@@ -106,7 +106,10 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
     live = None
     session_missing = False
     session_unknown = False
+    session_open = False
     stalled = False
+    if sessions is not None and state in ENDED and run.get("agterm_session"):
+        session_open = run["agterm_session"] in sessions
     if sessions is not None and state in ACTIVE and run.get("agterm_session"):
         session = sessions.get(run["agterm_session"])
         if session is None:
@@ -128,9 +131,28 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
         "stalled": stalled,
         "session_missing": session_missing,
         "session_unknown": session_unknown,
+        "session_open": session_open,
         "progress": find_progress(project["path"], run) if state in ACTIVE else None,
         "result": _result_note(run["id"]) if state in ENDED or state == "blocked" else None,
+        "pending": _action_view(run.get("pending_approval")),
+        "last_held": _action_view(run.get("last_held")),
     }
+
+
+def action_id(held) -> Optional[str]:
+    """The random id the guard gave a hold when it recorded it (`pending_approval` and
+    `last_held`): what `dw project auto-approve --from-run RUN --action ID` names. None for a
+    hold recorded before holds had one."""
+    value = held.get("action_id") if isinstance(held, dict) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _action_view(held) -> Optional[dict]:
+    """Rule id, text and action id of a pending approval or a last held action."""
+    if not isinstance(held, dict):
+        return None
+    return {"rule": held.get("rule"), "category": held.get("category"),
+            "describe": held.get("describe"), "action": action_id(held)}
 
 
 def project_status(project: dict, runs: list, sessions: Optional[dict], now: float,

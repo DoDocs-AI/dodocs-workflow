@@ -614,3 +614,143 @@ class AcknowledgementTests(EventBase):
         rec = self.record(rid)
         self.set_record(rid, acknowledged=True, acknowledged_at=rec["state_changed_at"] - 10)
         self.assertEqual(self.needs_owner(), [rid])
+
+
+class DoneSessionCloseTests(EventBase):
+    """A run that finishes as done has its session closed (unless switched off); other
+    endings keep the session for the owner to look at."""
+
+    def close_calls(self, sid):
+        return [c for c in self.agterm_calls() if c[:2] == ["session", "close"]
+                and sid in c]
+
+    def finish(self, rid, sid, text):
+        self.note(rid, text)
+        r = self.status_event(sid, "completed")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+    def set_registry(self, **fields):
+        from dwlib import paths, store
+        store.update_json(paths.registry_path(), lambda reg: {**reg, **fields},
+                          store.default_registry())
+
+    def test_done_closes_the_session_and_starts_the_next_queued_run_once(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        rid2, _ = self.start("alpha", "/other")
+        self.finish(rid, sid, "DONE\nok\n")
+        self.assertEqual(self.record(rid)["state"], "done")
+        self.assertEqual(len(self.close_calls(sid)), 1)
+        self.assertNotIn(sid, self.fake_sessions())
+        self.assertEqual(self.record(rid2)["state"], "running")
+        self.assertEqual(len(self.new_session_calls()), 2)
+        # The close comes after the state change, the notification and the next run's start,
+        # so a slow or failing close cannot hold up the queue.
+        calls = self.agterm_calls()
+        close_at = calls.index(self.close_calls(sid)[0])
+        self.assertLess(calls.index(self.notify_calls()[0]), close_at)
+        self.assertLess(calls.index(self.new_session_calls()[1]), close_at)
+        # The session-closed event that follows the close leaves everything as it is.
+        before = self.record(rid)
+        self.assertEqual(self.closed_event(sid).returncode, 0)
+        self.assertEqual(self.record(rid), before)
+        self.assertEqual(len(self.new_session_calls()), 2)
+
+    def test_failed_and_blocked_keep_the_session(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.finish(rid, sid, "BLOCKED: need a key\n")
+        self.assertEqual(self.close_calls(sid), [])
+        self.finish(rid, sid, "FAILED\nno\n")
+        self.assertEqual(self.record(rid)["state"], "failed")
+        self.assertEqual(self.close_calls(sid), [])
+
+    def test_the_registry_setting_switches_it_off(self):
+        self.add_project("alpha")
+        self.set_registry(close_done_sessions=False)
+        rid, sid = self.start("alpha")
+        self.finish(rid, sid, "DONE\n")
+        self.assertEqual(self.close_calls(sid), [])
+
+    def test_only_a_real_boolean_switches_it_on(self):
+        # Any value that is not a boolean means "do not close" (dw doctor reports it).
+        self.add_project("alpha")
+        for value in ("false", "true", 0, 1, None):
+            with self.subTest(value=value):
+                self.set_registry(close_done_sessions=value)
+                rid, sid = self.start("alpha")
+                self.finish(rid, sid, "DONE\n")
+                self.assertEqual(self.record(rid)["state"], "done")
+                self.assertEqual(self.close_calls(sid), [])
+        self.set_registry(close_done_sessions=True)
+        rid, sid = self.start("alpha")
+        self.finish(rid, sid, "DONE\n")
+        self.assertEqual(len(self.close_calls(sid)), 1)
+
+    def test_keep_open_wins_and_survives_resume(self):
+        self.add_project("alpha")
+        r = self.dw("run", "--keep-open", "alpha", "/scrum-team", "x")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rid = r.stdout.split()[0]
+        self.assertTrue(self.record(rid)["keep_open"])
+        self.set_record(rid, state="interrupted", harness_session="h-1")
+        self.assertEqual(self.dw("resume", rid).returncode, 0)
+        rec = self.record(rid)
+        self.assertTrue(rec["keep_open"])
+        self.finish(rid, rec["agterm_session"], "DONE\n")
+        self.assertEqual(self.record(rid)["state"], "done")
+        self.assertEqual(self.close_calls(rec["agterm_session"]), [])
+        r = self.dw("run", "--keep-open", "alpha", "x", env={"DW_RUN_ID": rid})
+        self.assertEqual(r.returncode, 2)
+
+    def test_a_failed_close_is_logged_and_the_run_stays_done(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        rid2, _ = self.start("alpha", "/other")
+        from dwlib import paths
+        sessions = self.fake_sessions()
+        del sessions[sid]  # the close fails: unknown session
+        (self.fake_agterm_dir / "sessions.json").write_text(json.dumps(sessions))
+        self.finish(rid, sid, "DONE\n")
+        self.assertEqual(self.record(rid)["state"], "done")
+        self.assertIn("close session", (paths.home() / "dw.log").read_text())
+        self.assertEqual(self.record(rid2)["state"], "running")
+
+    def test_interrupted_keeps_the_session(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.set_record(rid, state="interrupted")
+        self.note(rid, "DONE\n")
+        self.assertEqual(self.status_event(sid, "completed").returncode, 0)
+        self.assertEqual(self.record(rid)["state"], "interrupted")
+        self.assertEqual(self.close_calls(sid), [])
+
+    def test_dismiss_logs_a_failed_close_and_still_acknowledges(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.finish(rid, sid, "FAILED\nbroken\n")
+        (self.fake_agterm_dir / "fail-next").write_text("session close")
+        r = self.dw("dismiss", rid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "%s dismissed\n" % rid)
+        self.assertTrue(self.record(rid)["acknowledged"])
+        from dwlib import paths
+        self.assertIn("dismiss close session", (paths.home() / "dw.log").read_text())
+
+    def test_dismiss_closes_an_open_session_and_status_marks_it(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.finish(rid, sid, "FAILED\nbroken\n")
+        r = self.dw("status")
+        self.assertIn("session still open", r.stdout)
+        data = json.loads(self.dw("status", "--json").stdout)
+        self.assertTrue([v for v in data["needs_owner"] if v["id"] == rid][0]["session_open"])
+        r = self.dw("dismiss", rid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("session was closed", r.stdout)
+        self.assertEqual(len(self.close_calls(sid)), 1)
+        self.assertNotIn("session still open", self.dw("status").stdout)
+        r = self.dw("dismiss", rid)
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("session was closed", r.stdout)
+        self.assertNotIn("session still open", self.dw("status", env={"FAKE_AGTERM_DOWN": "1"}).stdout)

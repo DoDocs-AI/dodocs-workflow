@@ -13,6 +13,7 @@ from .guard_shell import (  # noqa: F401
     _resolve,
     _short,
     _unreadable_match,
+    _unreadable_state_match,
     _word_dynamic,
 )
 
@@ -109,10 +110,10 @@ def _git_control_matches(tokens: list, ctx: _Ctx) -> list:
         if t == "-c" and i + 1 < len(tokens):
             key = tokens[i + 1].split("=", 1)[0]
             if not _GIT_HARMLESS_KEY_RE.match(key):
-                return [_unreadable_match()]
+                return [_unreadable_state_match()]  # a config override
             i += 2
         elif t.startswith("--config-env"):
-            return [_unreadable_match()]
+            return [_unreadable_state_match()]
         elif t in ("-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"):
             i += 2
         elif t.startswith("-"):
@@ -127,7 +128,7 @@ def _git_control_matches(tokens: list, ctx: _Ctx) -> list:
     if sub == "push" and any(_word_dynamic(a) for a in _push_parts(args)["positional"]):
         return [_unreadable_match()]
     if sub in ("config", "remote", "branch") and any(_word_dynamic(a) for a in args[:3]):
-        return [_unreadable_match()]
+        return [_unreadable_state_match()]  # may change where pushes go
     detail = " ".join(tokens)
     routing = {"id": "control-git-config", "category": "control",
                "describe": "change where git pushes go: %s" % _short(detail)}

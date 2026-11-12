@@ -334,8 +334,9 @@ def start_eligible() -> list:
     return started
 
 
-def request_run(project: dict, command: str) -> dict:
-    """Validate, record the run as queued, then start whatever the limits allow."""
+def request_run(project: dict, command: str, keep_open: bool = False) -> dict:
+    """Validate, record the run as queued, then start whatever the limits allow. With
+    `keep_open`, the run's session is not closed when it finishes as done."""
     _preflight(project, command)
     record = {
         "id": new_run_id(), "project_id": project["id"], "project_path": project["path"],
@@ -344,6 +345,8 @@ def request_run(project: dict, command: str) -> dict:
         "harness_session": None, "created_at": time.time(), "started_at": None,
         "ended_at": None, "approvals": [], "pending_approval": None, "grants": [],
     }
+    if keep_open:
+        record["keep_open"] = True
     store.create_run(record)
     create_empty_note(record["id"])
     start_eligible()
@@ -400,17 +403,46 @@ def finish_run(run_id: str, state: str, reason: Optional[str]) -> dict:
     return finish_run_changed(run_id, state, reason)[0]
 
 
+def closes_when_done(run: dict) -> bool:
+    """Whether a run's session is closed when it finishes as done: not when the run was
+    started with --keep-open, nor when the registry's `close_done_sessions` is anything but
+    absent or the boolean true (a value that is not a boolean means "do not close"; `dw doctor`
+    reports it)."""
+    if run.get("keep_open"):
+        return False
+    try:
+        return store.load_registry().get("close_done_sessions", True) is True
+    except store.CorruptFile:
+        return False
+
+
 def dismiss_run(run_id: str) -> dict:
-    """Acknowledge a finished run so it no longer asks for the owner's attention."""
+    """Acknowledge a finished run so it no longer asks for the owner's attention, and close its
+    session if it is still open (best effort; `session_closed` in the result says so)."""
     def dismiss(r):
         if r.get("state") not in FINISHED_STATES:
             raise RunError("run %s is %s, not finished" % (run_id, r.get("state")))
         return {**r, "acknowledged": True, "acknowledged_at": time.time()}
 
     try:
-        return store.update_run(run_id, dismiss)
+        record = store.update_run(run_id, dismiss)
     except store.RunNotFound:
         raise RunError("unknown run: %s" % run_id)
+    closed = False
+    sid = record.get("agterm_session")
+    if sid:
+        try:
+            sessions, _windows = agterm.session_snapshot()
+        except agterm.AgtermError:
+            sessions = {}  # AGTerm unreachable: acknowledged all the same
+        if sid in sessions:
+            try:
+                agterm.close_session(sid)
+                closed = True
+            except agterm.AgtermError as exc:
+                from .events import log_error  # events imports this module
+                log_error("dismiss close session", exc)
+    return {**record, "session_closed": closed}
 
 
 def resume_run(run_id: str) -> dict:

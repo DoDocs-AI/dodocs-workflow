@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import agterm, guard, paths, runs, store
+from . import agterm, autoapprove, guard, paths, runs, store
 
 # The hook entry's own limit as Claude Code enforces it. The guard stops waiting well before
 # this (guard.HOOK_MAX_WAIT_SECONDS); the larger value only keeps Claude Code from killing a
@@ -611,6 +611,19 @@ def doctor_levels() -> list:
             add("projects", FAIL, "path does not exist: %s" % ", ".join(gone))
         else:
             add("projects", OK, "%d project(s), all paths exist" % len(registry.get("projects", [])))
+        problems, count = [], 0
+        for p in registry.get("projects", []):
+            good, bad = autoapprove.valid_entries(p)
+            count += len(good)
+            problems += bad
+        if problems:
+            add("auto-approve", WARN, "ignored by the guard: %s" % "; ".join(problems))
+        elif count:
+            add("auto-approve", OK, "%d automatic approval(s), all valid" % count)
+        close_done = registry.get("close_done_sessions", True)
+        if not isinstance(close_done, bool):
+            add("close_done_sessions", WARN, "%r is not a boolean: sessions of done runs are "
+                "kept open (use true or false)" % (close_done,))
 
     if states is None:
         add("runs", WARN, "skipped: AGTerm is not reachable")

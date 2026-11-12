@@ -26,7 +26,7 @@ def _guard_error_reason(exc: BaseException) -> str:
 
 
 try:
-    from dwlib import agterm, events, guard, runs, setup, status, store  # noqa: E402
+    from dwlib import agterm, autoapprove, events, guard, runs, setup, status, store  # noqa: E402
 except BaseException as _exc:  # noqa: B902 - a hook must answer even when dwlib is broken
     if sys.argv[1:2] == ["hook"]:
         sys.exit(0)  # unattended terminal hook: never fails, never prints
@@ -93,6 +93,143 @@ def cmd_project_remove(args) -> int:
     return 0
 
 
+shown = agterm.visible  # what the owner reads of text from an agent's command: marks, not codes
+
+
+def _describe_action(source: dict) -> str:
+    return "action %s, rule %s: %s" % (status.action_id(source), shown(source.get("rule")),
+                                       shown(source.get("describe")))
+
+
+def _auto_entries_from_run(project: dict, run_id: str, note: str, action) -> list:
+    """Exact entries for the run's pending approval or its most recent held action, whichever
+    has exactly the action id `action` (as `dw status` shows it). Without `action`, a terminal
+    is asked to confirm the current one; anything else is refused."""
+    try:
+        run = store.load_run(run_id)
+    except store.RunNotFound:
+        raise UserError("unknown run: %s" % run_id)
+    if run.get("project_id") != project["id"]:
+        raise UserError("run %s belongs to project %s, not %s"
+                        % (run_id, run.get("project_id"), project["id"]))
+    held = [s for s in (run.get("pending_approval"), run.get("last_held")) if isinstance(s, dict)]
+    if not held:
+        raise UserError("run %s has no pending or held action" % run_id)
+    candidates = [s for s in held if status.action_id(s)]
+    if not candidates:
+        raise UserError("run %s's held action was recorded without an action id; it can be "
+                        "named once the run is held again" % run_id)
+    if action is None:
+        current = candidates[0]
+        details = ["rule: %s" % shown(current.get("rule")),
+                   "describe: %s" % shown(current.get("describe"))]
+        details += ["segment: %s\ndirectory: %s" % (shown(k[1]), shown(k[2]))
+                    for k in current.get("keys") or [] if isinstance(k, list) and len(k) == 3]
+        details.append("action: %s" % status.action_id(current))
+        print("\n".join(details))
+        _refuse_unsafe(current)
+        if not sys.stdin.isatty():
+            raise UserError("not a terminal: name the action you checked, e.g. "
+                            "dw project auto-approve %s --from-run %s --action %s"
+                            % (project["id"], run_id, status.action_id(current)))
+        if not _confirm("Add this automatic approval? [y/N] "):
+            raise UserError("nothing was added")
+        source = current
+    else:
+        source = next((s for s in candidates if status.action_id(s) == action), None)
+        if source is None:
+            raise UserError("action %s is not the run's current action (%s); check it again"
+                            % (shown(action), "; ".join(_describe_action(s) for s in candidates)))
+    _refuse_unsafe(source)
+    note = ("%s " % note if note else "") + "(from run %s action %s)" % (
+        run_id, status.action_id(source))
+    rules = str(source.get("rule") or "").split("+")
+    if source.get("category") == "control" or any(autoapprove.is_control_rule(r) for r in rules):
+        raise UserError("%s changes the control point; it is never approved automatically"
+                        % shown(source.get("describe")))
+    keys = source.get("keys")
+    if not keys:
+        raise UserError("%s is not a shell command this can name; automatic approvals cover "
+                        "shell commands only" % shown(source.get("describe")))
+    now = time.time()
+    out = []
+    for rule, segment, directory in keys:
+        if not directory or not os.path.isabs(str(directory)):
+            raise UserError("the directory of %s is unknown; use --rule and --match"
+                            % shown(segment))
+        entry = autoapprove.exact_entry(str(rule), str(segment), str(directory), note, now)
+        entry["from_run"] = run_id
+        out.append(entry)
+    return out
+
+
+def _refuse_unsafe(source: dict) -> None:
+    """No automatic approval for a segment (or its directory) the owner could misread."""
+    for key in source.get("keys") or []:
+        if any(autoapprove.has_unsafe_char(str(part)) for part in key):
+            raise UserError("refused: the segment %s contains %s; an automatic approval must "
+                            "name text that reads as it runs"
+                            % (shown(key[1] if len(key) > 1 else key), autoapprove.UNSAFE_TEXT))
+
+
+def cmd_project_auto_approve(args) -> int:
+    project = _find_project(args.project)
+    if args.list:
+        for n, entry in enumerate(project.get("auto_approve") or [], 1):
+            if isinstance(entry, dict):
+                fields = (entry.get("rule"), entry.get("match"), entry.get("in") or "",
+                          entry.get("note") or "")
+                print("%d\t%s" % (n, "\t".join(shown(f) for f in fields)))
+            else:
+                print("%d\t(malformed) %s" % (n, shown(repr(entry))))
+        return 0
+    if args.remove is not None:
+        removed = []
+
+        def drop(reg):
+            for p in reg["projects"]:
+                if p["id"] == project["id"]:
+                    entries = list(p.get("auto_approve") or [])
+                    if not 1 <= args.remove <= len(entries):
+                        raise UserError("no entry %d in project %s" % (args.remove, project["id"]))
+                    removed.append(entries.pop(args.remove - 1))
+                    p["auto_approve"] = entries
+            return reg
+
+        store.update_json(store.paths.registry_path(), drop, store.default_registry())
+        print("removed %s" % json.dumps(removed[0], sort_keys=True))
+        return 0
+    if args.from_run:
+        new = _auto_entries_from_run(project, args.from_run, args.note, args.action)
+    else:
+        if not args.rule or args.match is None:
+            raise UserError("give --from-run RUN_ID, or --rule RULE_ID with --match REGEX")
+        where = os.path.realpath(args.within) if args.within else None
+        if where is not None and not os.path.isdir(where):
+            raise UserError("not a directory: %s" % args.within)
+        entry = {"rule": args.rule, "match": args.match, "note": args.note,
+                 "added_at": time.time()}
+        if where is not None:
+            entry["in"] = where
+        new = [entry]
+    for entry in new:
+        try:
+            autoapprove.check_entry(entry)
+        except autoapprove.EntryError as exc:
+            raise UserError("refused: %s" % exc)
+
+    def add(reg):
+        for p in reg["projects"]:
+            if p["id"] == project["id"]:
+                p["auto_approve"] = list(p.get("auto_approve") or []) + new
+        return reg
+
+    store.update_json(store.paths.registry_path(), add, store.default_registry())
+    for entry in new:
+        print(json.dumps(entry, sort_keys=True))
+    return 0
+
+
 def _find_project(query: str) -> dict:
     try:
         return store.find_project(store.load_registry(), query)
@@ -110,7 +247,7 @@ def cmd_run(args) -> int:
         raise UserError("usage: dw run PROJECT COMMAND...")
     project = _find_project(args.project)
     try:
-        run = runs.request_run(project, " ".join(command))
+        run = runs.request_run(project, " ".join(command), keep_open=args.keep_open)
     except runs.RunRefused as exc:
         raise UserError(str(exc))
     if run["state"] == "failed":
@@ -172,6 +309,8 @@ def _view_lines(project_id, v, finished=False) -> list:
         flags.append("session missing")
     if v.get("session_unknown"):
         flags.append("session not visible: a terminal window is closed")
+    if v.get("session_open"):
+        flags.append("session still open")
     head = "  %s  %s  [%s]" % (v["id"], project_id, v["state"])
     head += " %s%s" % (_age(v["since"]), " ago" if finished else "")
     flags = [f for f in flags if f]
@@ -179,7 +318,14 @@ def _view_lines(project_id, v, finished=False) -> list:
         head += " (%s)" % ", ".join(flags)
     lines = [head, "      " + str(v["command"] or "").replace("\n", " ")[:100]]
     if v["reason"]:
-        lines.append("      reason: %s" % v["reason"])
+        lines.append("      reason: %s" % shown(v["reason"]))
+    for key, label in (("pending", "pending approval"), ("last_held", "last held")):
+        held = v.get(key)
+        if held and (key == "pending" or (finished and not v.get("pending"))):
+            lines.append("      %s: %s (rule %s, action %s)"
+                         % (label, shown(held["describe"]), shown(held["rule"]),
+                            held["action"] or "none recorded"))
+            break
     if v["progress"]:
         lines += _indent(v["progress"])
     if v["result"]:
@@ -251,7 +397,10 @@ def cmd_dismiss(args) -> int:
         run = runs.dismiss_run(args.run_id)
     except runs.RunError as exc:
         raise UserError(str(exc))
-    print("%s dismissed" % run["id"])
+    if run.get("session_closed"):
+        print("%s dismissed; its session was closed" % run["id"])
+    else:
+        print("%s dismissed" % run["id"])
     return 0
 
 
@@ -420,7 +569,22 @@ def build_parser() -> argparse.ArgumentParser:
     legacy.add_argument("--from", dest="source", metavar="PATH")
     legacy.add_argument("--group", help="give every imported project this group, without asking")
     legacy.set_defaults(func=cmd_project_import_legacy)
+    auto = psub.add_parser("auto-approve", help="manage a project's automatic approvals")
+    auto.add_argument("project")
+    which = auto.add_mutually_exclusive_group(required=True)
+    which.add_argument("--from-run", metavar="RUN_ID",
+                       help="name the run's pending (or last held) action exactly")
+    which.add_argument("--rule", metavar="RULE_ID")
+    which.add_argument("--list", action="store_true")
+    which.add_argument("--remove", type=int, metavar="N")
+    auto.add_argument("--match", metavar="REGEX", help="with --rule: fully matches the segment")
+    auto.add_argument("--in", dest="within", metavar="DIR", help="with --rule: only in DIR")
+    auto.add_argument("--action", metavar="ID", help="with --from-run: the action id `dw status` shows")
+    auto.add_argument("--note", default="")
+    auto.set_defaults(func=cmd_project_auto_approve)
     run = sub.add_parser("run", help="start a run in an AGTerm session")
+    run.add_argument("--keep-open", action="store_true",
+                     help="do not close the run's session when it finishes as done")
     run.add_argument("project")
     run.add_argument("command", nargs=argparse.REMAINDER)
     run.set_defaults(func=cmd_run)
@@ -459,6 +623,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Subcommands that change the registry, a run, or the installation. `dw` refuses them when it
+# is called from inside a run (DW_RUN_ID set: the launch line sets it for the run's session and
+# everything it starts), whatever the guard decided. `dw hook` and `dw guard` are how a run's
+# events and tool calls reach `dw`, and stay open.
+STATE_CHANGING = {cmd_approve, cmd_deny, cmd_run, cmd_resume, cmd_cancel, cmd_dismiss, cmd_setup,
+                  cmd_project_add, cmd_project_remove, cmd_project_import_legacy}
+INSIDE_RUN_REFUSAL = "dw cannot change the control point from inside a run"
+
+
+def _changes_state(args) -> bool:
+    if args.func is cmd_project_auto_approve:
+        return not args.list
+    return args.func in STATE_CHANGING
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv[:1] == ["hook"]:
@@ -466,6 +645,9 @@ def main(argv=None) -> int:
     if argv == ["guard"]:
         return run_guard()
     args = build_parser().parse_args(argv)
+    if os.environ.get("DW_RUN_ID") and _changes_state(args):
+        sys.stderr.write("dw: %s\n" % INSIDE_RUN_REFUSAL)
+        return 2
     try:
         return args.func(args)
     except UserError as exc:

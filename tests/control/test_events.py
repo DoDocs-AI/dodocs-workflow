@@ -672,6 +672,21 @@ class DoneSessionCloseTests(EventBase):
         self.finish(rid, sid, "DONE\n")
         self.assertEqual(self.close_calls(sid), [])
 
+    def test_only_a_real_boolean_switches_it_on(self):
+        # Any value that is not a boolean means "do not close" (dw doctor reports it).
+        self.add_project("alpha")
+        for value in ("false", "true", 0, 1, None):
+            with self.subTest(value=value):
+                self.set_registry(close_done_sessions=value)
+                rid, sid = self.start("alpha")
+                self.finish(rid, sid, "DONE\n")
+                self.assertEqual(self.record(rid)["state"], "done")
+                self.assertEqual(self.close_calls(sid), [])
+        self.set_registry(close_done_sessions=True)
+        rid, sid = self.start("alpha")
+        self.finish(rid, sid, "DONE\n")
+        self.assertEqual(len(self.close_calls(sid)), 1)
+
     def test_keep_open_wins_and_survives_resume(self):
         self.add_project("alpha")
         r = self.dw("run", "--keep-open", "alpha", "/scrum-team", "x")

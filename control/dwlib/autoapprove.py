@@ -8,9 +8,11 @@ with `in`, the directory the guard tracks for that segment is that directory or 
 
 Entries come from the registry, a plain file: the guard treats them as untrusted. A malformed
 entry, a regex that does not compile, one longer than MAX_PATTERN, one with a nested
-quantifier (catastrophic backtracking), or one holding a control or format character is
-ignored; an entry for `control-unreadable` must not match the empty string or everything. A
-`control` rule is never auto-approved.
+quantifier or an unbounded quantifier on a group (catastrophic backtracking), one holding a
+control or format character, or one that fully matches every one of a fixed set of unrelated
+commands (`_PROBES`) is ignored; an entry for `control-unreadable` must also not match the
+empty string nor more than one of those commands. A `control` rule is never auto-approved.
+The CLI refuses the same entries (`check_entry` is shared) and `dw doctor` reports them.
 """
 from __future__ import annotations
 
@@ -26,8 +28,35 @@ _RULE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 # A group holding a quantifier, itself quantified: (a+)+, (a|b*)*, (x{2,})+ ...
 _NESTED_QUANTIFIER_RE = re.compile(r"\((?:[^()\\]|\\.)*(?:[+*]|\{\d*,?\d*\})(?:[^()\\]|\\.)*\)"
                                    r"\s*(?:[+*]|\{\d*,?\d*\})")
-# Texts no real pattern for one action would all match.
-_PROBES = ("x", "rm -rf /", "git push origin main", "a b\nc", "0", "é", "~/.claude")
+_UNBOUNDED_RE = re.compile(r"[*+]|\{\d*,\}")
+# Unrelated single-line actions: no pattern for one kind of action matches all of them, and a
+# pattern for unreadable commands matches at most one.
+_PROBES = ("kubectl $(cat v) ns prod", 'gh pr "$(cat v)" 12', "git push origin main", "rm -rf /",
+           "a", "zz zz", "npm publish", "docker push x/y:z", "x", "0", "é", "~/.claude")
+
+
+def _quantified_group(pattern: str) -> bool:
+    """Whether an unbounded quantifier (`*`, `+`, `{n,}`, lazy or not) applies to a group, read
+    with escapes and character classes respected."""
+    i, in_class = 0, False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if in_class:
+            if ch == "]":
+                in_class = False
+        elif ch == "[":
+            in_class = True
+            if pattern[i + 1:i + 2] == "^":
+                i += 1
+            if pattern[i + 1:i + 2] == "]":
+                i += 1  # a `]` right after `[` or `[^` is a literal
+        elif ch == ")" and _UNBOUNDED_RE.match(pattern, i + 1):
+            return True
+        i += 1
+    return False
 
 
 _CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
@@ -75,13 +104,21 @@ def check_entry(entry) -> "re.Pattern":
         raise EntryError("added_at is not a number")
     if _NESTED_QUANTIFIER_RE.search(pattern):
         raise EntryError("match has a nested quantifier")
+    if _quantified_group(pattern):
+        raise EntryError("match has an unbounded quantifier (*, +, {n,}) on a group")
     try:
         compiled = re.compile(pattern)
     except (re.error, RecursionError, OverflowError, ValueError) as exc:
         raise EntryError("match is not a valid regular expression (%s)" % exc)
-    if rule == UNREADABLE_ID and (pattern.strip() in (".*", ".+") or compiled.fullmatch("")
-                                  or all(compiled.fullmatch(p) for p in _PROBES)):
+    hits = sum(1 for p in _PROBES if compiled.fullmatch(p))
+    if hits == len(_PROBES):
+        raise EntryError("match must not match everything")
+    if rule == UNREADABLE_ID and (pattern.strip() in (".*", ".+") or compiled.fullmatch("")):
         raise EntryError("an unreadable entry must not match everything")
+    if rule == UNREADABLE_ID and hits >= 2:
+        raise EntryError("an unreadable entry must not match more than one unrelated command "
+                         "(it matches %d of: %s)" % (hits, "; ".join(
+                             p for p in _PROBES if compiled.fullmatch(p))))
     return compiled
 
 

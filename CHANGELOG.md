@@ -41,6 +41,21 @@ feat(control): guard usability
   a finished run's session that is still open; `dw status` marks it `session still open`.
 - `kubectl rollout status` and `kubectl rollout history` are reads and no longer held; any
   other `rollout` action (or one that cannot be read) still is.
+- Inline interpreter code that visibly starts a process (`subprocess`, `os.system`,
+  `child_process`, Perl/Ruby `system`, ...) is never plain `unreadable`: with a guarded program
+  name, a remote address or a quoted rule program name (`['npm','publish']`) in sight, or with
+  a computed argument after `-` or after the code (`python3 - "$(cat f)" <<'PY'` running
+  `sys.argv[1]`), it is held as `control-unreadable-state` (approve once or deny; a run-wide
+  approval of unreadable commands does not cover it). Inline code with no process start is
+  unchanged.
+- Automatic approvals are checked by what their pattern matches: one that matches every one of
+  a fixed set of unrelated commands is refused for any rule, an unreadable entry may match at
+  most one of them, and an unbounded quantifier on a group (`(a|a)*b`) is refused; the guard
+  ignores such entries and `dw doctor` reports them. An entry with `--in` no longer applies
+  when the command changes into a directory that does not exist yet or runs `ln`, `mv`,
+  `rename` or `mount` before the guarded part.
+- `close_done_sessions` must be a boolean: any other value (such as the string `"false"`)
+  keeps sessions open, and `dw doctor` reports it.
 
 ## [v2.1.0] - 2026-11-12
 

@@ -276,8 +276,9 @@ class InlineCodeAndWrapperTests(GuardClassifyBase):
     def test_inline_interpreter_code(self):
         self.check_rows([
             ("python3 -c \"import os; os.system('git push origin main')\"", "merge"),
+            # inline code starting a guarded program unreadably: control (review ruling 1)
             ("python -c \"import subprocess; subprocess.run(['git', 'push', 'origin', 'main'])\"",
-             "unreadable"),
+             "control"),
             ("node -e \"require('child_process').execSync('kubectl apply -f x')\"", "deploy"),
             ("node -p \"require('child_process').execSync('docker push a/b:1')\"", "deploy"),
             ("ruby -e 'system(\"docker push a/b:1\")'", "deploy"),
@@ -289,7 +290,7 @@ class InlineCodeAndWrapperTests(GuardClassifyBase):
              "control"),
             ("python3 -c \"import subprocess; subprocess.run(['dw', 'approve', 'r-1'])\"", "control"),
             ("python3 -c \"import subprocess; subprocess.run(['curl', '-d', 'x', 'https://api.example.com'])\"",
-             "unreadable"),
+             "control"),
             ("python3 - <<'EOF'\nimport os\nos.system('gh pr merge 3')\nEOF", "merge"),
             ("osascript -e 'tell application \"Messages\" to send \"hi\" to buddy \"x\"'", "send"),
             ("awk 'BEGIN { system(\"git push origin main\") }'", "merge"),
@@ -2159,8 +2160,8 @@ class KubectlRolloutTests(GuardClassifyBase):
             ("python3 -c 'import os; os.system(\"kubectl rollout -n x restart deploy/a\")'", "deploy"),
             ("python3 -c 'import os; os.system(\"kubectl rollout latest dc/a\")'", "deploy"),
             # inline code that runs a guarded program the scanner has no pattern for is
-            # unreadable (approvable), no longer a deploy
-            ("python3 -c 'import os; os.system(\"kubectl rollout status deploy/a\")'", "unreadable"),
+            # control-unreadable-state (not approvable for the run), no longer a deploy
+            ("python3 -c 'import os; os.system(\"kubectl rollout status deploy/a\")'", "control"),
             ("python3 -c 'import os; os.system(\"kubectl rollout restart deploy/a\")'", "deploy"),
         ])
         for command in ("kubectl rollout $ACTION deploy/a", "kubectl rollout $A deploy/a"):
@@ -2392,7 +2393,9 @@ class InlineRolloutTests(GuardClassifyBase):
         for code in allowed:
             for command in forms(code):
                 with self.subTest(command=command):
-                    self.assertIn(self.category(self.bash(command)), (None, "unreadable"))
+                    # bash -c reads it in full (allowed); inline python starting kubectl
+                    # unreadably is control (review ruling 1)
+                    self.assertIn(self.category(self.bash(command)), (None, "control"))
         self.assertTrue(self.guard._inline_rollout_change(
             "kubectl rollout status deploy/a; kubectl rollout restart deploy/a"))
         self.assertFalse(self.guard._inline_rollout_change(
@@ -2426,6 +2429,73 @@ class InlineRolloutBackstopTests(GuardClassifyBase):
                     self.assertNotEqual(self.category(self.bash(command)), "deploy")
         self.assertTrue(self.guard._inline_rollout_change("kubectl `ctx` rollout undo deploy/a"))
         self.assertFalse(self.guard._inline_rollout_change("kubectl -n $(ns) rollout status d/a"))
+
+
+class InlineSpawnTests(GuardClassifyBase):
+    """Inline interpreter code that visibly starts a process is never plain `unreadable` (which
+    a run-wide approval lets through): what it runs cannot be read, so it is
+    `control-unreadable-state`. The same for code that starts a process from a computed
+    argument. Inline code with no visible spawn is unchanged."""
+
+    STATE = ("control-unreadable-state", "control")
+
+    def result(self, command):
+        r = self.bash(command)
+        return None if r is None else (r["id"], r["category"])
+
+    def test_code_that_starts_a_guarded_program_unreadably_is_control(self):
+        for command in (
+                "python3 -c \"import subprocess; subprocess.run(['git','push','origin','main'])\"",
+                "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['git','push','origin','main'])"
+                "\nPY",
+                "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['kubectl','delete','ns','prod'])"
+                "\nPY",
+                "python3 - <<'PY'\nimport subprocess as s\ns.call(['npm','publish'])\nPY",
+                "node -e \"require('child_process').execFileSync('git',['push','origin','main'])\"",
+                "python3 -c \"import os; c='git pu'+'sh origin main'; os.system(c)\"",
+                "python3 -c \"__import__('subprocess').run(['docker','push','x/y'])\"",
+                "perl -e 'my $c = q(git); system($c, qw(push origin main))'"):
+            with self.subTest(command=command):
+                self.assertEqual(self.result(command), self.STATE)
+
+    def test_computed_arguments_to_code_that_starts_a_process_are_control(self):
+        for command in (
+                "python3 - \"$(cat f)\" <<'PY'\nimport sys,os\nos.system(sys.argv[1])\nPY",
+                "python3 - \"$CMD\" <<'PY'\nimport sys,os\nos.system(sys.argv[1])\nPY",
+                "python3 - $(cat f) <<'PY'\nimport sys,subprocess\nsubprocess.run(sys.argv[1:])\nPY",
+                "perl - \"$(cat f)\" <<'PL'\nsystem($ARGV[0]);\nPL",
+                "node - \"$(cat f)\" <<'JS'\nrequire('child_process').execSync(process.argv[2])\nJS",
+                "ruby - \"$X\" <<'RB'\nsystem(ARGV[0])\nRB",
+                "python3 -c 'import os,sys; os.system(sys.argv[1])' \"$(cat f)\"",
+                "node -e 'require(\"child_process\").execSync(process.argv[1])' \"$X\""):
+            with self.subTest(command=command):
+                self.assertEqual(self.result(command), self.STATE)
+
+    def test_code_with_no_visible_spawn_is_unchanged(self):
+        for command in (
+                # computed data arguments, no process started: the brief's idiom
+                'python3 - "$F" <<\'PY\'\nimport sys\np=sys.argv[1]\ns=open(p).read()\n'
+                'open(p,"w").write(s.replace("a","b"))\nPY',
+                "node - \"$X\" <<'EOF'\nconsole.log(process.argv[2])\nEOF",
+                "ruby - \"$X\" <<'EOF'\nputs ARGV[0]\nEOF",
+                "perl - \"$X\" <<'EOF'\nprint $ARGV[0]\nEOF",
+                "python3 -c \"import sys; print(open(sys.argv[1]).read())\" \"$(cat p.txt)\"",
+                # a file write through a computed argument: accepted (see Known ways around)
+                "python3 - \"$(cat p.txt)\" <<'PY'\nimport sys\nopen(sys.argv[1],'w').write('{}')\nPY",
+                # a process with static arguments and no guarded program: as before
+                "python3 -c \"import subprocess; subprocess.run(['ls','-l'])\"",
+                "python3 - a.txt <<'PY'\nimport sys,os\nos.system('wc -l ' + sys.argv[1])\nPY",
+                # a static same-command variable is not computed
+                "D=/p/x; python3 - $D/a <<'PY'\nimport sys,os\nos.system('ls ' + sys.argv[1])\nPY",
+                # rule program names that are ordinary words in code, with a computed argument
+                "node - \"$X\" <<'JS'\nconst ws = require('ws'); ws.on('open', () => 1); "
+                "const d = {k: 1}; console.log(d['k'], process.argv[2])\nJS",
+                "python3 - \"$F\" <<'PY'\nimport sys\nimport numpy as np\n"
+                "print(np.load(open(sys.argv[1], 'rb')))\nPY"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+        # Code that comes from somewhere unseen is still plain unreadable.
+        self.assertEqual(self.result('python3 - "$X"'), ("control-unreadable", "unreadable"))
 
 
 class GuardEntryPresentTests(DwTestCase):

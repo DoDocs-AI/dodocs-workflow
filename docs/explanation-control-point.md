@@ -83,7 +83,9 @@ registry, run records and log in `~/.dodocs-workflow/` are kept.
   running in it**, such as a preview server a pipeline started, so start a run whose output you
   want to browse in its session with `dw run --keep-open <project> "<command>"` (kept across
   `dw resume`), or turn closing off for every run with `"close_done_sessions": false` at the top
-  level of `~/.dodocs-workflow/registry.json` (`--keep-open` wins either way). Sessions of runs
+  level of `~/.dodocs-workflow/registry.json` (`--keep-open` wins either way; only the
+  booleans `true` and `false` are valid, any other value keeps sessions open and `dw doctor`
+  reports it). Sessions of runs
   that failed, blocked or were interrupted stay open for you to look at; `dw dismiss <run-id>`
   closes a finished run's session that is still open, and `dw status` marks such a run
   `session still open`. A failed close is only logged in `dw.log`.
@@ -145,7 +147,7 @@ change the control point's own settings. Everything it does not recognise is all
   to the control point), that category decides the question, and an approval of unreadable
   commands never lets it through. Answering such a question *for this run* remembers only the
   other rule, not the unreadable class.
-  The run-wide approval does **not** cover four kinds of unreadable command, which stay in
+  The run-wide approval does **not** cover five kinds of unreadable command, which stay in
   the `control` category ("command cannot be read and may change the control point"; approve
   once from the dialog or deny, never with `dw approve`):
   1. a command whose text mentions the control point or a file or variable that protects it
@@ -170,7 +172,21 @@ change the control point's own settings. Everything it does not recognise is all
   4. shell or interpreter code that could not be scanned at all: a shell or interpreter fed
      from a pipe (`curl ... | sh`), an interactive shell (`su`, `sudo -s`), `bash -c "$CMD"`,
      `python3 -c "$CODE"`, `eval "$(...)"`, `source <(...)`, `bash <(...)`, or a `-c` string
-     or here-document the guard cannot parse.
+     or here-document the guard cannot parse;
+  5. inline interpreter code (any interpreter; `-c`/`-e` code or a here-document on stdin)
+     that visibly starts a process and is not read as anything more precise: a spawning
+     primitive (Python `subprocess`, `os.system`, `os.popen`, `os.exec*`, `os.spawn*`, `pty`,
+     `__import__`, `exec`/`eval`, `importlib`; Node `child_process` and the `exec`/`spawn`/
+     `execFile` calls; Perl and Ruby `system`, `exec`, backticks, `qx`, `open` with a pipe; or a
+     quoted string that is the name of a program a guard rule names, such as `'npm'`) together
+     with a guarded program name or a remote address
+     (`python3 -c "import subprocess; subprocess.run(['git','push','origin','main'])"`,
+     `c='git pu'+'sh origin main'; os.system(c)`), or a spawning primitive while an argument
+     after `-` or after the code is computed
+     (`python3 - "$(cat f)" <<'PY'` with `os.system(sys.argv[1])`). Plain "command cannot be
+     read" is only for inline code where no process start is in sight; inline code that is
+     read in full and allowed (an inline script that reads and rewrites the files named by its
+     arguments) is still allowed with no question.
 - **Automatic approvals, per project.** An action you would approve every time can be let
   through without a question in one project. After a run asks for it, say so to `/control`
   ("always allow that in this project"), or run
@@ -196,11 +212,18 @@ change the control point's own settings. Everything it does not recognise is all
   `--remove N` takes one out. A call is let through only when every guarded part of it is
   covered. **Never auto-approved:** anything in the `control` category (changes to the control
   point, and the unreadable commands that may make them), and anything in a session whose run
-  has ended. An entry for "command cannot be read" must name something specific: an empty
-  pattern, `.*`, `.+` and any pattern that matches the empty string or everything are refused,
-  by `dw` and again by the guard. Entries the guard cannot use (a bad regex, a nested
-  quantifier such as `(a+)+`, wrong types, a control or format character in the pattern) are
-  ignored and reported by `dw doctor`. Automatic
+  has ended. Patterns are checked by what they match, by `dw` and again by the guard: a
+  pattern that fully matches every one of a fixed set of unrelated commands (`git push origin
+  main`, `rm -rf /`, `npm publish`, `a`, ...) is refused for any rule, and an entry for "command
+  cannot be read" must name something specific: an empty pattern, a pattern that matches the
+  empty string, and one that matches two or more of those unrelated commands are refused.
+  Entries the guard cannot use (a bad regex, a nested quantifier such as `(a+)+`, an unbounded
+  quantifier `*`, `+` or `{n,}` on a group such as `(a|b)*`, wrong types, a control or format
+  character in the pattern) are ignored and reported by `dw doctor`. An entry with `--in`
+  applies only when the directory is known for certain: not when the command first changes
+  into a directory that does not exist when the guard reads it, nor when it runs `ln`, `mv`,
+  `rename`, `mount` or anything else that makes a link before the guarded part (the action is
+  then asked as usual); entries without `--in` are unaffected. Automatic
   approvals cover shell commands only. `dw status` shows the rule id and action id of a pending
   approval, so you can see what an entry would name.
 - **`dw` itself refuses inside a run.** Called with `DW_RUN_ID` in its environment (the run's
@@ -297,7 +320,19 @@ Things that pass although you might expect them to be held.
 **Code it cannot see**
 - Script files and build steps (`bash deploy.sh`, `python script.py`, `make release`,
   `npm run deploy`), git hooks, and anything a `Makefile` or `package.json` script does.
-- Inline code is scanned for markers only; commands or URLs built from pieces pass.
+- Inline code is scanned for markers only; commands or URLs built from pieces pass when no
+  guarded program name, remote address or computed argument is in sight (code that starts a
+  process with one of those is held as `control`).
+- A file written by inline code through a computed argument:
+  `python3 - "$(cat f)" <<'PY'` with `open(sys.argv[1], 'w')`, like `echo x > "$(cat f)"`.
+  (The `-c` form, `python3 -c '...' "$(cat f)"`, is the same.)
+- Inline code can run `dw` itself (including `dw project auto-approve`) with `DW_RUN_ID`
+  removed from its environment, so `dw` does not know it is inside a run and an automatic
+  approval it adds persists, for this run and later ones (when the name `dw` is built from
+  pieces, nothing in the code shows it).
+- A directory changed by something other than `ln`, `mv`, `rename`, `mount` or a `cd` into a
+  path that does not exist yet (`tar x`, `git checkout`, `unzip` replacing a directory with a
+  link) is not noticed by automatic approvals limited with `--in`.
 - Content read from files: `psql -f drop.sql`, `expect -f`, `source ./x.sh`, `sed -f`, `awk -f`.
 - Shell aliases, and functions defined outside the command (in a profile or an earlier
   command), including one named like a read-only program; `tmux send-keys`, `screen -X stuff`.
@@ -451,8 +486,16 @@ be approved for the run, unless noted. Those held as "command cannot be read" ar
   write whose command line contains an arithmetic expansion (`echo $((1+2)) > note`,
   `echo "$((1+2))" > note`, a here-document body with `$((...))` written to the note), though
   the same arithmetic written elsewhere passes.
-- **Inline code that runs a guarded program in a form the scanner has no pattern for**
-  (`python3 -c 'os.system("kubectl rollout status deploy/a")'`) is held as `unreadable`.
+- **Inline code that starts a guarded program in a form the scanner has no pattern for**
+  (`python3 -c 'os.system("kubectl rollout status deploy/a")'`,
+  `python3 - <<'PY'` with `subprocess.run(['git', 'log'])`) is held as `control`
+  ("command cannot be read and may change the control point"): approve once or deny, every
+  time; a run-wide approval of unreadable commands does not cover it.
+- **Inline code that starts any process while one of its arguments is computed**
+  (`python3 - "$F" <<'PY'` with `subprocess.run(['wc', '-l', sys.argv[1]])`) is held as
+  `control` the same way.
+- **A `cd` into a directory the command creates** (`mkdir x && cd x && ...`) or a command with
+  `ln`/`mv`: automatic approvals limited to a directory (`--in`) do not apply to it.
 - **An approval question for the same words in another directory**: an approval covers one
   directory, so `git push origin main` after `cd /tmp/other` asks again (an ordinary question,
   not a `control` hold).

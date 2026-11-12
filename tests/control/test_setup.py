@@ -358,6 +358,19 @@ class DoctorTests(SetupBase):
         self.assertEqual(r.returncode, 1)
         self.assertTrue(self.line(r.stdout, "files").startswith("FAIL"))
 
+    def test_doctor_reports_a_close_done_sessions_value_that_is_not_a_boolean(self):
+        self.installed()
+        from dwlib import paths, store
+        store.update_json(paths.registry_path(), lambda reg: {**reg, "close_done_sessions": "false"},
+                          store.default_registry())
+        r = self.dw("doctor")
+        line = self.line(r.stdout, "close_done_sessions")
+        self.assertTrue(line.startswith("WARN"), line)
+        self.assertIn("not a boolean", line)
+        store.update_json(paths.registry_path(), lambda reg: {**reg, "close_done_sessions": False},
+                          store.default_registry())
+        self.assertNotIn("close_done_sessions", self.dw("doctor").stdout)
+
     def test_doctor_fails_on_invalid_settings_json(self):
         self.installed()
         self.settings.write_text("{ nope")

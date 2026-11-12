@@ -620,6 +620,10 @@ def doctor_levels() -> list:
             add("auto-approve", WARN, "ignored by the guard: %s" % "; ".join(problems))
         elif count:
             add("auto-approve", OK, "%d automatic approval(s), all valid" % count)
+        close_done = registry.get("close_done_sessions", True)
+        if not isinstance(close_done, bool):
+            add("close_done_sessions", WARN, "%r is not a boolean: sessions of done runs are "
+                "kept open (use true or false)" % (close_done,))
 
     if states is None:
         add("runs", WARN, "skipped: AGTerm is not reachable")

@@ -184,6 +184,50 @@ class AutoApproveCliTests(DwTestCase):
                 self.assertEqual(r.returncode, 2, r.stdout)
         self.assertEqual(self.entries(), [])
 
+    def test_match_everything_patterns_are_refused_by_behaviour(self):
+        self.add_project("alpha")
+        for rule in ("control-unreadable", "kubectl-change", "git-push-default"):
+            for pattern in ("..*", ".+?", "(.+)", ".{1,}", "\\S.*", "[^\\n]+",
+                            "(?s).+", "(?:.)+?"):
+                with self.subTest(rule=rule, pattern=pattern):
+                    r = self.dw("project", "auto-approve", "alpha", "--rule", rule,
+                                "--match", pattern)
+                    self.assertEqual(r.returncode, 2, r.stdout)
+                    self.assertIn("refused", r.stderr)
+        # An unreadable entry may cover one kind of action, not two unrelated ones.
+        for pattern in ("(kubectl|gh) .*", "kubectl .*|git push origin main", "[a-z]+ .*",
+                        "git.*|[^g].*"):
+            with self.subTest(pattern=pattern):
+                r = self.dw("project", "auto-approve", "alpha", "--rule", "control-unreadable",
+                            "--match", pattern)
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn("more than one", r.stderr)
+        self.assertEqual(self.entries(), [])
+        for rule, pattern in (("control-unreadable", r"kubectl \$\(cat v\) ns \w+"),
+                              ("kubectl-change", r"kubectl -n app (apply|diff) -f k8s/\w+\.yaml"),
+                              ("git-push-default", r"git push origin main"),
+                              ("control-unreadable", r"git push origin \"\$B\"")):
+            with self.subTest(pattern=pattern):
+                r = self.dw("project", "auto-approve", "alpha", "--rule", rule, "--match", pattern)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_unbounded_quantifier_on_a_group_is_refused(self):
+        self.add_project("alpha")
+        for pattern in ("kubectl (a|a)*b", "kubectl (?:a|b)+ x", "kubectl (ab){2,} x",
+                        "kubectl (a)*?b", "x(y(z))+"):
+            with self.subTest(pattern=pattern):
+                r = self.dw("project", "auto-approve", "alpha", "--rule", "kubectl-change",
+                            "--match", pattern)
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn("unbounded", r.stderr)
+        # Escaped parentheses, parentheses in a class, bounded repeats: accepted.
+        for pattern in (r"kubectl \(a\)* x", "kubectl [()]+ x", "kubectl (a|b){1,3} x",
+                        "kubectl (apply|diff)? -f x", r"echo \\(a|b) x"):
+            with self.subTest(pattern=pattern):
+                r = self.dw("project", "auto-approve", "alpha", "--rule", "kubectl-change",
+                            "--match", pattern)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_inside_a_run_only_the_list_works(self):
         self.add_project("alpha")
         env = {"DW_RUN_ID": "r-1"}
@@ -201,11 +245,15 @@ class AutoApproveCliTests(DwTestCase):
 
         def fn(reg):
             reg["projects"][0]["auto_approve"] = [{"rule": "x", "match": "("},
-                                                  {"rule": "control-unreadable", "match": ".*"}]
+                                                  {"rule": "control-unreadable", "match": ".*"},
+                                                  {"rule": "control-unreadable", "match": "..*"},
+                                                  {"rule": "kubectl-change", "match": "(a|a)*b"},
+                                                  {"rule": "kubectl-change", "match": "kubectl x"}]
             return reg
         store.update_json(paths.registry_path(), fn, store.default_registry())
         r = self.dw("doctor")
         line = [l for l in r.stdout.splitlines() if "auto-approve" in l][0]
         self.assertTrue(line.startswith("WARN"), line)
-        self.assertIn("entry 1", line)
-        self.assertIn("entry 2", line)
+        for n in (1, 2, 3, 4):
+            self.assertIn("entry %d:" % n, line)
+        self.assertNotIn("entry 5", line)

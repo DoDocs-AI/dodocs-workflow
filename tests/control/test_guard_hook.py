@@ -1393,6 +1393,25 @@ class UnreadableStateApprovalTests(GuardHookBase):
                 self.assertEqual(self.dw("deny", rid).returncode, 0)
         self.assertEqual(len(self.ask_calls()), asks + 6)
 
+    def test_a_run_wide_unreadable_approval_does_not_cover_inline_code_that_spawns(self):
+        path, rid = self.start_run()
+        self.script_ask("run")
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
+        self.clear_answer()
+        for command in (
+                "python3 -c \"import subprocess; subprocess.run(['git','push','origin','main'])\"",
+                "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['kubectl','delete','ns','prod'])"
+                "\nPY",
+                "python3 - <<'PY'\nimport subprocess as s\ns.call(['npm','publish'])\nPY",
+                "node -e \"require('child_process').execFileSync('git',['push','origin','main'])\"",
+                "python3 - \"$(cat f)\" <<'PY'\nimport sys,os\nos.system(sys.argv[1])\nPY"):
+            with self.subTest(command=command):
+                out = self.guard(self.payload(path, command))
+                self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+                pending = self.record(rid)["pending_approval"]
+                self.assertEqual(pending["category"], "control")
+                self.assertEqual(self.dw("deny", rid).returncode, 0)
+
 
 class AutoApproveTests(GuardHookBase):
     """Per-project automatic approvals: an entry naming the rule and the exact segment lets the
@@ -1466,6 +1485,50 @@ class AutoApproveTests(GuardHookBase):
         self.dw("deny", rid)
         self.set_entries("slotme", [self.entry("control-unreadable", r"kubectl \$VERB pods")])
         self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
+
+    def test_match_everything_and_unbounded_group_entries_are_ignored_at_load(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("control-unreadable", "..*"),
+                                    self.entry("control-unreadable", "(.+)"),
+                                    self.entry("control-unreadable", "(kubectl|gh) .*"),
+                                    self.entry("kubectl-change", "\\S.*"),
+                                    self.entry("kubectl-change", "kubectl (apply|a)* -f k8s/")])
+        for command in ("kubectl $(cat v) ns prod", 'gh pr "$(cat v)" 12', "kubectl apply -f k8s/"):
+            with self.subTest(command=command):
+                self.held(path, command)
+                self.dw("deny", rid)
+        self.assertIn("must not match", self.log())
+        self.assertIn("unbounded", self.log())
+
+    def test_an_entry_with_in_needs_a_directory_known_for_certain(self):
+        path, rid = self.start_run()
+        sub = path / "sub"
+        sub.mkdir()
+        (sub / "k8s").mkdir()
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        self.set_entries("slotme", [self.entry("kubectl-change", "kubectl apply -f k8s/",
+                                               os.path.realpath(str(sub)))])
+        asks = len(self.ask_calls())
+        for command in ("kubectl apply -f k8s/", "cd k8s && cd .. && kubectl apply -f k8s/"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.guard(self.payload(sub, command)))
+        self.assertEqual(len(self.ask_calls()), asks)
+        for command in ("ln -s %s l2 && cd l2 && kubectl apply -f k8s/" % outside,
+                        "ln -sfn %s l3; cd l3; kubectl apply -f k8s/" % outside,
+                        "mkdir -p x && mv x y && ln -sfn %s y && cd y && kubectl apply -f k8s/"
+                        % outside,
+                        "mkdir new && cd new && kubectl apply -f k8s/",
+                        "python3 -c 'import os; os.symlink(\"%s\", \"k9\")' && cd k9 && "
+                        "kubectl apply -f k8s/" % outside,
+                        "(ln -s %s l4 && cd l4 && kubectl apply -f k8s/)" % outside):
+            with self.subTest(command=command):
+                self.held(sub, command)
+                self.dw("deny", rid)
+        # An entry without `in` is unaffected.
+        self.set_entries("slotme", [self.entry("kubectl-change", "kubectl apply -f k8s/")])
+        self.assertIsNone(self.guard(self.payload(
+            sub, "ln -s %s l5 && cd l5 && kubectl apply -f k8s/" % outside)))
 
     def test_malformed_entries_are_ignored(self):
         path, rid = self.start_run()

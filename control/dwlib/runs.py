@@ -405,11 +405,13 @@ def finish_run(run_id: str, state: str, reason: Optional[str]) -> dict:
 
 def closes_when_done(run: dict) -> bool:
     """Whether a run's session is closed when it finishes as done: not when the run was
-    started with --keep-open, nor when the registry's `close_done_sessions` is false."""
+    started with --keep-open, nor when the registry's `close_done_sessions` is anything but
+    absent or the boolean true (a value that is not a boolean means "do not close"; `dw doctor`
+    reports it)."""
     if run.get("keep_open"):
         return False
     try:
-        return store.load_registry().get("close_done_sessions", True) is not False
+        return store.load_registry().get("close_done_sessions", True) is True
     except store.CorruptFile:
         return False
 

@@ -22,8 +22,15 @@ fail-closed reading off for that run. It means one thing only: a known program w
 ARGUMENT (`kubectl $VERB pods`, `git push origin "$B"`). Anything where the program or the code
 itself is computed (a run-time program word, loader, script operand, `-c`/`eval` value, an
 unresolved same-command function call, unscannable code), or that may change the control point,
-is `control-unreadable-state` (category `control`). When the same call also matches another category, that
-category decides the question, and an unreadable approval never lets it through.
+is `control-unreadable-state` (category `control`). So is inline interpreter code (any
+interpreter; `-c`/`-e` code or a here-document on stdin) that visibly starts a process (a
+spawning primitive of its family: python subprocess, os.system/popen/exec*/spawn*, pty,
+`__import__`, exec/eval, importlib; node child_process and its exec/spawn/execFile calls;
+perl/ruby system, exec, backticks, qx, open with a pipe; or a quoted rule program name) when
+its verdict would otherwise be plain `unreadable`, or when an argument after `-` or after the
+code is computed: plain `unreadable` is only for inline code where no spawn is visible. When
+the same call also matches another category, that category decides the question, and an
+unreadable approval never lets it through.
 
 This catches direct and lightly wrapped risky commands from a cooperative agent. It is not
 a sandbox: a script the agent writes and then runs is not read.
@@ -226,6 +233,10 @@ class _Ctx:
         self.loop_words: dict = {}  # loop variable -> the words it runs over
         self.stdin_commands: list = []  # the commands piped into the one being read, as words
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
+        # Set once the command may have made the tracked directory differ from the real one
+        # (a `cd` into a path that does not exist yet, a link, move or mount): an automatic
+        # approval limited to a directory no longer applies. Shared by every fork.
+        self.dir_doubt = {"set": False}
         # Whether this Bash command may write the run's result note at all (classify sets it:
         # see _plain_note_write); which words are spared is decided in _control_matches.
         self.note_plain = False
@@ -585,6 +596,9 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     ctx.incomplete = incomplete
     matches: list = []
     tokens = original
+    inline_spawn = False  # inline interpreter code of this command visibly starts a process
+    if _MOVES_PATHS_RE.search(" ".join(list(original) + list(seg.get("heredocs") or []))):
+        ctx.dir_doubt["set"] = True
     if any(_GIT_ENV_RE.match(t) for t in original):
         matches.append(_unreadable_state_match())  # a git environment override
     matches += _loader_env_matches(original, ctx, depth)
@@ -655,6 +669,12 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                 matches.append(_unreadable_match())  # the code comes from somewhere unseen
             if not codes and not stdin_script and operands and _run_time_text(operands[0]):
                 matches.append(_unreadable_state_match())  # the script itself is computed
+            # Code that visibly starts a process is never plain unreadable: what it runs cannot
+            # be read (a computed argument may be the very command it runs).
+            code_texts = list(codes) + (list(seg["heredocs"]) if stdin_script else [])
+            inline_spawn = any(_code_spawns(t, family, ctx) for t in code_texts)
+            if inline_spawn and any(_computed_word(a) for a in rest if a not in codes):
+                matches.append(_unreadable_state_match())
             for arg in rest:
                 matches += _inline_matches(arg, ctx, depth)
             for body in seg["heredocs"]:
@@ -666,7 +686,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                         found += _shell_matches(m.group(3), ctx.new_shell(), depth + 1)
                     if not found and re.search(r"\b(spawn|system|exec)\b", text) and \
                             _GUARDED_NAME_RE.search(text):
-                        found.append(_unreadable_match())
+                        found.append(_unreadable_state_match())
                     matches += found
             if seg["pipe_in"] and not codes and (not operands or stdin_script):
                 matches.append(_unreadable_state_match())  # code from another command
@@ -726,7 +746,14 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             match = _render(rule, " ".join(original), _segment_text(original))
             if "segment" in match:
                 match["dir"] = ctx.cwd  # where it runs: part of an approval's identity
+                if ctx.dir_doubt["set"]:
+                    match["dir_doubt"] = True
             matches.append(match)
+    if inline_spawn and all(m.get("category") in ("unreadable", "control") for m in matches):
+        # Plain `unreadable` is only for inline code where no process start is in sight. (When
+        # another category matched, that one decides the question anyway.)
+        matches = [_unreadable_state_match() if m.get("id") == UNREADABLE_ID else m
+                   for m in matches]
     return matches
 
 
@@ -739,6 +766,16 @@ def _change_dir(tokens: list, ctx: _Ctx) -> None:
         ctx.cwd = None
     else:
         ctx.cwd = _resolve(target, ctx.cwd)
+        if ctx.cwd is not None and not os.path.isdir(ctx.cwd):
+            ctx.dir_doubt["set"] = True  # made (or linked) by the command itself, if at all
+
+
+# A command that may make a directory or link appear where a path pointed to something else:
+# ln, mv, rename, mount, link, cp making links, and inline code that links or renames.
+_MOVES_PATHS_RE = re.compile(
+    r"(?<![\w.-])(ln|gln|mv|gmv|rename|renameat|mount|link|mount_\w+)(?![\w.-])|symlink|"
+    r"(?<![\w.-])g?cp(?![\w.-])[^;&|\n]*\s-(\w*[sl]\w*|-symbolic-link|-link)(?![\w-])|"
+    r"\b(os|shutil|fs|File|FileUtils)\s*\.\s*(rename\w*|replace|move|link\w*|ln\w*|mv)\b")
 
 
 # Wrappers that run their command in the CURRENT shell, so a `cd` through them moves it.
@@ -1044,6 +1081,52 @@ _DW_REF_RE = re.compile(
     r"project['\"]?\s*,?\s*['\"]?\s*(add|remove))\b|(bin|control)/dw\b")
 _LITERAL_RE = re.compile(r"'([^'\n]{1,2000})'|\"([^\"\n]{1,2000})\"")
 _URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+")
+# A process-spawning primitive in inline code, per interpreter family (a family-blind
+# `system(`/`exec(` would also hit `platform.system()` or a JavaScript `re.exec()`).
+_FAMILY_SPAWN_RE = {
+    "python": re.compile(r"\bsubprocess\b|\bos\s*\.\s*(system|popen|exec\w*|spawn\w*|posix_spawn\w*)\b|"
+                         r"\bpty\b|__import__|\bimportlib\b|(?<![.\w])(exec|eval)\s*\("),
+    "node": re.compile(r"child_process|(?<![.\w])(exec|execSync|execFile|execFileSync|spawn|spawnSync|"
+                       r"fork)\s*\(|\.\s*(execSync|execFile|execFileSync|spawn|spawnSync)\s*\(|"
+                       r"Bun\.spawn|Deno\.(run|Command)"),
+    "perl": re.compile(r"\b(system|exec)\b|`|\bqx\s*\W|%x\W|\bopen\s*\(?[^;\n]*['\"][^'\"\n]*\|"),
+}
+_FAMILY_SPAWN_RE["pypy"] = _FAMILY_SPAWN_RE["python"]
+_FAMILY_SPAWN_RE["bun"] = _FAMILY_SPAWN_RE["deno"] = _FAMILY_SPAWN_RE["node"]
+_FAMILY_SPAWN_RE["ruby"] = re.compile(_FAMILY_SPAWN_RE["perl"].pattern +
+                                      r"|\bspawn\b|IO\s*\.\s*popen|\bOpen3\b|\bKernel\s*\.")
+_QUOTED_WORD_RE = re.compile(r"'([\w./+-]{1,64})'|\"([\w./+-]{1,64})\"")
+# Rule program names that are also ordinary words in code (`ws.on('open')`, `d['k']`), and
+# interpreters (which run code themselves): as a quoted word they say nothing.
+_RULE_NAME_EXEMPT = {"open", "k", "http", "https", "mail", "np", "pod", "cap", "ko", "sam", "mina"}
+
+
+def _names_rule_program(text: str, ctx: _Ctx) -> bool:
+    """Whether a whole quoted string literal in inline code is the name of a program a guard
+    rule names (`'npm'` in `['npm','publish']`), other than an interpreter or an ordinary word."""
+    names = {p for r in ctx.rules for p in (r.get("program") or ())}
+    for m in _QUOTED_WORD_RE.finditer(text):
+        word = m.group(1) if m.group(1) is not None else m.group(2)
+        if word in names and word not in _RULE_NAME_EXEMPT and not _INTERPRETER_RE.match(word):
+            return True
+    return False
+
+
+def _code_spawns(text: str, family: Optional[str], ctx: _Ctx) -> bool:
+    """Whether inline code visibly starts a process: a spawning primitive of its interpreter
+    family (any known one when the family is not known), or a quoted program name a guard
+    rule names."""
+    rx = _FAMILY_SPAWN_RE.get(family or "")
+    if rx is not None:
+        found = bool(rx.search(text))
+    else:
+        found = bool(_SPAWN_RE.search(text)) or any(r.search(text) for r in _FAMILY_SPAWN_RE.values())
+    return found or _names_rule_program(text, ctx)
+
+
+def _computed_word(word: str) -> bool:
+    """A word whose text is only known at run time, in whole or in part."""
+    return "__dwsub" in word or _expand(word) is None
 
 
 _INLINE_ROLLOUT_CHANGE_RE = re.compile(
@@ -1088,7 +1171,11 @@ def _inline_rollout_change(text: str) -> bool:
 
 
 def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> list:
-    """Matches for code given inline to an interpreter (python -c, node -e, a here-document...)."""
+    """Matches for code given inline to an interpreter (python -c, node -e, a here-document...).
+
+    Code that starts a process where a guarded program or a remote address is in sight, and
+    that is not read as anything more precise, is `control-unreadable-state`: what it runs
+    cannot be read, and a run-wide approval of unreadable commands must not cover it."""
     out: list = []
     if depth > 6:
         return [_unreadable_match()]
@@ -1111,8 +1198,8 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
         out.append(_state_match(text))
     if not out and (spawn or _SPAWN_RE.search(text)):
         remote = any(not _is_local_host(_url_host(u)) for u in _URL_RE.findall(text))
-        if remote or _GUARDED_NAME_RE.search(text):
-            out.append(_unreadable_match())
+        if remote or _GUARDED_NAME_RE.search(text) or _names_rule_program(text, ctx):
+            out.append(_unreadable_state_match())
     return out
 
 
@@ -2032,10 +2119,14 @@ def _combine(matches: list) -> Optional[dict]:
         unique.sort(key=lambda m: CATEGORIES.index(m["category"]))
         out = {"id": "+".join(m["id"] for m in unique), "category": unique[0]["category"],
                "describe": "; ".join(m["describe"] for m in unique), "pairs": pairs}
-    for internal in ("segment", "dir", "where"):
+    for internal in ("segment", "dir", "where", "dir_doubt"):
         out.pop(internal, None)
     if all("segment" in m for m in matches):
         out["keys"] = keys
+    if any(m.get("dir_doubt") for m in matches):
+        # A directory of the keys may not be where the command really runs: automatic
+        # approvals limited to a directory do not apply (see _auto_approved).
+        out["dir_doubt"] = True
     return out
 
 
@@ -2094,6 +2185,8 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
         for m in matches:
             if not straight:
                 m["segment"], m["dir"] = command.strip(), start
+                if ctx.dir_doubt["set"]:
+                    m["dir_doubt"] = True  # the whole command is the action
             m.setdefault("dir", start)
             if m["dir"] != start:  # shown in the question, right after the describe text
                 m["where"] = _middle(m["dir"], WHERE_MAX) if m["dir"] else "an unknown directory"
@@ -2606,8 +2699,10 @@ def _auto_approved(project: dict, run: dict, match: dict, tool: str) -> bool:
         events.log_error("guard auto-approve", GuardError("ignored: " + "; ".join(problems)))
     if not entries:
         return False
+    # An entry limited to a directory applies only when the directory is known for certain.
+    doubt = bool(match.get("dir_doubt"))
     if not all(autoapprove.covers(entries, str(rule), str(segment),
-                                  None if directory == _UNKNOWN_DIR else directory)
+                                  None if doubt or directory == _UNKNOWN_DIR else directory)
                for rule, segment, directory in keys):
         return False
     events.log_text("auto-approved run %s rule %s" % (run["id"], match["id"]),

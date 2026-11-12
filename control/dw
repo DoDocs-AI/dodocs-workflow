@@ -93,8 +93,15 @@ def cmd_project_remove(args) -> int:
     return 0
 
 
-def _auto_entries_from_run(project: dict, run_id: str, note: str) -> list:
-    """Exact entries for a run's pending approval, or else its most recent held action."""
+def _describe_action(source: dict) -> str:
+    return "action %s, rule %s: %s" % (status.action_id(source.get("action")), source.get("rule"),
+                                       source.get("describe"))
+
+
+def _auto_entries_from_run(project: dict, run_id: str, note: str, action) -> list:
+    """Exact entries for the run's pending approval or its most recent held action, whichever
+    has the short action id `action` (as `dw status` shows it). Without `action`, a terminal is
+    asked to confirm the current one; anything else is refused."""
     try:
         run = store.load_run(run_id)
     except store.RunNotFound:
@@ -102,9 +109,33 @@ def _auto_entries_from_run(project: dict, run_id: str, note: str) -> list:
     if run.get("project_id") != project["id"]:
         raise UserError("run %s belongs to project %s, not %s"
                         % (run_id, run.get("project_id"), project["id"]))
-    source = run.get("pending_approval") or run.get("last_held")
-    if not source:
+    candidates = [s for s in (run.get("pending_approval"), run.get("last_held"))
+                  if isinstance(s, dict) and s.get("action")]
+    if not candidates:
         raise UserError("run %s has no pending or held action" % run_id)
+    if action is None:
+        current = candidates[0]
+        details = ["rule: %s" % current.get("rule"), "describe: %s" % current.get("describe")]
+        details += ["segment: %s\ndirectory: %s" % (k[1], k[2]) for k in current.get("keys") or []]
+        details.append("action: %s" % status.action_id(current.get("action")))
+        if not sys.stdin.isatty():
+            print("\n".join(details))
+            raise UserError("not a terminal: name the action you checked, e.g. "
+                            "dw project auto-approve %s --from-run %s --action %s"
+                            % (project["id"], run_id, status.action_id(current.get("action"))))
+        print("\n".join(details))
+        if not _confirm("Add this automatic approval? [y/N] "):
+            raise UserError("nothing was added")
+        source = current
+    else:
+        source = next((s for s in candidates if action and
+                       status.action_id(s.get("action")) == action[:status.ACTION_ID_CHARS]
+                       and len(action) >= 4), None)
+        if source is None:
+            raise UserError("action %s is not the run's current action (%s); check it again"
+                            % (action, "; ".join(_describe_action(s) for s in candidates)))
+    note = ("%s " % note if note else "") + "(from run %s action %s)" % (
+        run_id, status.action_id(source.get("action")))
     rules = str(source.get("rule") or "").split("+")
     if source.get("category") == "control" or any(autoapprove.is_control_rule(r) for r in rules):
         raise UserError("%s changes the control point; it is never approved automatically"
@@ -118,7 +149,9 @@ def _auto_entries_from_run(project: dict, run_id: str, note: str) -> list:
     for rule, segment, directory in keys:
         if not directory or not os.path.isabs(str(directory)):
             raise UserError("the directory of %s is unknown; use --rule and --match" % segment)
-        out.append(autoapprove.exact_entry(str(rule), str(segment), str(directory), note, now))
+        entry = autoapprove.exact_entry(str(rule), str(segment), str(directory), note, now)
+        entry["from_run"] = run_id
+        out.append(entry)
     return out
 
 
@@ -149,7 +182,7 @@ def cmd_project_auto_approve(args) -> int:
         print("removed %s" % json.dumps(removed[0], sort_keys=True))
         return 0
     if args.from_run:
-        new = _auto_entries_from_run(project, args.from_run, args.note)
+        new = _auto_entries_from_run(project, args.from_run, args.note, args.action)
     else:
         if not args.rule or args.match is None:
             raise UserError("give --from-run RUN_ID, or --rule RULE_ID with --match REGEX")
@@ -267,8 +300,12 @@ def _view_lines(project_id, v, finished=False) -> list:
     if v["reason"]:
         lines.append("      reason: %s" % v["reason"])
     if v.get("pending"):
-        lines.append("      pending approval: %s (rule %s)" % (v["pending"]["describe"],
-                                                             v["pending"]["rule"]))
+        lines.append("      pending approval: %s (rule %s, action %s)"
+                     % (v["pending"]["describe"], v["pending"]["rule"], v["pending"]["action"]))
+    elif finished and v.get("last_held"):
+        lines.append("      last held: %s (rule %s, action %s)"
+                     % (v["last_held"]["describe"], v["last_held"]["rule"],
+                        v["last_held"]["action"]))
     if v["progress"]:
         lines += _indent(v["progress"])
     if v["result"]:
@@ -519,6 +556,7 @@ def build_parser() -> argparse.ArgumentParser:
     which.add_argument("--remove", type=int, metavar="N")
     auto.add_argument("--match", metavar="REGEX", help="with --rule: fully matches the segment")
     auto.add_argument("--in", dest="within", metavar="DIR", help="with --rule: only in DIR")
+    auto.add_argument("--action", metavar="ID", help="with --from-run: the action id `dw status` shows")
     auto.add_argument("--note", default="")
     auto.set_defaults(func=cmd_project_auto_approve)
     run = sub.add_parser("run", help="start a run in an AGTerm session")

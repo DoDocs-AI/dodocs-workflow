@@ -49,7 +49,7 @@ Run `dw approve <run-id>` or `dw deny <run-id>` only on the owner's explicit wor
 
 `dw approve` lets the pending action through once: it works while the question is still waiting and after it, and covers that guarded action in its directory, not only the exact command line. `dw deny` refuses it the same way. Holds in the `control` category (a run trying to change its own controls) cannot be approved with `dw approve`; they can only be approved once, by the owner, from the dialog in the terminal. Say so and point the owner there. A "command cannot be read" hold (category `unreadable`) is not `control`: `dw approve` works for it.
 
-Only when the owner explicitly asks to always allow a held action in a project ("always allow that in this project"), run `dw project auto-approve <project> --from-run <run-id>` and show the entry it prints. It does not approve the pending action; that still needs the owner's answer. Never add an automatic approval on your own initiative, and never for a `control` hold (`dw` refuses those).
+Only when the owner explicitly asks to always allow a held action in a project ("always allow that in this project"), get the action id from `dw status --json` (the `pending` or `last_held` entry of that run), show the owner the rule, the exact command text and the directory, and run `dw project auto-approve <project> --from-run <run-id> --action <id>` for that one action only; show the entry it prints. It does not approve the pending action; that still needs the owner's answer. Never add an automatic approval on your own initiative, and never for a `control` hold (`dw` refuses those).
 
 ## Style
 

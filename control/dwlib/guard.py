@@ -2379,7 +2379,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
                 pending["keys"] = match["keys"]
         # What `dw project auto-approve --from-run` names when nothing is pending any more.
         held = {"rule": match["id"], "category": match["category"], "describe": describe,
-                "tool": tool, "keys": match.get("keys") or [], "at": now}
+                "tool": tool, "keys": match.get("keys") or [], "action": action, "at": now}
         return runs._moved(r, now, state="blocked", reason="awaiting approval: " + describe,
                            pending_approval=pending, last_held=held)
 

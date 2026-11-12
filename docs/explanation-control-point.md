@@ -165,9 +165,12 @@ change the control point's own settings. Everything it does not recognise is all
 - **Automatic approvals, per project.** An action you would approve every time can be let
   through without a question in one project. After a run asks for it, say so to `/control`
   ("always allow that in this project"), or run
-  `dw project auto-approve <project> --from-run <run-id>`: it names the run's pending action
-  (or, when nothing is pending, the last action it held) exactly, its rule, its full command
-  segment and its directory, and prints the entry. It does not approve the pending action
+  `dw project auto-approve <project> --from-run <run-id> --action <id>`, with the short action
+  id `dw status` shows next to the pending approval (or a finished run's last held action). It
+  names that action exactly, its rule, its full command segment and its directory, and prints
+  the entry. If the run has since been held on something else, the id no longer matches and
+  nothing is added; without `--action`, `dw` shows the action and asks first in a terminal, and
+  refuses anywhere else. It does not approve the pending action
   itself; answer that as usual. From then on the guard lets that exact action through in that
   project and writes `auto-approved run <id> rule <rule>: <segment>` to `dw.log`. An entry is
   exact by default; to widen one deliberately, write it yourself:
@@ -181,8 +184,8 @@ change the control point's own settings. Everything it does not recognise is all
   pattern, `.*`, `.+` and any pattern that matches the empty string or everything are refused,
   by `dw` and again by the guard. Entries the guard cannot use (a bad regex, a nested
   quantifier such as `(a+)+`, wrong types) are ignored and reported by `dw doctor`. Automatic
-  approvals cover shell commands only. `dw status` shows the rule id of a pending approval, so
-  you can see what an entry would name.
+  approvals cover shell commands only. `dw status` shows the rule id and action id of a pending
+  approval, so you can see what an entry would name.
 - **`dw` itself refuses inside a run.** Called with `DW_RUN_ID` in its environment (the run's
   session and everything it starts), every `dw` subcommand that changes something (`approve`,
   `deny`, `run`, `resume`, `cancel`, `dismiss`, `setup`, `project add`/`remove`/`import-legacy`,

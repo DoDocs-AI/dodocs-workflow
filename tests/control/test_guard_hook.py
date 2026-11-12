@@ -1485,14 +1485,33 @@ class AutoApproveTests(GuardHookBase):
         out = self.guard(self.payload(path, "git push origin main"), env={"DW_RUN_ID": rid})
         self.assertEqual(out["permissionDecisionReason"], INACTIVE_REASON % (rid, "done"))
 
+    def action_id(self, rid):
+        data = json.loads(self.dw("status", "--json").stdout)
+        view = [v for v in data["needs_owner"] if v["id"] == rid]
+        if view and view[0].get("pending"):
+            return view[0]["pending"]["action"]
+        for p in data["projects"]:
+            for v in p["active"] + p["recent"]:
+                if v["id"] == rid:
+                    return (v.get("pending") or v.get("last_held"))["action"]
+        raise AssertionError("no action id for %s" % rid)
+
     def test_from_run_adds_the_exact_entry_without_approving(self):
         path, rid = self.start_run()
         self.held(path, "git push origin main")
+        action = self.action_id(rid)
+        self.assertEqual(len(action), 8)
         r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--note", "ok")
+        self.assertEqual(r.returncode, 2)  # no --action, no terminal: refused
+        self.assertIn("--action %s" % action, r.stdout + r.stderr)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", action,
+                    "--note", "ok")
         self.assertEqual(r.returncode, 0, r.stderr)
         entry = json.loads(r.stdout)
-        self.assertEqual((entry["rule"], entry["in"], entry["note"]),
-                         ("git-push-default", os.path.realpath(str(path)), "ok"))
+        self.assertEqual((entry["rule"], entry["in"], entry["from_run"]),
+                         ("git-push-default", os.path.realpath(str(path)), rid))
+        self.assertIn("ok", entry["note"])
+        self.assertIn(action, entry["note"])
         self.assertTrue(re.fullmatch(entry["match"], "git push origin main"))
         self.assertIsNotNone(self.record(rid)["pending_approval"])  # still the owner's to answer
         self.assertEqual(self.dw("deny", rid).returncode, 0)
@@ -1507,11 +1526,23 @@ class AutoApproveTests(GuardHookBase):
         self.assertEqual(self.dw("deny", rid).returncode, 0)
         held = self.record(rid)["last_held"]
         self.assertEqual((held["rule"], held["category"]), ("kubectl-change", "deploy"))
-        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid)
+        old = self.action_id(rid)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", old)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["rule"], "kubectl-change")
+        # The run has since been held on another action: the old id is stale.
+        self.held(path, "git push origin main")
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        before = json.loads(self.dw("project", "list", "--json").stdout)[0]["auto_approve"]
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", old)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn(self.action_id(rid), r.stderr)
+        self.assertIn("git-push-default", r.stderr)
+        self.assertEqual(json.loads(self.dw("project", "list", "--json").stdout)[0]["auto_approve"],
+                         before)
         self.held(path, "dw approve %s" % rid)
-        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                    "--action", self.action_id(rid))
         self.assertEqual(r.returncode, 2)
         self.assertIn("control", r.stderr)
 
@@ -1520,6 +1551,7 @@ class AutoApproveTests(GuardHookBase):
         self.held(path, "git push origin main")
         r = self.dw("status")
         self.assertIn("git-push-default", r.stdout)
+        self.assertIn(self.record(rid)["pending_approval"]["action"][:8], r.stdout)
         self.assertIn("push to the default branch", r.stdout)
         data = json.loads(self.dw("status", "--json").stdout)
         pending = [v for v in data["needs_owner"] if v["id"] == rid][0]["pending"]

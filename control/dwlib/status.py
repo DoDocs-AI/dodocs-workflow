@@ -130,17 +130,26 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
         "session_unknown": session_unknown,
         "progress": find_progress(project["path"], run) if state in ACTIVE else None,
         "result": _result_note(run["id"]) if state in ENDED or state == "blocked" else None,
-        "pending": _pending(run),
+        "pending": _action_view(run.get("pending_approval")),
+        "last_held": _action_view(run.get("last_held")),
     }
 
 
-def _pending(run: dict) -> Optional[dict]:
-    """The rule id and text of a run's pending approval (what an automatic approval names)."""
-    pending = run.get("pending_approval")
-    if not isinstance(pending, dict):
+ACTION_ID_CHARS = 8
+
+
+def action_id(action) -> str:
+    """The short id of an approval identity (`guard._fingerprint`): what `dw project
+    auto-approve --from-run RUN --action ID` names."""
+    return str(action or "")[:ACTION_ID_CHARS]
+
+
+def _action_view(held) -> Optional[dict]:
+    """Rule id, text and short action id of a pending approval or a last held action."""
+    if not isinstance(held, dict):
         return None
-    return {"rule": pending.get("rule"), "category": pending.get("category"),
-            "describe": pending.get("describe")}
+    return {"rule": held.get("rule"), "category": held.get("category"),
+            "describe": held.get("describe"), "action": action_id(held.get("action"))}
 
 
 def project_status(project: dict, runs: list, sessions: Optional[dict], now: float,

@@ -2497,6 +2497,24 @@ class InlineSpawnTests(GuardClassifyBase):
         # Code that comes from somewhere unseen is still plain unreadable.
         self.assertEqual(self.result('python3 - "$X"'), ("control-unreadable", "unreadable"))
 
+    def test_double_quoted_code_with_a_run_time_expansion_is_computed_code(self):
+        for command in ("python3 -c \"print('$X')\"",
+                        "python3 -c \"import json,sys; print(json.load(sys.stdin)['${KEY}'])\"",
+                        "node -e \"console.log('${X}')\"",
+                        "perl -e \"print '$X'\"",
+                        "ruby -e \"puts `id`\""):
+            with self.subTest(command=command):
+                self.assertIn("control-unreadable-state", self.bash(command)["id"].split("+"))
+                self.assertEqual(self.bash(command)["category"], "control")
+        # Single quotes keep the text literal; a same-command literal variable and $HOME are
+        # resolved: as before.
+        self.assertEqual(self.result("python3 -c 'print(\"$X\")'"),
+                         ("control-unreadable", "unreadable"))
+        for command in ("perl -e 'print $x'", "X=hi; python3 -c \"print('$X')\"",
+                        "node -e \"console.log('a')\""):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
 
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):

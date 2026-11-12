@@ -660,7 +660,8 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                     matches += _inline_matches(loader, ctx, depth)
             operands = [a for a in rest if not a.startswith("-")]
             for code in codes:
-                if _run_time_text(code) or "__dwsub" in code:
+                if _run_time_text(code) or "__dwsub" in code or \
+                        _double_quoted_run_time(code, seg["words"]):
                     matches.append(_unreadable_state_match())  # code that cannot be scanned
             # `python3 - ARG...`: the program is read from standard input, the words after `-`
             # are data for it. With a here-document the body is the code (scanned below).
@@ -1122,6 +1123,45 @@ def _code_spawns(text: str, family: Optional[str], ctx: _Ctx) -> bool:
     else:
         found = bool(_SPAWN_RE.search(text)) or any(r.search(text) for r in _FAMILY_SPAWN_RE.values())
     return found or _names_rule_program(text, ctx)
+
+
+_EXPANSION_START_RE = re.compile(r"\$(?:[A-Za-z_0-9@*#?!$-]|\{|\()")
+
+
+def _unquoted_expansion(raw: str) -> bool:
+    """Whether a raw shell word has an expansion the shell performs (`$VAR`, `${...}`,
+    `$(...)`, backticks) outside single quotes, other than $HOME."""
+    raw = raw.replace("${HOME}", "").replace("$HOME", "")
+    i, single = 0, False
+    while i < len(raw):
+        ch = raw[i]
+        if single:
+            if ch == "'":
+                single = False
+        elif ch == "\\":
+            i += 2
+            continue
+        elif ch == "'" and raw[:i].count('"') % 2 == 0:
+            single = True
+        elif ch == "`" or (ch == "$" and _EXPANSION_START_RE.match(raw, i)):
+            return True
+        i += 1
+    return False
+
+
+def _double_quoted_run_time(code: str, raw_words: list) -> bool:
+    """Whether inline code given as a value (`-c`/`-e`) comes from a raw word in which the
+    shell expands something at run time (a double-quoted `"...$X..."`): the code is computed.
+    Same-command literal variables are already resolved in the words."""
+    for raw in raw_words:
+        try:
+            if _tokens([raw]) != [code]:
+                continue
+        except _Unreadable:
+            continue
+        if _unquoted_expansion(raw):
+            return True
+    return False
 
 
 def _computed_word(word: str) -> bool:

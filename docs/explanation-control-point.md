@@ -171,8 +171,11 @@ change the control point's own settings. Everything it does not recognise is all
      is not held at all);
   4. shell or interpreter code that could not be scanned at all: a shell or interpreter fed
      from a pipe (`curl ... | sh`), an interactive shell (`su`, `sudo -s`), `bash -c "$CMD"`,
-     `python3 -c "$CODE"`, `eval "$(...)"`, `source <(...)`, `bash <(...)`, or a `-c` string
-     or here-document the guard cannot parse;
+     `python3 -c "$CODE"`, `eval "$(...)"`, `source <(...)`, `bash <(...)`, interpreter code
+     given as a double-quoted value with a run-time expansion in it
+     (`python3 -c "print('$X')"`, `node -e "f('${X}')"`; single quotes, `$HOME` and a literal
+     variable set earlier in the same command are read), or a `-c` string or here-document
+     the guard cannot parse;
   5. inline interpreter code (any interpreter; `-c`/`-e` code or a here-document on stdin)
      that visibly starts a process and is not read as anything more precise: a spawning
      primitive (Python `subprocess`, `os.system`, `os.popen`, `os.exec*`, `os.spawn*`, `pty`,
@@ -326,6 +329,16 @@ Things that pass although you might expect them to be held.
 - A file written by inline code through a computed argument:
   `python3 - "$(cat f)" <<'PY'` with `open(sys.argv[1], 'w')`, like `echo x > "$(cat f)"`.
   (The `-c` form, `python3 -c '...' "$(cat f)"`, is the same.)
+- Inline code that runs its own arguments as a command when they are literal:
+  `python3 - kubectl delete ns prod <<'PY'` with `subprocess.run(sys.argv[1:])` (also the
+  `-c` form; held only when an argument is computed, or when an argument is itself a whole
+  command line such as `'git push origin main'`).
+- An interpreter fed an unquoted here-document whose body has a run-time expansion
+  (`python3 - <<PY` with `os.system('$CMD')`): the shell fills the code in at run time and the
+  guard scans the text before expansion.
+- Inline code that executes code it computes: `exec(__import__('base64').b64decode('...'))`,
+  `exec(open(sys.argv[1]).read())`, `compile(...)`, node `new Function(...)` or `vm.*`, perl
+  `eval $x`.
 - Inline code can run `dw` itself (including `dw project auto-approve`) with `DW_RUN_ID`
   removed from its environment, so `dw` does not know it is inside a run and an automatic
   approval it adds persists, for this run and later ones (when the name `dw` is built from

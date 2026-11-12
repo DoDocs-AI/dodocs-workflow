@@ -1893,6 +1893,20 @@ class ZshPrecommandTests(GuardClassifyBase):
                 self.assertIsNone(self.bash(command))
 
 
+class StateDirectoryMkdirTests(GuardClassifyBase):
+    def test_mkdir_of_the_state_directories_is_spared_only_inside_a_run(self):
+        runs = os.path.realpath(str(self.paths.runs_dir()))
+        outside = self.guard.load_rules({"guard_rules": []})
+        command = "mkdir -p %s" % runs
+        self.assertIsNone(self.bash(command))
+        result = self.guard.classify("Bash", {"command": command}, "/p", "/p", outside)
+        self.assertEqual(self.category(result), "control")
+        for held in ("mkdir -p %s/x" % runs, "mkdir -p -- %s %s/x" % (runs, runs),
+                     "mkdir -p '%s'*" % runs, "mkdir -mp 700 %s" % runs, "mkdir %s" % runs):
+            with self.subTest(command=held):
+                self.assertEqual(self.category(self.bash(held)), "control")
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

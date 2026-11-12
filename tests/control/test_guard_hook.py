@@ -1034,3 +1034,61 @@ class GuardApprovalSegmentTests(GuardHookBase):
         self.assertIsNone(self.guard(self.payload(
             path, 'git commit -qm "$(date)" && git push origin main')))
         self.assertEqual(self.record(rid)["grants"], [])
+
+
+class GuardResultNoteTests(GuardHookBase):
+    """The agent's own result note must be writable the way agents write it; nothing else in
+    the control point's state directory is."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.path, self.rid = self.start_run()
+        self.home = str(self.dw_home.resolve())
+        self.runs = self.home + "/runs"
+        self.note = "%s/%s.result.md" % (self.runs, self.rid)
+
+    def allowed(self, command):
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(self.path, command)), command)
+        self.assertEqual(len(self.ask_calls()), asks)
+
+    def held_as_control(self, command):
+        out = self.guard(self.payload(self.path, command))
+        self.assertEqual(out["permissionDecision"], "deny", command)
+        pending = self.record(self.rid)["pending_approval"]
+        self.assertEqual(pending["category"], "control", command)
+        self.assertEqual(self.dw("deny", self.rid).returncode, 0)
+
+    def test_the_observed_note_command_is_allowed_silently(self):
+        self.allowed("mkdir -p %s && cat > %s <<'EOF'\nDONE\nAll good.\nEOF" % (self.runs, self.note))
+
+    def test_mkdir_of_the_existing_state_directories_is_allowed(self):
+        for command in ("mkdir -p %s" % self.runs, "mkdir -p %s" % self.home,
+                        "mkdir --parents %s" % self.runs, "mkdir -pv -m 700 %s %s" % (self.home, self.runs),
+                        "test -d %s" % self.runs, "[ -d %s ]" % self.runs, "ls %s" % self.runs,
+                        "stat %s" % self.runs):
+            with self.subTest(command=command):
+                self.allowed(command)
+
+    def test_the_note_stays_writable_every_usual_way(self):
+        for command in ("echo DONE > %s" % self.note, "printf 'DONE\\n' > %s" % self.note,
+                        "echo DONE | tee %s" % self.note, "cp /tmp/x %s" % self.note,
+                        "mv /tmp/x %s" % self.note):
+            with self.subTest(command=command):
+                self.allowed(command)
+        for tool in ("Write", "Edit"):
+            with self.subTest(tool=tool):
+                self.assertIsNone(self.guard(self.payload(
+                    self.path, tool=tool, tool_input={"file_path": self.note, "content": "DONE"})))
+
+    def test_everything_else_in_the_state_directory_stays_held(self):
+        other = "%s/r-other.result.md" % self.runs
+        for command in ("mkdir -p %s/sub" % self.runs,
+                        "mkdir -p %s && echo x > %s" % (self.runs, other),
+                        "mkdir -p %s && echo x > %s/registry.json" % (self.runs, self.home),
+                        "mkdir %s/bin" % self.home, "mkdir %s" % self.runs,
+                        "mkdir -p %s > %s/registry.json" % (self.runs, self.home),
+                        "touch %s" % self.runs, "chmod 700 %s" % self.runs, "rm -r %s" % self.runs,
+                        "echo x > %s/%s.json" % (self.runs, self.rid)):
+            with self.subTest(command=command):
+                self.held_as_control(command)

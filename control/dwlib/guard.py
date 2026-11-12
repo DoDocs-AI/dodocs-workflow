@@ -1034,6 +1034,8 @@ def _write_positions(tokens: list, ctx: _Ctx, incomplete: Optional[bool] = None)
     name = tokens[0]  # only a bare name is the program it is called after
     options = [t for t in tokens[1:] if _is_option(t)]
     entry = _READ_ONLY.get(name)
+    if name == "mkdir" and not incomplete and _makes_only_existing_state_dirs(tokens, ctx):
+        return []
     if entry is not None:
         short, long, most, check = entry
         operands = len(tokens) - 1 - len(options)
@@ -1060,6 +1062,57 @@ def _write_positions(tokens: list, ctx: _Ctx, incomplete: Optional[bool] = None)
     skip = {i + 1 for i in found if tokens[i] in patterns}
     skip |= {i for i in found if tokens[i].split("=", 1)[0] in patterns and "=" in tokens[i]}
     return [i for i in found if i not in skip]
+
+
+_MKDIR_SHORT_RE = re.compile(r"-[pv]*(m.*)?")
+
+
+def _makes_only_existing_state_dirs(tokens: list, ctx: _Ctx) -> bool:
+    """Inside a run: `mkdir -p` (or --parents; -v and -m MODE allowed) whose every operand is
+    the state directory itself or its runs directory, the directory the run's result note
+    goes in. They exist already, so the command changes nothing; agents run it before writing
+    their note. Anything else (another directory, no -p, an operand that is not plain text)
+    is judged as usual."""
+    if not ctx.protected.note:
+        return False
+    parents = False
+    operands: list = []
+    i, options = 1, True
+    while i < len(tokens):
+        t = tokens[i]
+        if options and t == "--":
+            options = False
+        elif options and t in ("--parents", "--verbose"):
+            parents = parents or t == "--parents"
+        elif options and t.startswith("--mode="):
+            pass
+        elif options and t == "--mode":
+            i += 1
+        elif options and t.startswith("-") and len(t) > 1 and not t.startswith("--"):
+            m = _MKDIR_SHORT_RE.fullmatch(t)
+            if not m:
+                return False
+            parents = parents or "p" in t[:m.start(1) if m.group(1) else len(t)]
+            if m.group(1) == "m":
+                i += 1  # -m MODE: the mode is the next word
+        elif options and t.startswith("-"):
+            return False
+        else:
+            operands.append(t)
+        i += 1
+    if not parents or not operands:
+        return False
+    home = ctx.protected.dw_home.lower()
+    allowed = {home, os.path.join(home, "runs")}
+    for op in operands:
+        if not op or re.search(r"[$`*?\[\]{}~\\]|__dwsub", op):
+            return False
+        if ctx.cwd is None and not op.startswith("/"):
+            return False  # relative to a directory nobody knows
+        real = os.path.realpath(os.path.join(ctx.cwd or "/", op)).lower()
+        if real not in allowed:
+            return False
+    return True
 
 
 MAX_LOOP_WORDS = 64

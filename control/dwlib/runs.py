@@ -21,7 +21,8 @@ FINISHED_STATES = ("done", "failed", "interrupted", "cancelled")
 RESULT_NOTE_SUFFIX = (
     "When this work is finished, or you cannot continue, write a short result note to %s. "
     "First line: exactly DONE, BLOCKED or FAILED. Then: what was done, the pull request URL "
-    "if any, and what is left. Write this file even if the work failed."
+    "if any, and what is left. Write this file even if the work failed. Write it with your "
+    "file-writing tool or a single redirect to exactly that path; the directory already exists."
 )
 
 

@@ -12,7 +12,9 @@ from helpers import DwTestCase, FAKE_AGTERMCTL
 SUFFIX_RE = re.compile(
     r"When this work is finished, or you cannot continue, write a short result note to "
     r"(\S+)\. First line: exactly DONE, BLOCKED or FAILED\. Then: what was done, the pull "
-    r"request URL if any, and what is left\. Write this file even if the work failed\.\Z")
+    r"request URL if any, and what is left\. Write this file even if the work failed\. Write it "
+    r"with your file-writing tool or a single redirect to exactly that path; the directory "
+    r"already exists\.\Z")
 
 
 def opt(argv, name):

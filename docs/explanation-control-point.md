@@ -125,6 +125,17 @@ change the control point's own settings. Everything it does not recognise is all
   directory, `~/.claude/settings.json` or AGTerm's hooks file, is held in a separate
   `control` category. It can be approved once, from the dialog only, never for the rest of
   the run and never with `dw approve`.
+- **Commands the guard cannot read.** For the programs it guards (git, gh, kubectl, the
+  shells, interpreters, wrappers ...), a command whose deciding words are only known at run
+  time, or whose syntax the guard cannot follow, is held as "command cannot be read", in its
+  own `unreadable` category. It can be approved once, with `dw approve`, or for the rest of
+  the run with the dialog's *Approve unreadable commands for this run* button. **Approving
+  unreadable commands for a run turns off the guard's fail-closed reading for that run:**
+  every later command it cannot read in that run goes through without a question, whatever
+  it does. When the same command also matches another category (a push, a deploy, a change
+  to the control point), that category decides the question, and an approval of unreadable
+  commands never lets it through. Answering such a question *for this run* remembers only the
+  other rule, not the unreadable class.
 - While a run is active in a project, your own Claude sessions in that project see the same
   questions. That is accepted.
 - **After the run ends.** A session that belongs to a run that has finished, failed, been
@@ -276,7 +287,9 @@ Things that pass although you might expect them to be held.
 ### Known over-holds
 
 Things that are held although they are harmless. They are held as `control`, so they cannot
-be approved for the run, unless noted.
+be approved for the run, unless noted. Those held as "command cannot be read" are in the
+`unreadable` category and can be approved for the run (see
+[How approvals work](#how-approvals-work)).
 
 - **Reading a protected file** (`.git`, `.claude/settings.json`) in a way the guard cannot
   prove is a read: a read-only program
@@ -296,9 +309,10 @@ be approved for the run, unless noted.
   (`rm .git/refs/heads/$B`); a segment that may be a protected name with something after it
   (`.*/x`, `a*/x`); `..` after a run-time segment in a path that also names a protected
   directory; a run-time word written directly in your home directory (`echo x > ~/$F`).
-- **Run-time programs and wrappers**: `cd $DW_HOME`, `python3 -m $MOD`, `tsx $SCRIPT`, a wrapper
-  with a run-time or glob argument (`timeout 5 ls $DIR`, `npx tsx x.ts "$PORT"`), and a loop
-  over more than 64 literal words whose body writes the loop variable.
+- **Run-time programs and wrappers**: `cd $DW_HOME` (`control`); held as `unreadable`:
+  `python3 -m $MOD`, `tsx $SCRIPT`, a wrapper with a run-time or glob argument
+  (`timeout 5 ls $DIR`, `npx tsx x.ts "$PORT"`), and a loop over more than 64 literal words
+  whose body writes the loop variable.
 - **Environment**: `ENV=value` on a line that also runs a shell (`ENV=prod npm ci && bash build.sh`),
   `BASH_ENV=value` always, `NODE_OPTIONS` with run-time text, loader variables under a wrapper
   even when they belong to the wrapped program (`sudo make LD_PRELOAD=x`).

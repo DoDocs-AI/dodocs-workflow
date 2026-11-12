@@ -9,12 +9,17 @@ is refused every matching action outright, without asking.
 Classification rule for what the parser does not understand: a command whose program is
 SENSITIVE (see `sensitive_programs`: every program a rule names, git, gh, ssh, scp, rsync,
 curl, wget, osascript, dw, the shells, interpreters given inline code, and every wrapper this
-module unwraps) is held as `control` ("command cannot be read") when anything that decides
+module unwraps) is held as `unreadable` ("command cannot be read") when anything that decides
 its classification cannot be read: an unknown option shape of a wrapper or interpreter, a
 word only known at run time (substitution, variable, glob, or brace too large to expand) in
 the subcommand, remote, branch or refspec, URL, target path or HTTP-method position, or
 quoting the lexer cannot follow. For any other program, unknown syntax is allowed. Control
 checks (dw, the control point's files, agtermctl, other agent CLIs) always apply.
+
+`unreadable` is its own category (rule id `control-unreadable`, kept for existing records): the
+owner can approve it once, with `dw approve`, or for the rest of the run, which turns this
+fail-closed reading off for that run. When the same call also matches another category, that
+category decides the question, and an unreadable approval never lets it through.
 
 This catches direct and lightly wrapped risky commands from a cooperative agent. It is not
 a sandbox: a script the agent writes and then runs is not read.
@@ -51,6 +56,7 @@ from .guard_shell import (  # noqa: F401
     _RUNNERS,
     _SHELL_STARTERS,
     _UNREADABLE_RULE,
+    UNREADABLE_ID,
     _Unreadable,
     _bounded_glob,
     _command_strings,
@@ -116,7 +122,9 @@ from .guard_git import (  # noqa: F401
     _git_control_matches,
 )
 
-CATEGORIES = ("control", "destroy", "spend", "send", "deploy", "merge", "publish")
+# In the order a call matching several decides its question: the first one present wins, so
+# `unreadable` (last) decides only when nothing else matched.
+CATEGORIES = ("control", "destroy", "spend", "send", "deploy", "merge", "publish", "unreadable")
 # Spike B: a hook may wait at least this long (entry timeout 3600 s; 900 s was the longest probe).
 HOOK_MAX_WAIT_SECONDS = 900
 ASK_TIMEOUT = min(HOOK_MAX_WAIT_SECONDS - 30, 3000)
@@ -2159,6 +2167,11 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
     pairs = _pairs(match)
     parts = match["id"].split("+")
     control = match["category"] == "control"
+    # What "for this run" remembers: every rule of the question, except that the unreadable
+    # class is remembered only from a question about it alone (never from one another
+    # category decides).
+    remembered = parts if match["category"] == "unreadable" else \
+        [p for p in parts if p != UNREADABLE_ID]
     describe = "; ".join(d for _, d in pairs)
     now = time.time()
     outcome: dict = {}
@@ -2208,7 +2221,8 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
                  "%s: %s" % (name, describe))
         buttons = [("once", "Approve once")]
         if not control:
-            buttons.append(("run", "Approve for this run"))
+            buttons.append(("run", "Approve unreadable commands for this run"
+                            if match["category"] == "unreadable" else "Approve for this run"))
         buttons.append(("deny", "Deny"))
         # One line: AGTerm refuses control characters, and agterm sanitises the rest.
         count = "%d guarded actions: " % len(pairs) if len(pairs) > 1 else ""
@@ -2275,7 +2289,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             out = runs._moved(out, time.time(), state="running", reason=None)
         if answer == "run":
             out["approvals"] = list(r.get("approvals") or []) + \
-                [p for p in parts if p not in (r.get("approvals") or [])]
+                [p for p in remembered if p not in (r.get("approvals") or [])]
         if answer == "deny":
             grant = _matching_grant(grants, action)
             if grant is not None:
@@ -2411,9 +2425,9 @@ def _resolve_pending(run_id: str, grant: bool) -> dict:
         pending = r.get("pending_approval")
         if not pending:
             raise NothingPending("run %s has no pending approval" % run_id)
+        rules = str(pending.get("rule") or "").split("+")
         if grant and (pending.get("category") == "control" or
-                      str(pending.get("rule") or "").startswith("control-") or
-                      "+control-" in str(pending.get("rule") or "")):
+                      any(p.startswith("control-") and p != UNREADABLE_ID for p in rules)):
             raise ApprovalRefused(
                 "%s changes the control point; it can be approved only in the run's own dialog"
                 % pending.get("describe"))

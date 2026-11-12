@@ -2,6 +2,17 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
+## [Unreleased]
+
+feat(control): guard usability
+
+- "Command cannot be read" is its own approval category, `unreadable` (rule id
+  `control-unreadable` unchanged), no longer `control`: it can be approved once, with
+  `dw approve`, or for the rest of the run ("Approve unreadable commands for this run"), which
+  turns the guard's fail-closed reading off for that run. When the same command also matches
+  another category, that category decides the question, and an unreadable approval never lets
+  it through.
+
 ## [v2.1.0] - 2026-11-12
 
 feat(control): control point — `/control` and the `dw` command

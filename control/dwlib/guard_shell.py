@@ -618,12 +618,16 @@ _KEYWORDS = {"if", "then", "else", "elif", "fi", "do", "done", "while", "until",
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=")
 
 
-_UNREADABLE_RULE = {"id": "control-unreadable", "category": "control", "describe": UNREADABLE,
+# A command the guard cannot read: its own category, approvable like any other but never
+# when the same call also matches another category. The rule id keeps its old name so that
+# existing run records stay valid.
+UNREADABLE_ID = "control-unreadable"
+_UNREADABLE_RULE = {"id": UNREADABLE_ID, "category": "unreadable", "describe": UNREADABLE,
                     "tool": "Bash"}
 
 
 def _unreadable_match() -> dict:
-    return {"id": "control-unreadable", "category": "control", "describe": UNREADABLE}
+    return {"id": UNREADABLE_ID, "category": "unreadable", "describe": UNREADABLE}
 
 
 def _dynamic(token: str) -> bool:

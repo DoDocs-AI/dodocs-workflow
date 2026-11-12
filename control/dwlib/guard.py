@@ -43,6 +43,7 @@ from .guard_shell import (  # noqa: F401
     SHELLS,
     WRAPPERS,
     _INTERPRETER_RE,
+    _KEYWORDS,
     _Lexer,
     _TooMany,
     _brace_expand,
@@ -205,6 +206,10 @@ class _Ctx:
         self.loop_words: dict = {}  # loop variable -> the words it runs over
         self.stdin_commands: list = []  # the commands piped into the one being read, as words
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
+        # Set when the command may run a segment more than once or with input from elsewhere
+        # (a loop, a background job, a function, xargs, parallel, watch, find -exec...):
+        # approvals then key on the whole command. Shared by every fork.
+        self.repeat = {"on": False}
 
     def fork(self) -> "_Ctx":
         other = _Ctx.__new__(_Ctx)
@@ -398,6 +403,8 @@ def _input_is_unreadable_for(suffix: list, marks: list, ctx: _Ctx) -> bool:
 def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int = 1) -> list:
     """Classify a wrapper call without parsing its options."""
     name = os.path.basename(tokens[0])
+    if name in _REPEATING_WRAPPERS:
+        ctx.repeat["on"] = True
     if len(tokens) > MAX_WRAPPER_TOKENS or depth > MAX_DEPTH:
         return [_unreadable_match()]
     if name == "command" and tokens[1:2] in (["-v"], ["-V"]):
@@ -469,6 +476,8 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
     except _Unreadable:
         return [_unreadable_match()]
     matches: list = []
+    if lexed.repeats:
+        ctx.repeat["on"] = True
     ctx.sub_bodies = lexed.subs
     start = ctx.fork()
     before = None
@@ -507,7 +516,17 @@ def _arithmetic_subscript(tokens: list) -> bool:
     return False
 
 
+_LOOP_WORDS = ("for", "while", "until", "select", "do", "done", "function")
+# Wrappers that run their command more than once or with arguments from elsewhere.
+_REPEATING_WRAPPERS = ("xargs", "parallel", "watch", "entr", "nodemon")
+
+
 def _segment_matches(seg: dict, ctx: _Ctx, depth: int) -> list:
+    for word in seg["words"]:
+        if word in _LOOP_WORDS:
+            ctx.repeat["on"] = True
+        if word not in _KEYWORDS:
+            break
     try:
         original = _tokens(seg["words"])
         redirects = [_unquote(w) for w in seg["redirects"]]
@@ -698,6 +717,8 @@ MAX_FIND_STARTS = 8
 
 def _find_exec_matches(tokens: list, ctx: _Ctx, depth: int) -> list:
     """Classify the commands that `find -exec/-execdir/-ok/-okdir` runs."""
+    if any(t in ("-exec", "-execdir", "-ok", "-okdir") for t in tokens):
+        ctx.repeat["on"] = True
     starts = []
     for t in tokens[1:]:
         if t.startswith("-") or t in ("(", "!", ")"):
@@ -1128,7 +1149,11 @@ def _state_match(detail: str) -> dict:
 
 def _segment_text(tokens: list) -> str:
     """The full text of a matched segment: its words as lexed, one space apart, each quoted
-    where needed so word boundaries survive. Part of an approval's identity (`_fingerprint`)."""
+    where needed so word boundaries survive, without leading keywords (`then`, `!`, `{`...).
+    Part of an approval's identity (`_fingerprint`)."""
+    tokens = list(tokens)
+    while tokens and tokens[0] in _KEYWORDS:
+        tokens = tokens[1:]
     return " ".join(shlex.quote(str(t)) for t in tokens)
 
 
@@ -1575,7 +1600,8 @@ def _combine(matches: list) -> Optional[dict]:
     if not unique:
         return None
     pairs = [list(p) for p in sorted({(m["id"], m["describe"]) for m in matches})]
-    keys = [list(k) for k in sorted({(m["id"], m["segment"]) for m in matches if "segment" in m})]
+    # A list, repeats kept: `X && X` runs X twice and is not the action `X`.
+    keys = sorted([m["id"], m["segment"]] for m in matches if "segment" in m)
     if len(unique) == 1:
         out = {**unique[0], "pairs": pairs}
     else:
@@ -1607,8 +1633,10 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
         matches = [dict(m) for m in _shell_matches(command, ctx)]
         for m in matches:
             # A match not about one segment (an unreadable command, a write found across the
-            # line...) is about the whole command: its exact text is the segment.
-            m.setdefault("segment", command.strip())
+            # line...) is about the whole command: its exact text is the segment. So is every
+            # match of a command that may run a segment more than once.
+            if ctx.repeat["on"] or "segment" not in m:
+                m["segment"] = command.strip()
         return _combine(matches)
     if tool_name in WRITE_TOOLS:
         target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
@@ -1743,9 +1771,10 @@ def _pairs(match: dict) -> list:
 
 def _fingerprint(tool: str, tool_input: dict, match: dict) -> str:
     """The identity of an approval; what `pending_approval.action`, one-shot grants, "one
-    question per run at a time" and sibling waiters compare. For Bash: the sorted (rule id,
-    full segment text) pairs the call hit, so the same guarded segment is the same action
-    whatever else is on the command line (a match about the whole command carries the whole
+    question per run at a time" and sibling waiters compare. For Bash: the sorted list (repeats
+    kept) of (rule id, full segment text) pairs the call hit, so the same guarded segment run
+    once is the same action whatever else is on a straight-line command line (a match about
+    the whole command, or any match of a command that may repeat a segment, carries the whole
     command as its segment). For any other tool: the rule ids, the tool and its input."""
     keys = match.get("keys")
     if tool == "Bash" and keys:

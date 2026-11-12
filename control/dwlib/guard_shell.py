@@ -112,6 +112,9 @@ class _Lexer:
         self.subs: list = []
         self.seg = _new_segment(False)
         self.pending: list = []
+        # Whether the text may run a segment more than once or apart from the line: a
+        # background `&` or a function definition `name()`. (Loops are seen in the segments.)
+        self.repeats = False
 
     def run(self) -> "_Lexer":
         s = self.s
@@ -135,6 +138,7 @@ class _Lexer:
             elif c == "&" and nxt == ">":
                 self.redirect()
             elif c == "&":
+                self.repeats = True
                 self.end()
                 self.i += 1
             elif c == "|":
@@ -147,6 +151,8 @@ class _Lexer:
             elif c in "<>" and nxt == "(":
                 self.seg["words"].append(self.substitution(self.i + 2))
             elif c in "()":
+                if s[self.i:self.i + 2] == "()" or re.match(r"\(\s+\)", s[self.i:]):
+                    self.repeats = True
                 self.end()
                 self.i += 1
             elif c == "#":

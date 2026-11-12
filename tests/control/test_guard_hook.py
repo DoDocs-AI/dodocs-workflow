@@ -996,3 +996,26 @@ class GuardApprovalSegmentTests(GuardHookBase):
         self.assertEqual(len(self.record(rid)["grants"]), 1)
         self.assertIsNone(self.guard(self.payload(path, "true && " + first)))
         self.assertEqual(self.record(rid)["grants"], [])
+
+    def test_i_a_grant_for_one_run_of_a_segment_does_not_cover_repeated_runs(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        for repeated in ("git push origin main && git push origin main",
+                         "for i in 1 2; do git push origin main; done",
+                         "echo x | xargs -I{} git push origin main"):
+            with self.subTest(command=repeated):
+                self.dw("deny", rid)  # clear the previous hold, if any; the grant stays
+                self.held(path, repeated)
+                self.assertEqual(len(self.record(rid)["grants"]), 1)
+        self.dw("deny", rid)
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
+        self.assertEqual(self.record(rid)["grants"], [])
+        self.held(path, "git push origin main")
+
+    def test_j_a_straight_line_compound_still_matches_its_plain_segment(self):
+        path, rid = self.start_run()
+        self.held(path, "if true; then git push origin main; fi")
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        self.assertIsNone(self.guard(self.payload(path, "timeout 60 git push origin main")))
+        self.assertEqual(self.record(rid)["grants"], [])

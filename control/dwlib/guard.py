@@ -633,6 +633,8 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                 matches.append(_unreadable_match())
             break
         if name in WRAPPERS:
+            if name in _CURRENT_SHELL_WRAPPERS:
+                _wrapped_dir_change(name, tokens, ctx)
             matches += _wrapper_matches(tokens, seg, ctx, depth)
             tokens, wrapped = [], True
             break
@@ -642,13 +644,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             break
         break
     if tokens and os.path.basename(tokens[0]) in ("cd", "pushd"):
-        target = next((t for t in tokens[1:] if not t.startswith("-")), None)
-        if target is None:
-            ctx.cwd = os.path.realpath(_home())
-        elif target == "-":
-            ctx.cwd = None
-        else:
-            ctx.cwd = _resolve(target, ctx.cwd)
+        _change_dir(tokens, ctx)
     if tokens and os.path.basename(tokens[0]) == "find":
         matches += _find_exec_matches(tokens, ctx, depth)
         matches += _find_write_matches(tokens, ctx)
@@ -662,6 +658,44 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
         if rule is not None:
             matches.append(_render(rule, " ".join(original), _segment_text(original)))
     return matches
+
+
+def _change_dir(tokens: list, ctx: _Ctx) -> None:
+    """Follow `cd`/`pushd` (tokens[0]) in the current shell's tracked directory."""
+    target = next((t for t in tokens[1:] if not t.startswith("-")), None)
+    if target is None:
+        ctx.cwd = os.path.realpath(_home())
+    elif target == "-":
+        ctx.cwd = None
+    else:
+        ctx.cwd = _resolve(target, ctx.cwd)
+
+
+# Wrappers that run their command in the CURRENT shell, so a `cd` through them moves it.
+_CURRENT_SHELL_WRAPPERS = ("builtin", "command", "time", "repeat")
+_DIR_CHANGERS = ("cd", "pushd", "popd", "chdir")
+
+
+def _wrapped_dir_change(name: str, tokens: list, ctx: _Ctx) -> None:
+    """A directory change run through a current-shell wrapper moves the current shell, so it
+    is followed as an unwrapped `cd`/`pushd` would be: the wrapped command after the
+    wrapper's own options (for `repeat`, after its count word, or right after `repeat` when
+    that word is already the command). Any other directory change through it (`popd`...)
+    makes the tracked directory unknown, as an unwrapped `cd -` does."""
+    if not any(os.path.basename(t) in _DIR_CHANGERS for t in tokens[1:]):
+        return
+    if name == "repeat":
+        readings = [tokens[2:], tokens[1:]]
+    else:
+        inner = list(tokens[1:])
+        while inner and inner[0].startswith("-"):
+            inner = inner[1:]
+        readings = [inner]
+    for inner in readings:
+        if inner and inner[0] in ("cd", "pushd"):
+            _change_dir(inner, ctx)
+            return
+    ctx.cwd = None
 
 
 _GH_COMMANDS = set("""

@@ -1880,6 +1880,18 @@ class ZshPrecommandTests(GuardClassifyBase):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command))
 
+    def test_a_cd_through_a_current_shell_prefix_moves_the_tracked_directory(self):
+        for command in ("repeat 1 cd .git; echo x > config",
+                        "builtin cd .git && echo x > hooks/pre-push",
+                        "command cd ~/.claude; cp /tmp/x settings.json",
+                        "time cd .git; echo x > config",
+                        "command -p cd .git; echo x > config"):
+            with self.subTest(command=command):
+                self.assertEqual(self.category(self.bash(command)), "control")
+        for command in ("repeat 2 ls", "builtin cd src && ls", "builtin cd src && echo x > a.txt"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
 
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):

@@ -92,8 +92,11 @@ class _Unreadable(Exception):
 
 
 def _new_segment(pipe_in: bool) -> dict:
+    # before/after: the operator that ends the previous segment and this one ("" at either
+    # end of the text; ";", "\n", "&&", "||", "|", "&", "(" or ")"); depth: how many
+    # parentheses it is inside.
     return {"words": [], "redirects": [], "reads": [], "heredocs": [], "pipe_in": pipe_in,
-            "pipe_out": False, "keep": False}
+            "pipe_out": False, "keep": False, "before": "", "after": "", "depth": 0}
 
 
 def _scan_body(target: "_Lexer", body: str) -> None:
@@ -151,6 +154,7 @@ class _Lexer:
         # or pipes (which the segments record): a background `&`, a subshell or group
         # parenthesis (a function definition `name()` included) or a process substitution.
         self.flat = True
+        self.depth = 0  # parentheses open at the current position
 
     def run(self) -> "_Lexer":
         s = self.s
@@ -162,34 +166,35 @@ class _Lexer:
             elif c == "\\" and nxt == "\n":
                 self.i += 2
             elif c == "\n":
-                self.end()
+                self.end(op="\n")
                 self.i += 1
                 self.heredoc_bodies()
             elif c == ";":
-                self.end()
+                self.end(op=";")
                 self.i += 1
             elif c == "&" and nxt == "&":
-                self.end()
+                self.end(op="&&")
                 self.i += 2
             elif c == "&" and nxt == ">":
                 self.redirect()
             elif c == "&":
                 self.flat = False
-                self.end()
+                self.end(op="&")
                 self.i += 1
             elif c == "|":
                 if nxt == "|":
-                    self.end()
+                    self.end(op="||")
                     self.i += 2
                 else:
-                    self.end(pipe=True)
+                    self.end(pipe=True, op="|")
                     self.i += 2 if nxt == "&" else 1
             elif c in "<>" and nxt == "(":
                 self.flat = False
                 self.seg["words"].append(self.substitution(self.i + 2))
             elif c in "()":
                 self.flat = False
-                self.end()
+                self.depth += 1 if c == "(" else -1
+                self.end(op=c)
                 self.i += 1
             elif c == "#":
                 while self.i < self.n and s[self.i] != "\n":
@@ -204,12 +209,20 @@ class _Lexer:
                 seg["heredocs"].append("")
         return self
 
-    def end(self, pipe: bool = False) -> None:
+    def end(self, pipe: bool = False, op: str = "") -> None:
         seg = self.seg
         seg["pipe_out"] = pipe
+        seg["after"] = op
         if seg["words"] or seg["redirects"] or seg["heredocs"] or seg["keep"]:
             self.segments.append(seg)
-        self.seg = _new_segment(pipe)
+            self.seg = _new_segment(pipe)
+            self.seg["before"] = op
+        else:  # an empty segment: the next one follows the operator before it, and this one
+            before = seg["before"] if op in (";", "\n") and seg["before"] not in ("", ";", "\n") \
+                else op
+            self.seg = _new_segment(pipe)
+            self.seg["before"] = before
+        self.seg["depth"] = self.depth
 
     def read_heredoc(self, j: int, delim: str, strip: bool, quoted: bool) -> tuple:
         """(body, index after it) of a here-document whose body starts at `j`. The one reader
@@ -790,3 +803,295 @@ def _word_dynamic(word: str) -> bool:
     if word in ("[", "[[", "{", "}", "{}"):
         return False
     return _expand(word) is None or any(ch in word for ch in "*?[{")
+
+
+# -- idioms read in full: a static variable, a small function, set earlier in the same command
+
+# A value that means the same written out as substituted: no quote, expansion, glob, brace,
+# tilde, or shell syntax; spaces only split words.
+_STATIC_VALUE_RE = re.compile(r"[A-Za-z0-9_./:@%+,=\- ]+")
+_NAME = r"[A-Za-z_][A-Za-z0-9_]*"
+_FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+_COMPOUND_OPEN = {"if", "while", "until", "for", "select", "case", "{"}
+_COMPOUND_CLOSE = {"fi", "done", "esac", "}"}
+_STATEMENT_START = ("", ";", "\n")
+
+
+def _compound_balance(words: list) -> int:
+    """How many compound commands (if, loops, case, groups) the leading keywords of a segment
+    open, minus how many they close."""
+    balance = 0
+    for w in words:
+        if w in _COMPOUND_OPEN:
+            balance += 1
+        elif w in _COMPOUND_CLOSE:
+            balance -= 1
+        elif w not in _KEYWORDS and w not in ("then", "do", "else", "elif"):
+            break
+    return balance
+
+
+def _static_value(raw: str) -> Optional[str]:
+    """The value of an assignment's raw text when it is one literal: quotes allowed, nothing the
+    shell would expand, and nothing that would read differently once substituted."""
+    if not raw or re.search(r"[$`\\]|__dwsub", raw):
+        return None
+    try:
+        parts = shlex.split(raw)
+    except ValueError:
+        return None
+    if len(parts) != 1 or not _STATIC_VALUE_RE.fullmatch(parts[0]) or not parts[0].strip():
+        return None
+    words = parts[0].split()
+    if any(_ASSIGNMENT_RE.match(w) or w in _KEYWORDS or w in _COMPOUND_OPEN or
+           w in _COMPOUND_CLOSE or w in ("function", "[[", "]]") for w in words):
+        return None
+    return parts[0]
+
+
+def _static_variables(text: str, segments: list) -> dict:
+    """{name: value} for the variables the command assigns once, at top level, to a literal,
+    before any use, and does nothing else with: every other mention of the name in the whole
+    text is `$NAME` (not followed by `[`) or `${NAME}`, after the assignment. A top-level
+    assignment is a segment of assignments only, outside any parenthesis or compound command,
+    starting a statement (after nothing, `;` or a newline), not piped, not in the background."""
+    found: dict = {}
+    depth = 0
+    for seg in segments:
+        words = seg["words"]
+        top = seg["depth"] == 0 and depth == 0 and seg["before"] in _STATEMENT_START and \
+            seg["after"] in ("", ";", "\n", "&&", "||") and not seg["pipe_in"] and \
+            not seg["pipe_out"] and not seg["redirects"] and not seg["heredocs"] and \
+            not seg["keep"]
+        pairs = [re.match(r"^(%s)=(.*)$" % _NAME, w, re.S) for w in words]
+        if words and all(pairs):
+            for m in pairs:
+                value = _static_value(m.group(2)) if top else None
+                found.setdefault(m.group(1), []).append(value)
+        depth += _compound_balance(words)
+    out: dict = {}
+    for name, values in found.items():
+        if len(values) != 1 or values[0] is None:
+            continue
+        mentions = list(re.finditer(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % name, text))
+        assigned = [m for m in mentions if text.startswith("=", m.end())]
+        if len(assigned) != 1:
+            continue
+        at = assigned[0].start()
+        ok = True
+        for m in mentions:
+            if m is assigned[0]:
+                continue
+            s, e = m.start(), m.end()
+            plain = text[s - 1:s] == "$" and text[s - 2:s] != "$$" and text[e:e + 1] != "["
+            braced = text[s - 2:s] == "${" and text[e:e + 1] == "}"
+            if not (plain or braced) or s < at:
+                ok = False
+                break
+        if ok:
+            out[name] = values[0]
+    return out
+
+
+def _substitute_word(raw: str, variables: dict, split: bool) -> str:
+    """A raw word with each unquoted or double-quoted `$NAME`/`${NAME}` of a static variable
+    replaced by its value. Unquoted, the value splits into words where it has spaces (when
+    `split`; otherwise it is put in double quotes); single-quoted text is left alone."""
+    out: list = []
+    i, quote = 0, None
+    while i < len(raw):
+        c = raw[i]
+        if quote == "'":
+            out.append(c)
+            quote = None if c == "'" else quote
+            i += 1
+            continue
+        if c == "\\":
+            out.append(raw[i:i + 2])
+            i += 2
+            continue
+        if c == "'" and quote is None:
+            quote = "'"
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "$":
+            m = re.match(r"\$(?:\{(%s)\}|(%s)(?![A-Za-z0-9_\[]))" % (_NAME, _NAME), raw[i:])
+            name = m and (m.group(1) or m.group(2))
+            if name in variables:
+                value = variables[name]
+                out.append(value if quote == '"' or split else '"%s"' % value)
+                i += m.end()
+                continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _split_unquoted(raw: str) -> list:
+    """A raw word split at its unquoted spaces and tabs."""
+    words, cur = [], []
+    i, quote = 0, None
+    while i < len(raw):
+        c = raw[i]
+        if quote:
+            cur.append(c)
+            if c == "\\" and quote == '"' and i + 1 < len(raw):
+                cur.append(raw[i + 1])
+                i += 1
+            elif c == quote:
+                quote = None
+        elif c == "\\":
+            cur.append(raw[i:i + 2])
+            i += 1
+        elif c in "'\"":
+            quote = c
+            cur.append(c)
+        elif c in " \t":
+            if cur:
+                words.append("".join(cur))
+                cur = []
+        else:
+            cur.append(c)
+        i += 1
+    if cur:
+        words.append("".join(cur))
+    return words
+
+
+def _substituted_segment(seg: dict, variables: dict) -> dict:
+    """The segment with its static variables substituted (see `_substitute_word`). Assignment
+    words and redirect targets are not split."""
+    if not variables:
+        return seg
+    words: list = []
+    for w in seg["words"]:
+        if _ASSIGNMENT_RE.match(w):
+            words.append(_substitute_word(w, variables, False))
+        else:
+            words += _split_unquoted(_substitute_word(w, variables, True))
+    return {**seg, "words": words,
+            "redirects": [_substitute_word(w, variables, False) for w in seg["redirects"]],
+            "reads": [_substitute_word(w, variables, False) for w in seg["reads"]]}
+
+
+_POSITIONAL_RE = re.compile(r'"\$([1-9])"|\$([1-9])|"\$\{([1-9])\}"|\$\{([1-9])\}')
+
+
+def _function_plan(text: str, segments: list) -> tuple:
+    """For small functions defined and called in the same command: ({segment index: segment
+    to classify in its place}, {segment indexes not to classify}). A function counts when it is
+    defined once, at top level (`name(){ ...; }`, `name() { ...; }`, `function name { ...; }`,
+    `function name() { ...; }`), its body is one simple command (no pipe, redirect, here-document,
+    substitution, or `$` other than whole-word "$@", $@, "$1".."$9", $1..$9) whose program is
+    not a function the command defines, and every mention of its name in the whole text is the
+    definition or a later top-level call (`name args...`). Each call is replaced by the body
+    with the call's words substituted, keeping the call's redirects and pipes; a call whose
+    result runs a function the command defines, or whose static argument would split or glob
+    where the body leaves it unquoted, is unreadable (None). The definition itself is not
+    classified. Any other function stays as today: its body is classified where it is defined,
+    and its calls by their own words."""
+    attempts: dict = {}  # name -> number of definitions, readable or not
+    defined: dict = {}  # name -> (first index, last index, body words)
+    depth = 0
+    i = 0
+    while i < len(segments):
+        seg = segments[i]
+        words = seg["words"]
+        top = seg["depth"] == 0 and depth == 0 and seg["before"] in _STATEMENT_START
+        name = body_at = None
+        body: list = []
+        if len(words) == 1 and seg["after"] == "(":
+            name, body_at = words[0], i + 1
+        elif len(words) == 2 and words[0] == "function" and seg["after"] == "(":
+            name, body_at = words[1], i + 1
+        elif len(words) >= 2 and words[0] == "function":
+            name, body_at = words[1], i
+        if name is not None:
+            attempts[name] = attempts.get(name, 0) + 1
+            shape = _function_shape(segments, i, body_at, top)
+            if shape is not None and _FUNCTION_NAME_RE.fullmatch(name) and \
+                    name not in _KEYWORDS and name not in _COMPOUND_OPEN:
+                body = shape
+                defined[name] = (i, body_at + 1, body)
+                i = body_at + 2
+                continue
+        depth += _compound_balance(words)
+        i += 1
+    calls: dict = {}
+    skip: set = set()
+    for name, (first, last, body) in defined.items():
+        if attempts[name] != 1 or not body or body[0] in attempts or \
+                any(re.search(r"[$`]|__dwsub", w) and not _POSITIONAL_RE.fullmatch(w)
+                    and w not in ('"$@"', "$@") for w in body):
+            continue
+        sites = [k for k in range(last + 1, len(segments)) if segments[k]["words"][:1] == [name]]
+        mentions = re.findall(r"(?<![\w.-])%s(?![\w.-])" % re.escape(name), text)
+        if len(mentions) != 1 + len(sites):
+            continue
+        skip.update(range(first, last + 1))
+        for k in sites:
+            calls[k] = _call_segment(segments[k], body, attempts)
+    return calls, skip
+
+
+def _function_shape(segments: list, at: int, body_at: int, top: bool) -> Optional[list]:
+    """The body words of a definition starting at segment `at` whose `{ body` is at `body_at`,
+    when it has exactly the readable shape; otherwise None."""
+    if not top or body_at + 1 >= len(segments):
+        return None
+    seg, close = segments[body_at], segments[body_at + 1]
+    words = seg["words"]
+    if body_at == at:
+        if len(words) < 4 or words[2] != "{":
+            return None
+        body = words[3:]
+    else:
+        if seg["before"] != ")" or seg["depth"] != 0 or words[:1] != ["{"] or len(words) < 2:
+            return None
+        body = words[1:]
+    if seg["after"] not in (";", "\n") or seg["pipe_in"] or seg["pipe_out"] or \
+            seg["redirects"] or seg["heredocs"] or seg["keep"]:
+        return None
+    if close["words"] != ["}"] or close["before"] not in (";", "\n") or close["depth"] != 0 or \
+            close["after"] not in ("", ";", "\n") or close["redirects"] or close["heredocs"] or \
+            close["pipe_out"]:
+        return None
+    return body
+
+
+def _call_segment(call: dict, body: list, functions: dict) -> Optional[dict]:
+    """The segment a call runs: the body with the call's arguments put in. None: unreadable."""
+    args = call["words"][1:]
+
+    def splits(arg: str) -> bool:
+        if re.search(r"[$`]|__dwsub", arg):
+            return False  # a run-time value: kept as written, judged where it lands
+        try:
+            value = " ".join(shlex.split(arg))
+        except ValueError:
+            return True
+        return bool(re.search(r"[\s*?\[{]", value))
+
+    words: list = []
+    for w in body:
+        m = _POSITIONAL_RE.fullmatch(w)
+        if w == '"$@"':
+            words += args
+        elif w == "$@":
+            if any(splits(a) for a in args):
+                return None
+            words += args
+        elif m:
+            n = int(next(g for g in m.groups() if g))
+            quoted = w.startswith('"')
+            if n <= len(args):
+                if not quoted and splits(args[n - 1]):
+                    return None
+                words.append(args[n - 1])
+            elif quoted:
+                words.append("''")
+        else:
+            words.append(w)
+    if words[:1] and words[0] in functions:
+        return None  # it calls a function this command defines
+    return {**call, "words": words}

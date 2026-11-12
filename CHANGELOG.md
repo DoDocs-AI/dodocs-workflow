@@ -16,6 +16,13 @@ feat(control): guard usability
   the run or with `dw approve`) when its text names the control point, when what cannot be read
   is a write target or a git override, or when it is shell or interpreter code that could not
   be scanned (`curl ... | sh`, `bash -c "$CMD"`, `eval "$(...)"`).
+- Three idioms are read instead of being held as unreadable: a static variable set earlier in
+  the same command (`K="kubectl -n x"; $K get pods`, `D=build; echo x > $D/a`), a small function
+  defined in the same command (`k(){ kubectl -n x "$@"; }; k get pods`, read through its body,
+  even when named like a program), and an inline script on stdin with data arguments
+  (`python3 - "$F" <<'PY'`). Anything not simple and static stays unreadable.
+- `kubectl rollout status` and `kubectl rollout history` are reads and no longer held;
+  `rollout restart`, `undo`, `pause` and `resume` still are.
 
 ## [v2.1.0] - 2026-11-12
 

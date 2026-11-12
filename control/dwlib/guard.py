@@ -66,6 +66,7 @@ from .guard_shell import (  # noqa: F401
     _dynamic,
     _expand,
     _flags_values,
+    _function_plan,
     _home,
     _inside,
     _new_segment,
@@ -73,7 +74,9 @@ from .guard_shell import (  # noqa: F401
     _run_time_text,
     _short,
     _starts_shell_without_command,
+    _static_variables,
     _strip_prefix,
+    _substituted_segment,
     _tokens,
     _unquote,
     _unreadable_match,
@@ -220,11 +223,23 @@ class _Ctx:
         # Whether this Bash command may write the run's result note at all (classify sets it:
         # see _plain_note_write); which words are spared is decided in _control_matches.
         self.note_plain = False
+        # Static variables of the Bash command (see guard_shell._static_variables), read in
+        # the same shell (its substitutions included) but not in a shell it starts.
+        self.vars: dict = {}
+        # (command text, {segment index: segment it runs, or None}, {indexes to skip}) for the
+        # small functions the command defines and calls (guard_shell._function_plan).
+        self.plan: Optional[tuple] = None
 
     def fork(self) -> "_Ctx":
         other = _Ctx.__new__(_Ctx)
         other.__dict__.update(self.__dict__)
         other.incomplete = False
+        return other
+
+    def new_shell(self) -> "_Ctx":
+        """A fork for text another shell or interpreter reads: the variables are not there."""
+        other = self.fork()
+        other.vars = {}
         return other
 
 
@@ -251,7 +266,7 @@ def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
             if not _prose_with_apostrophe(re.sub(r"__dwsub\w*?__", "", text), exc):
                 out.append(_unreadable_state_match())  # code that could not be scanned
             continue
-        out += _shell_matches(text, ctx.fork(), depth + 1)
+        out += _shell_matches(text, ctx.new_shell(), depth + 1)
     return out
 
 
@@ -427,7 +442,7 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
             return [_unreadable_state_match()]  # the commands come from standard input
     if name in _SHELL_STARTERS:
         for body in seg["heredocs"]:
-            out += _shell_matches(body, ctx.fork(), depth + 1)
+            out += _shell_matches(body, ctx.new_shell(), depth + 1)
         if seg["pipe_in"] and not seg["heredocs"]:
             out.append(_unreadable_state_match())  # its input comes from another command
         elif not seg["heredocs"] and _starts_shell_without_command(name, tokens):
@@ -491,7 +506,18 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
     ctx.sub_bodies = lexed.subs
     start = ctx.fork()
     before = None
-    for seg in lexed.segments:
+    calls, skip = {}, set()
+    if depth == 0 and ctx.plan is not None and ctx.plan[0] == text:
+        _text, calls, skip = ctx.plan
+    for index, seg in enumerate(lexed.segments):
+        if index in skip:
+            continue  # the definition of a function read at its calls
+        if index in calls:
+            if calls[index] is None:
+                matches.append(_unreadable_match())  # a call this guard cannot read
+                continue
+            seg = calls[index]
+        seg = _substituted_segment(seg, ctx.vars)
         # Everything upstream in the same pipeline may put file names on standard input.
         upstream = list(ctx.stdin_commands) if seg["pipe_in"] else []
         if seg["pipe_in"] and before is not None:
@@ -579,7 +605,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                     matches.append(_unreadable_state_match())  # code that cannot be scanned
                 else:
                     matches += _string_matches([code], ctx, depth)
-            if not codes and operands and _run_time_text(operands[0]):
+            if not codes and operands and _run_time_text(operands[0]) and "-s" not in args:
                 # The script itself is computed: a substitution (process substitution
                 # included) is code nobody can scan; a variable naming a file is a value.
                 matches.append(_unreadable_state_match() if "__dwsub" in operands[0]
@@ -588,7 +614,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             if stdin_program and seg["pipe_in"]:
                 matches.append(_unreadable_state_match())
             for body in seg["heredocs"]:
-                matches += _shell_matches(body, ctx.fork(), depth + 1)
+                matches += _shell_matches(body, ctx.new_shell(), depth + 1)
             tokens = []
             break
         if _INTERPRETER_RE.match(name):
@@ -614,7 +640,12 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             for code in codes:
                 if _run_time_text(code) or "__dwsub" in code:
                     matches.append(_unreadable_state_match())  # code that cannot be scanned
-            if not codes and operands and _run_time_text(operands[0]):
+            # `python3 - ARG...`: the program is read from standard input, the words after `-`
+            # are data for it. With a here-document the body is the code (scanned below).
+            stdin_script = not codes and _script_word(rest) in ("-", "/dev/stdin")
+            if stdin_script and not seg["heredocs"] and not seg["pipe_in"]:
+                matches.append(_unreadable_match())  # the code comes from somewhere unseen
+            if not codes and not stdin_script and operands and _run_time_text(operands[0]):
                 matches.append(_unreadable_match())  # the script itself is computed
             for arg in rest:
                 matches += _inline_matches(arg, ctx, depth)
@@ -624,12 +655,12 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                 for text in rest + list(seg["heredocs"]):
                     found = []
                     for m in re.finditer(r"\b(spawn|system|exec)\s+((?:-\w+\s+)*)([^;\n}\]]+)", text):
-                        found += _shell_matches(m.group(3), ctx.fork(), depth + 1)
+                        found += _shell_matches(m.group(3), ctx.new_shell(), depth + 1)
                     if not found and re.search(r"\b(spawn|system|exec)\b", text) and \
                             _GUARDED_NAME_RE.search(text):
                         found.append(_unreadable_match())
                     matches += found
-            if seg["pipe_in"] and (not operands or operands[0] in ("-", "/dev/stdin")):
+            if seg["pipe_in"] and not codes and (not operands or stdin_script):
                 matches.append(_unreadable_state_match())  # code from another command
             if operands and os.path.basename(operands[0]) == "dw":
                 tokens = rest[rest.index(operands[0]):]
@@ -968,8 +999,9 @@ _INLINE_PATTERNS = [
     (re.compile(r"\bgit\s+push\b"), "inline-git-push", "merge", "push from inline code"),
     (re.compile(r"\b(gh\s+pr|glab\s+mr)\s+merge\b"), "inline-pr-merge", "merge",
      "merge a pull request from inline code"),
-    (re.compile(r"\b(kubectl|oc)\b[^\n'\"]*\b(apply|create|replace|patch|delete|rollout|scale|"
-                r"set|edit|drain)\b"), "inline-kubectl", "deploy", "change a cluster from inline code"),
+    (re.compile(r"\b(kubectl|oc)\b[^\n'\"]*\b(apply|create|replace|patch|delete|"
+                r"rollout\s+(restart|undo|pause|resume)|scale|set|edit|drain)\b"), "inline-kubectl",
+     "deploy", "change a cluster from inline code"),
     (re.compile(r"\bhelm\s+(install|upgrade|uninstall|delete|rollback|push)\b"), "inline-helm",
      "deploy", "change a Helm release from inline code"),
     (re.compile(r"\b(docker|podman)\s+((image|manifest|compose)\s+)?push\b"), "inline-docker-push",
@@ -1015,7 +1047,7 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
     for m in _LITERAL_RE.finditer(text):
         literal = m.group(1) if m.group(1) is not None else m.group(2)
         if len(literal.split()) >= 2:
-            out += [x for x in _shell_matches(literal, ctx.fork(), depth + 1)
+            out += [x for x in _shell_matches(literal, ctx.new_shell(), depth + 1)
                     if not _is_unreadable(x)]
     found = {x["category"] for x in out}
     for rx, rid, category, describe in _INLINE_PATTERNS:
@@ -1365,7 +1397,7 @@ def _plain_note_write(command: str, ctx: _Ctx, depth: int = 0) -> bool:
     sub.sub_bodies = lexed.subs
     for seg in lexed.segments:
         try:
-            words = _tokens(seg["words"])
+            words = _tokens(_substituted_segment(seg, ctx.vars)["words"])
         except _Unreadable:
             return False
         while words and _ASSIGNMENT_RE.match(words[0]):
@@ -1475,9 +1507,16 @@ def _unreadable_deciding_word(rule: dict, nonflags: list) -> bool:
     return False
 
 
+def _script_word(args: list) -> Optional[str]:
+    """An interpreter's script word: the first argument that is `-` or not an option."""
+    return next((a for a in args if a == "-" or not a.startswith("-")), None)
+
+
 def _first_rule(tokens: list, seg: dict, ctx: _Ctx) -> Optional[dict]:
     name = os.path.basename(tokens[0])
     nonflags = [t for t in tokens[1:] if not t.startswith("-")]
+    if _INTERPRETER_RE.match(name) and _script_word(tokens[1:]) in ("-", "/dev/stdin"):
+        nonflags = []  # a program on standard input: the words after `-` are its data
     undecided = None
     for rule in ctx.rules:
         if rule.get("tool") != "Bash":
@@ -1935,6 +1974,13 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
     if tool_name == "Bash" or (shell_like and tool_name not in WRITE_TOOLS):
         command = str(tool_input.get("command") or "")
         ctx.full_text = command
+        try:
+            segments = _Lexer(command).run().segments
+        except _Unreadable:
+            segments = []
+        ctx.vars = _static_variables(command, segments)
+        calls, skip = _function_plan(command, segments)
+        ctx.plan = (command, calls, skip)
         ctx.note_plain = _plain_note_write(command, ctx)
         matches = [dict(m) for m in _shell_matches(command, ctx)]
         # Segment-level identity only for a command positively known to be straight-line,

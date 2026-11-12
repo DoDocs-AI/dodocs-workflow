@@ -175,6 +175,38 @@ change the control point's own settings. Everything it does not recognise is all
   `DW_HOME` overrides that for tests only: launched sessions and the terminal hooks always use
   the default directory.
 
+## What the guard reads in full
+
+Three everyday forms are read as if they had been written out, and the result is judged by the
+same rules. Anything not positively simple and static stays "command cannot be read".
+
+- **A variable that stands for a command or a path, set in the same command.**
+  `K="kubectl -n app"; $K get pods` is read as `kubectl -n app get pods` (also `${K}`, also
+  inside `$( ... )`, loops and pipelines of that command); `D=.git; echo x > $D/config` is a
+  write to `.git/config`. Only when the value is one literal (quotes allowed; no `$`, backquote,
+  glob, brace, tilde or backslash), assigned once at the top level of the command (not in a
+  subshell, a pipeline, the background, under `&&`/`||`, an `if` or a loop, and not with
+  `export`, `local` or as a prefix of another command) before it is used, and the name is never
+  reassigned, unset, `read`, appended to or used in any other way (`${!K}`, `${K[@]}`,
+  `${K:-x}`). It is not carried into a shell the command starts (`bash -c '$K ...'`). The
+  guard splits an unquoted value into words as bash does; zsh does not split it, so there such a
+  command would run nothing.
+- **A small function used as an alias, defined in the same command.**
+  `k(){ kubectl -n app "$@"; }; k get pods` is read as `kubectl -n app get pods`, through the
+  body and not through the name: a function takes precedence over a program of the same name,
+  so `git(){ echo "$@"; }; git push origin main` is an `echo`, and `ok(){ git push origin main; }; ok`
+  is a push. Only when it is defined once, at the top level, as `name(){ ...; }`,
+  `name() { ...; }` or `function name { ...; }`, its body is one simple command using only
+  `"$@"`, `$@`, `"$1"`...`$9` (no pipe, redirect, substitution or other variable, and no call of
+  another function the command defines), and every mention of its name is the definition or a
+  plain call later in the command (not `time k`, `xargs k`, `bash -c k` ...). Any other
+  function is read as before: its body where it is defined, its calls by their own words.
+- **An inline script on standard input with arguments.** `python3 - "$F" <<'PY' ... PY` (and
+  `node -`, `ruby -`, `perl -`, `bash -s -- ...`): the here-document is the code and is scanned
+  like other inline code; the words after `-` are data for it, so a run-time value there does
+  not make the command unreadable. Without a here-document the code is unseen and the command
+  stays unreadable; fed from a pipe it is `control`.
+
 ## What the guard does not protect against
 
 **The guard is not a sandbox.** It reads the commands and tool calls a cooperative agent
@@ -201,8 +233,10 @@ Things that pass although you might expect them to be held.
   `npm run deploy`), git hooks, and anything a `Makefile` or `package.json` script does.
 - Inline code is scanned for markers only; commands or URLs built from pieces pass.
 - Content read from files: `psql -f drop.sql`, `expect -f`, `source ./x.sh`, `sed -f`, `awk -f`.
-- Shell aliases and functions, including one named like a read-only program; `tmux send-keys`,
-  `screen -X stuff`.
+- Shell aliases, and functions defined outside the command (in a profile or an earlier
+  command), including one named like a read-only program; `tmux send-keys`, `screen -X stuff`.
+  (A small function defined in the same command is read: see
+  [What the guard reads in full](#what-the-guard-reads-in-full).)
 - An alias defined and then used inside one command (`alias gp='git push origin main'; gp`)
   is not read.
 - A file named only inside program text: `sed -n 'w .git/hooks/pre-push' x`,
@@ -210,8 +244,10 @@ Things that pass although you might expect them to be held.
 
 **Paths and names only known at run time**
 - A path with no protected name in its fixed text: `echo x > $D/settings.json`, `echo x > $F`,
-  `echo x > $GIT_DIR/$X`, and a variable assigned earlier on the same line
-  (`x=.git; echo x > $x/config`, `cd "$(git rev-parse --git-dir)" && echo x > config`).
+  `echo x > $GIT_DIR/$X`, and a variable assigned earlier on the same line in a form the guard
+  does not read (`x=$(echo .git); echo x > $x/config`,
+  `cd "$(git rev-parse --git-dir)" && echo x > config`; a static one is read, see
+  [What the guard reads in full](#what-the-guard-reads-in-full)).
 - A substitution that prints a protected name: `echo x > $(echo .git)/config`,
   `echo x > $(basename .git)/config`.
 - A subscript that reaches arithmetic evaluation at run time. In `[[ ... ]]` with a numeric
@@ -349,6 +385,8 @@ be approved for the run, unless noted. Those held as "command cannot be read" ar
   write whose command line contains an arithmetic expansion (`echo $((1+2)) > note`,
   `echo "$((1+2))" > note`, a here-document body with `$((...))` written to the note), though
   the same arithmetic written elsewhere passes.
+- **Inline code that runs a guarded program in a form the scanner has no pattern for**
+  (`python3 -c 'os.system("kubectl rollout status deploy/a")'`) is held as `unreadable`.
 - **An approval question for the same words in another directory**: an approval covers one
   directory, so `git push origin main` after `cd /tmp/other` asks again (an ordinary question,
   not a `control` hold).

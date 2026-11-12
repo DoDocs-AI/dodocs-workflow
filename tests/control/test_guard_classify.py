@@ -82,6 +82,8 @@ class ClassificationTableTests(GuardClassifyBase):
             ("Bash", {"command": "dw approve r-1"}, "/p", "control"),
             ("Bash", {"command": "~/.dodocs-workflow/bin/dw setup --remove --yes"}, "/p", "control"),
             ("Bash", {"command": "dw status --json"}, "/p", None),
+            ("Bash", {"command": "dw project auto-approve p --from-run r-1"}, "/p", "control"),
+            ("Bash", {"command": "dw project auto-approve p --rule x --match y"}, "/p", "control"),
             ("Write", {"file_path": os.path.join(dw_home, "runs", "r-1.result.md"), "content": "DONE"},
              "/p", None),
             ("Write", {"file_path": os.path.join(dw_home, "runs", "r-1.json"), "content": "{}"},

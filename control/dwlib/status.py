@@ -130,7 +130,17 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
         "session_unknown": session_unknown,
         "progress": find_progress(project["path"], run) if state in ACTIVE else None,
         "result": _result_note(run["id"]) if state in ENDED or state == "blocked" else None,
+        "pending": _pending(run),
     }
+
+
+def _pending(run: dict) -> Optional[dict]:
+    """The rule id and text of a run's pending approval (what an automatic approval names)."""
+    pending = run.get("pending_approval")
+    if not isinstance(pending, dict):
+        return None
+    return {"rule": pending.get("rule"), "category": pending.get("category"),
+            "describe": pending.get("describe")}
 
 
 def project_status(project: dict, runs: list, sessions: Optional[dict], now: float,

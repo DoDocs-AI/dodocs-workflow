@@ -26,6 +26,11 @@ feat(control): guard usability
   defined in the same command (`k(){ kubectl -n x "$@"; }; k get pods`, read through its body,
   even when named like a program), and an inline script on stdin with data arguments
   (`python3 - "$F" <<'PY'`). Anything not simple and static stays unreadable.
+- Per-project automatic approvals: `dw project auto-approve PROJECT --from-run RUN_ID`
+  (exact: rule, segment, directory), `--rule R --match REGEX [--in DIR]`, `--list`,
+  `--remove N`. Never for `control`, never in an ended run's session; unreadable entries must be
+  specific; malformed entries are ignored and reported by `dw doctor`. `dw status` shows the
+  rule id of a pending approval; run records remember `last_held`.
 - `kubectl rollout status` and `kubectl rollout history` are reads and no longer held; any
   other `rollout` action (or one that cannot be read) still is.
 

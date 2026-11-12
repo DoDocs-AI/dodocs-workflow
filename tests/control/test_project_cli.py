@@ -140,3 +140,69 @@ class InsideRunRefusalTests(DwTestCase):
         self.assertNotIn(self.REFUSAL, r.stdout + r.stderr)
         r = self.dw("hook", "status", env={"DW_RUN_ID": "r-1"})
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+
+class AutoApproveCliTests(DwTestCase):
+    def entries(self):
+        return json.loads(self.dw("project", "list", "--json").stdout)[0].get("auto_approve", [])
+
+    def test_explicit_list_and_remove(self):
+        path = self.add_project("alpha")
+        r = self.dw("project", "auto-approve", "alpha", "--rule", "kubectl-change",
+                    "--match", r"kubectl -n app rollout restart deploy/\w+", "--in", str(path),
+                    "--note", "restarts are fine")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["in"], os.path.realpath(str(path)))
+        r = self.dw("project", "auto-approve", "alpha", "--rule", "git-push-default",
+                    "--match", "git push origin main")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        listing = self.dw("project", "auto-approve", "alpha", "--list")
+        self.assertEqual(listing.returncode, 0)
+        lines = listing.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].startswith("1") and "kubectl-change" in lines[0])
+        self.assertEqual(self.dw("project", "auto-approve", "alpha", "--remove", "1").returncode, 0)
+        self.assertEqual([e["rule"] for e in self.entries()], ["git-push-default"])
+        self.assertEqual(self.dw("project", "auto-approve", "alpha", "--remove", "5").returncode, 2)
+
+    def test_refusals(self):
+        self.add_project("alpha")
+        for argv in (["--rule", "control-state", "--match", "x"],
+                     ["--rule", "control-dw", "--match", "dw run x"],
+                     ["--rule", "control-unreadable", "--match", ".*"],
+                     ["--rule", "control-unreadable", "--match", ".+"],
+                     ["--rule", "control-unreadable", "--match", "a*"],
+                     ["--rule", "git-push-default", "--match", "git push ("],
+                     ["--rule", "git-push-default", "--match", "(a+)+"],
+                     ["--rule", "git-push-default"],
+                     ["--from-run", "r-nope"]):
+            with self.subTest(argv=argv):
+                r = self.dw("project", "auto-approve", "alpha", *argv)
+                self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertEqual(self.entries(), [])
+
+    def test_inside_a_run_only_the_list_works(self):
+        self.add_project("alpha")
+        env = {"DW_RUN_ID": "r-1"}
+        r = self.dw("project", "auto-approve", "alpha", "--rule", "git-push-default",
+                    "--match", "git push origin main", env=env)
+        self.assertEqual((r.returncode, r.stderr.strip()),
+                         (2, "dw: dw cannot change the control point from inside a run"))
+        self.assertEqual(self.dw("project", "auto-approve", "alpha", "--remove", "1",
+                                 env=env).returncode, 2)
+        self.assertEqual(self.dw("project", "auto-approve", "alpha", "--list", env=env).returncode, 0)
+
+    def test_doctor_reports_bad_entries(self):
+        from dwlib import paths, store
+        self.add_project("alpha")
+
+        def fn(reg):
+            reg["projects"][0]["auto_approve"] = [{"rule": "x", "match": "("},
+                                                  {"rule": "control-unreadable", "match": ".*"}]
+            return reg
+        store.update_json(paths.registry_path(), fn, store.default_registry())
+        r = self.dw("doctor")
+        line = [l for l in r.stdout.splitlines() if "auto-approve" in l][0]
+        self.assertTrue(line.startswith("WARN"), line)
+        self.assertIn("entry 1", line)
+        self.assertIn("entry 2", line)

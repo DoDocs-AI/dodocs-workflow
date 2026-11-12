@@ -162,6 +162,27 @@ change the control point's own settings. Everything it does not recognise is all
      from a pipe (`curl ... | sh`), an interactive shell (`su`, `sudo -s`), `bash -c "$CMD"`,
      `python3 -c "$CODE"`, `eval "$(...)"`, `source <(...)`, `bash <(...)`, or a `-c` string
      or here-document the guard cannot parse.
+- **Automatic approvals, per project.** An action you would approve every time can be let
+  through without a question in one project. After a run asks for it, say so to `/control`
+  ("always allow that in this project"), or run
+  `dw project auto-approve <project> --from-run <run-id>`: it names the run's pending action
+  (or, when nothing is pending, the last action it held) exactly, its rule, its full command
+  segment and its directory, and prints the entry. It does not approve the pending action
+  itself; answer that as usual. From then on the guard lets that exact action through in that
+  project and writes `auto-approved run <id> rule <rule>: <segment>` to `dw.log`. An entry is
+  exact by default; to widen one deliberately, write it yourself:
+  `dw project auto-approve <project> --rule <rule-id> --match '<regex>' [--in <dir>] [--note <text>]`
+  (the regex must match the whole segment; `--in` limits it to a directory and below).
+  `dw project auto-approve <project> --list` shows the entries, numbered;
+  `--remove N` takes one out. A call is let through only when every guarded part of it is
+  covered. **Never auto-approved:** anything in the `control` category (changes to the control
+  point, and the unreadable commands that may make them), and anything in a session whose run
+  has ended. An entry for "command cannot be read" must name something specific: an empty
+  pattern, `.*`, `.+` and any pattern that matches the empty string or everything are refused,
+  by `dw` and again by the guard. Entries the guard cannot use (a bad regex, a nested
+  quantifier such as `(a+)+`, wrong types) are ignored and reported by `dw doctor`. Automatic
+  approvals cover shell commands only. `dw status` shows the rule id of a pending approval, so
+  you can see what an entry would name.
 - **`dw` itself refuses inside a run.** Called with `DW_RUN_ID` in its environment (the run's
   session and everything it starts), every `dw` subcommand that changes something (`approve`,
   `deny`, `run`, `resume`, `cancel`, `dismiss`, `setup`, `project add`/`remove`/`import-legacy`,

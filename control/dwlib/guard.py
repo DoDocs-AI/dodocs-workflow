@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
-from . import agterm, events, paths, runs, store
+from . import agterm, autoapprove, events, paths, runs, store
 from .guard_shell import (  # noqa: F401
     ANALYSIS_BUDGET,
     _ASSIGNMENT_RE,
@@ -2356,8 +2356,13 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         if not pending:
             pending = {"rule": match["id"], "category": match["category"], "describe": describe,
                        "tool": tool, "action": action, "since": now}
+            if match.get("keys"):
+                pending["keys"] = match["keys"]
+        # What `dw project auto-approve --from-run` names when nothing is pending any more.
+        held = {"rule": match["id"], "category": match["category"], "describe": describe,
+                "tool": tool, "keys": match.get("keys") or [], "at": now}
         return runs._moved(r, now, state="blocked", reason="awaiting approval: " + describe,
-                           pending_approval=pending)
+                           pending_approval=pending, last_held=held)
 
     run = store.update_run(run_id, claim)
     kind = outcome["kind"]
@@ -2554,7 +2559,33 @@ def decide(payload: dict) -> Optional[dict]:
     match = classify(tool, tool_input, cwd, project.get("path") or cwd, rules)
     if match is None:
         return None
+    if _auto_approved(project, run, match, tool):
+        return None
     return _hold(project, run, match, tool, tool_input)
+
+
+def _auto_approved(project: dict, run: dict, match: dict, tool: str) -> bool:
+    """Whether every match of an active run's shell call is covered by an automatic approval of
+    the run's project (see autoapprove). Never for a call with a `control` match. Malformed
+    entries are ignored and logged once per call. A covered call is logged to dw.log."""
+    if tool != "Bash" or match["category"] == "control" or \
+            any(autoapprove.is_control_rule(p) for p in match["id"].split("+")):
+        return False
+    keys = match.get("keys")
+    if not keys or run.get("state") not in runs.ACTIVE_STATES:
+        return False
+    entries, problems = autoapprove.valid_entries(project)
+    if problems:
+        events.log_error("guard auto-approve", GuardError("ignored: " + "; ".join(problems)))
+    if not entries:
+        return False
+    if not all(autoapprove.covers(entries, str(rule), str(segment),
+                                  None if directory == _UNKNOWN_DIR else directory)
+               for rule, segment, directory in keys):
+        return False
+    events.log_text("auto-approved run %s rule %s" % (run["id"], match["id"]),
+                    " ; ".join(str(k[1]) for k in keys))
+    return True
 
 
 def run_hook(stdin_text: str) -> Optional[dict]:

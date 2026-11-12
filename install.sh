@@ -260,6 +260,7 @@ CONTROL_FILES=(
     "guard-rules.json"
     "dwlib/__init__.py"
     "dwlib/agterm.py"
+    "dwlib/autoapprove.py"
     "dwlib/events.py"
     "dwlib/guard.py"
     "dwlib/guard_git.py"

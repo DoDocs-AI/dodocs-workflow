@@ -1392,3 +1392,135 @@ class UnreadableStateApprovalTests(GuardHookBase):
                 self.assertEqual(self.dw("approve", rid).returncode, 2)
                 self.assertEqual(self.dw("deny", rid).returncode, 0)
         self.assertEqual(len(self.ask_calls()), asks + 6)
+
+
+class AutoApproveTests(GuardHookBase):
+    """Per-project automatic approvals: an entry naming the rule and the exact segment lets the
+    call through silently; anything else is handled as before."""
+
+    def set_entries(self, project_id, entries):
+        from dwlib import paths, store
+
+        def fn(reg):
+            for p in reg["projects"]:
+                if p["id"] == project_id:
+                    p["auto_approve"] = entries
+            return reg
+        store.update_json(paths.registry_path(), fn, store.default_registry())
+
+    def entry(self, rule, match, where=None):
+        out = {"rule": rule, "match": match, "note": "t", "added_at": 1}
+        if where is not None:
+            out["in"] = where
+        return out
+
+    def log(self):
+        from dwlib import paths
+        p = paths.home() / "dw.log"
+        return p.read_text() if p.exists() else ""
+
+    def held(self, path, command, env=None):
+        out = self.guard(self.payload(path, command), env=env)
+        self.assertIsNotNone(out, command)
+        self.assertEqual(out["permissionDecision"], "deny")
+        return out
+
+    def test_an_entry_lets_the_named_action_through_silently(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main",
+                                               str(path))])
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.assertIn("auto-approved run %s rule git-push-default" % rid, self.log())
+        self.assertIsNone(self.record(rid)["pending_approval"])
+        # Another action, another directory, or another match on the same call: asked.
+        self.held(path, "git push origin master")
+        self.dw("deny", rid)
+        other = path / "sub"
+        other.mkdir()
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main",
+                                               str(other))])
+        self.held(path, "git push origin main")
+        self.dw("deny", rid)
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main")])
+        self.held(path, "git push origin main && kubectl apply -f k8s/")
+
+    def test_control_is_never_auto_approved(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("control-dw", r".+"),
+                                    self.entry("control-state", r".+"),
+                                    self.entry("git-push-default", r"git push origin main")])
+        self.held(path, "dw approve %s" % rid)
+        self.dw("deny", rid)
+        self.held(path, "git push origin main; dw approve %s" % rid)
+
+    def test_unreadable_entries_must_be_narrow(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("control-unreadable", ".*"),
+                                    self.entry("control-unreadable", ""),
+                                    self.entry("control-unreadable", "(?s).*"),
+                                    self.entry("control-unreadable", "[^\\n]*|.*")])
+        self.held(path, "kubectl $VERB pods")
+        self.assertIn("guard auto-approve", self.log())
+        self.dw("deny", rid)
+        self.set_entries("slotme", [self.entry("control-unreadable", r"kubectl \$VERB pods")])
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
+
+    def test_malformed_entries_are_ignored(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [{"rule": 3}, "x", self.entry("git-push-default", "(a+)+"),
+                                    self.entry("git-push-default", "git push ("),
+                                    self.entry("git-push-default", "git.*", where="relative/dir")])
+        self.held(path, "git push origin main")
+        self.dw("deny", rid)
+        self.set_entries("slotme", "not a list")
+        self.held(path, "git push origin main")
+
+    def test_an_ended_runs_session_gets_no_auto_approval(self):
+        path, rid = self.start_run()
+        self.set_entries("slotme", [self.entry("git-push-default", r"git push origin main")])
+        from dwlib import runs
+        runs.finish_run(rid, "done", None)
+        out = self.guard(self.payload(path, "git push origin main"), env={"DW_RUN_ID": rid})
+        self.assertEqual(out["permissionDecisionReason"], INACTIVE_REASON % (rid, "done"))
+
+    def test_from_run_adds_the_exact_entry_without_approving(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--note", "ok")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = json.loads(r.stdout)
+        self.assertEqual((entry["rule"], entry["in"], entry["note"]),
+                         ("git-push-default", os.path.realpath(str(path)), "ok"))
+        self.assertTrue(re.fullmatch(entry["match"], "git push origin main"))
+        self.assertIsNotNone(self.record(rid)["pending_approval"])  # still the owner's to answer
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, "git push origin main")))
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.held(path, "git push origin main --force")  # exact by default
+
+    def test_from_run_uses_the_last_held_action_and_refuses_control(self):
+        path, rid = self.start_run()
+        self.held(path, "kubectl apply -f k8s/")
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        held = self.record(rid)["last_held"]
+        self.assertEqual((held["rule"], held["category"]), ("kubectl-change", "deploy"))
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["rule"], "kubectl-change")
+        self.held(path, "dw approve %s" % rid)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("control", r.stderr)
+
+    def test_status_shows_the_rule_of_a_pending_approval(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        r = self.dw("status")
+        self.assertIn("git-push-default", r.stdout)
+        self.assertIn("push to the default branch", r.stdout)
+        data = json.loads(self.dw("status", "--json").stdout)
+        pending = [v for v in data["needs_owner"] if v["id"] == rid][0]["pending"]
+        self.assertEqual(pending["rule"], "git-push-default")

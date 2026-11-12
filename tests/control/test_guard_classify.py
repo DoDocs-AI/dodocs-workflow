@@ -1925,6 +1925,37 @@ class StateDirectoryMkdirTests(GuardClassifyBase):
                 self.assertEqual(self.category(self.bash(held)), "control")
 
 
+class UnquotedHereDocumentTests(GuardClassifyBase):
+    """An unquoted here-document body runs its substitutions; a quoted one is literal text."""
+
+    def test_substitutions_in_an_unquoted_body_are_classified(self):
+        home = os.path.realpath(str(self.paths.home()))
+        note = os.path.realpath(str(self.paths.result_note_path(self.run_id)))
+        held = {
+            "cat > /tmp/zz <<EOF\n$(rm %s/registry.json)\nEOF" % home: "control",
+            "cat <<EOF\n$(touch %s/evil)\nEOF" % home: "control",
+            "cat <<-EOF\n\t$(touch %s/evil)\n\tEOF" % home: "control",
+            "cat > %s <<EOF\nDONE $(rm %s/registry.json)\nEOF" % (note, home): "control",
+            "cat <<EOF\n`touch %s/evil`\nEOF" % home: "control",
+            "cat > %s <<EOF\nDONE `rm %s/registry.json`\nEOF" % (note, home): "control",
+            "cat <<EOF\n$(git push origin main)\nEOF": "merge",
+            "cat <<EOF\n`gh pr merge 3`\nEOF": "merge",
+        }
+        for command, category in held.items():
+            with self.subTest(command=command):
+                self.assertEqual(self.category(self.bash(command)), category)
+
+    def test_a_quoted_body_is_literal_text(self):
+        note = os.path.realpath(str(self.paths.result_note_path(self.run_id)))
+        for command in ("cat > notes.txt <<'EOF'\n$(rm -rf /)\nEOF",
+                        'cat > notes.txt <<"EOF"\n$(rm -rf /)\nEOF',
+                        "cat > notes.txt <<\\EOF\n`rm -rf /`\nEOF",
+                        "cat <<EOF\nplain $HOME text\nEOF",
+                        "cat > %s <<'EOF'\nDONE: ran git push origin main\nEOF" % note):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

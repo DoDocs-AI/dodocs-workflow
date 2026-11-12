@@ -96,6 +96,28 @@ def _new_segment(pipe_in: bool) -> dict:
             "pipe_out": False, "keep": False}
 
 
+def _body_substitutions(body: str) -> list:
+    """The command substitutions ($( ) and backticks) of an unquoted here-document body, read
+    as a double-quoted word is (see _Lexer.read_double), except that a double quote is plain
+    text: a backslash escapes the next character, $(( )) is arithmetic as elsewhere."""
+    if "$" not in body and "`" not in body:
+        return []
+    lexer = _Lexer(body)
+    while lexer.i < lexer.n:
+        c = body[lexer.i]
+        if c == "\\":
+            lexer.i += 2
+        elif body.startswith("$((", lexer.i):
+            lexer.i = lexer.close_paren(lexer.i + 3, 2) + 1
+        elif body.startswith("$(", lexer.i):
+            lexer.substitution(lexer.i + 2)
+        elif c == "`":
+            lexer.backtick()
+        else:
+            lexer.i += 1
+    return lexer.subs
+
+
 class _Lexer:
     """Splits a shell command into simple-command segments.
 
@@ -165,7 +187,7 @@ class _Lexer:
                 self.seg["words"].append(self.read_word())
         self.end()
         if self.pending:
-            for _delim, _strip, seg in self.pending:
+            for _delim, _strip, seg, _quoted in self.pending:
                 seg["heredocs"].append("")
         return self
 
@@ -177,7 +199,7 @@ class _Lexer:
         self.seg = _new_segment(pipe)
 
     def heredoc_bodies(self) -> None:
-        for delim, strip, seg in self.pending:
+        for delim, strip, seg, quoted in self.pending:
             lines = []
             while self.i < self.n:
                 j = self.s.find("\n", self.i)
@@ -186,7 +208,10 @@ class _Lexer:
                 if (line.lstrip("\t") if strip else line) == delim:
                     break
                 lines.append(line)
-            seg["heredocs"].append("\n".join(lines))
+            body = "\n".join(lines)
+            seg["heredocs"].append(body)
+            if not quoted:
+                self.subs += _body_substitutions(body)
         self.pending = []
 
     def redirect(self) -> None:
@@ -206,7 +231,10 @@ class _Lexer:
             except ValueError:
                 raise _Unreadable("here-document delimiter")
             self.seg["keep"] = True
-            self.pending.append((delim, op == "<<-", self.seg))
+            # A quoted delimiter (any quote or backslash in it) makes the body literal text;
+            # otherwise the shell runs the body's substitutions, as in a double-quoted word.
+            quoted = any(c in word for c in "'\"\\")
+            self.pending.append((delim, op == "<<-", self.seg, quoted))
         elif op == "<<<":
             self.seg["heredocs"].append(_unquote(word))
         elif op in (">&", "<&") and re.fullmatch(r"\d+-?|-", word):

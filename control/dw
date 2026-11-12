@@ -1,0 +1,486 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+_here = os.path.dirname(os.path.realpath(__file__))
+for _cand in (_here, os.path.join(_here, "..", "lib")):
+    if os.path.isdir(os.path.join(_cand, "dwlib")):
+        sys.path.insert(0, os.path.normpath(_cand))
+        break
+
+
+def _guard_deny(reason: str) -> dict:
+    """A PreToolUse deny object, built without dwlib so it works when dwlib cannot load."""
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": reason}}
+
+
+def _guard_error_reason(exc: BaseException) -> str:
+    return "Guard error: %s" % ((" ".join(str(exc).split()) or exc.__class__.__name__)[:300])
+
+
+try:
+    from dwlib import agterm, events, guard, runs, setup, status, store  # noqa: E402
+except BaseException as _exc:  # noqa: B902 - a hook must answer even when dwlib is broken
+    if sys.argv[1:2] == ["hook"]:
+        sys.exit(0)  # unattended terminal hook: never fails, never prints
+    if sys.argv[1:] == ["guard"] and os.environ.get("DW_RUN_ID"):
+        sys.stdout.write(json.dumps(_guard_deny(_guard_error_reason(_exc))) + "\n")
+        sys.exit(0)  # inside a run the guard fails closed
+    raise
+
+
+class UserError(Exception):
+    pass
+
+
+slugify = store.slugify
+
+
+def cmd_project_add(args) -> int:
+    pid = slugify(args.name)
+    if not pid:
+        raise UserError("project name must contain letters or digits")
+    if not os.path.isdir(args.path):
+        raise UserError("path is not a directory: %s" % args.path)
+    project = {
+        "id": pid,
+        "name": args.name,
+        "path": os.path.realpath(args.path),
+        "group": args.group,
+        "harness": "claude",
+        "notes": args.notes,
+        "guard_rules": [],
+    }
+
+    def add(reg):
+        if any(p["id"] == pid for p in reg["projects"]):
+            raise UserError("project already exists: %s" % pid)
+        reg["projects"].append(project)
+        return reg
+
+    store.update_json(store.paths.registry_path(), add, store.default_registry())
+    print("added %s" % pid)
+    return 0
+
+
+def cmd_project_list(args) -> int:
+    projects = store.load_registry()["projects"]
+    if args.json:
+        print(json.dumps(projects, indent=2))
+    else:
+        for p in projects:
+            print("%s\t%s\t%s\t%s" % (p["id"], p["group"], p["harness"], p["path"]))
+    return 0
+
+
+def cmd_project_remove(args) -> int:
+    def remove(reg):
+        kept = [p for p in reg["projects"] if p["id"] != args.id]
+        if len(kept) == len(reg["projects"]):
+            raise UserError("unknown project: %s" % args.id)
+        reg["projects"] = kept
+        return reg
+
+    store.update_json(store.paths.registry_path(), remove, store.default_registry())
+    print("removed %s" % args.id)
+    return 0
+
+
+def _find_project(query: str) -> dict:
+    try:
+        return store.find_project(store.load_registry(), query)
+    except store.ProjectNotFound:
+        raise UserError("unknown project: %s" % query)
+    except store.AmbiguousProject as exc:
+        raise UserError("ambiguous project %s: %s" % (query, ", ".join(c["id"] for c in exc.candidates)))
+
+
+def cmd_run(args) -> int:
+    command = list(args.command)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        raise UserError("usage: dw run PROJECT COMMAND...")
+    project = _find_project(args.project)
+    try:
+        run = runs.request_run(project, " ".join(command))
+    except runs.RunRefused as exc:
+        raise UserError(str(exc))
+    if run["state"] == "failed":
+        sys.stderr.write("dw: %s failed: %s\n" % (run["id"], run.get("reason")))
+        return 2
+    if run["state"] == "queued" and run.get("reason") == "AGTerm unavailable":
+        sys.stderr.write("dw: AGTerm did not respond; %s stays queued\n" % run["id"])
+        return 2
+    if run["state"] == "queued":
+        print("%s queued (%s)" % (run["id"], run.get("reason") or "waiting"))
+    else:
+        print("%s started" % run["id"])
+    return 0
+
+
+def cmd_queue(args) -> int:
+    queued = [r for r in store.list_runs()[0] if r.get("state") == "queued"]
+    queued.sort(key=lambda r: (r.get("created_at") or 0, r["id"]))
+    if args.json:
+        print(json.dumps(queued, indent=2))
+    else:
+        for r in queued:
+            print("%s\t%s\t%s\t%s" % (r["id"], r["project_id"], r.get("reason") or "",
+                                       r["command"][:60].replace("\n", " ")))
+    return 0
+
+
+def cmd_cancel(args) -> int:
+    try:
+        run = runs.cancel_run(args.run_id)
+    except runs.RunError as exc:
+        raise UserError(str(exc))
+    print("%s cancelled" % run["id"])
+    return 0
+
+
+def _age(seconds) -> str:
+    if seconds is None:
+        return "?"
+    seconds = int(seconds)
+    if seconds < 90:
+        return "%ds" % seconds
+    if seconds < 90 * 60:
+        return "%dm" % round(seconds / 60)
+    if seconds < 48 * 3600:
+        return "%dh" % round(seconds / 3600)
+    return "%dd" % round(seconds / 86400)
+
+
+def _indent(text, prefix="      ") -> list:
+    return [prefix + line for line in str(text).splitlines()]
+
+
+def _view_lines(project_id, v, finished=False) -> list:
+    flags = []
+    if v["state"] == "running":
+        flags.append("STALLED" if v["stalled"] else (v["live"] or ""))
+    if v.get("session_missing"):
+        flags.append("session missing")
+    if v.get("session_unknown"):
+        flags.append("session not visible: a terminal window is closed")
+    head = "  %s  %s  [%s]" % (v["id"], project_id, v["state"])
+    head += " %s%s" % (_age(v["since"]), " ago" if finished else "")
+    flags = [f for f in flags if f]
+    if flags:
+        head += " (%s)" % ", ".join(flags)
+    lines = [head, "      " + str(v["command"] or "").replace("\n", " ")[:100]]
+    if v["reason"]:
+        lines.append("      reason: %s" % v["reason"])
+    if v["progress"]:
+        lines += _indent(v["progress"])
+    if v["result"]:
+        lines.append("      result:")
+        lines += _indent(v["result"], "        ")
+    return lines
+
+
+def format_status(data: dict) -> str:
+    out: list = []
+    if data["needs_owner"]:
+        out.append("Needs owner:")
+        for v in data["needs_owner"]:
+            out += _view_lines(v["project"], v, finished=v["state"] in status.ENDED)
+    for title, key, finished in (("Running:", "active", False), ("Queued:", "queued", False),
+                                 ("Recently finished:", "recent", True)):
+        rows = [(p["project"], v) for p in data["projects"] for v in p[key]]
+        if key == "active":
+            rows = [(pid, v) for pid, v in rows if v["state"] == "running"]
+        if rows:
+            out.append(title)
+            for pid, v in rows:
+                out += _view_lines(pid, v, finished)
+    if data["corrupt_files"]:
+        out.append("Corrupt files (skipped):")
+        out += ["  " + p for p in data["corrupt_files"]]
+    if not out:
+        out.append("No runs.")
+    if not data["agterm_reachable"]:
+        out.append("AGTerm not reachable: live state unavailable")
+    return "\n".join(out)
+
+
+def cmd_status(args) -> int:
+    data = status.overall_status(time.time())
+    if args.project:
+        pid = _find_project(args.project)["id"]
+        data["projects"] = [p for p in data["projects"] if p["project"] == pid]
+        data["needs_owner"] = [v for v in data["needs_owner"] if v["project"] == pid]
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print(format_status(data))
+    return 0
+
+
+def cmd_tail(args) -> int:
+    try:
+        run = store.load_run(args.run_id)
+    except store.RunNotFound:
+        raise UserError("unknown run: %s" % args.run_id)
+    if run.get("state") not in status.ACTIVE or not run.get("agterm_session"):
+        raise UserError("run %s has no live session (state: %s)" % (run["id"], run.get("state")))
+    sys.stdout.write(agterm.session_tail(run["agterm_session"], args.lines))
+    return 0
+
+
+def cmd_resume(args) -> int:
+    try:
+        run = runs.resume_run(args.run_id)
+    except (runs.RunRefused, runs.RunError) as exc:
+        raise UserError(str(exc))
+    print("%s resumed" % run["id"])
+    return 0
+
+
+def cmd_dismiss(args) -> int:
+    try:
+        run = runs.dismiss_run(args.run_id)
+    except runs.RunError as exc:
+        raise UserError(str(exc))
+    print("%s dismissed" % run["id"])
+    return 0
+
+
+def cmd_approve(args) -> int:
+    try:
+        run = guard.approve_pending(args.run_id)
+    except (guard.NothingPending, guard.ApprovalRefused) as exc:
+        raise UserError(str(exc))
+    print("%s approved once: %s" % (run["id"], run["resolved"].get("describe")))
+    return 0
+
+
+def cmd_deny(args) -> int:
+    try:
+        run = guard.deny_pending(args.run_id)
+    except guard.NothingPending as exc:
+        raise UserError(str(exc))
+    print("%s denied: %s" % (run["id"], run["resolved"].get("describe")))
+    return 0
+
+
+def _confirm(prompt: str) -> bool:
+    """One question to the owner. Anything but a terminal on stdin counts as no."""
+    if not sys.stdin.isatty():
+        return False
+    try:
+        return input(prompt).strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def cmd_setup(args) -> int:
+    settings, conf = setup.claude_settings_path(), setup.hooks_conf_path()
+    try:
+        if args.remove:
+            plan = setup.plan_remove(settings, conf)
+        else:
+            plan = setup.plan_setup(settings, conf, os.path.realpath(__file__))
+    except setup.SetupError as exc:
+        raise UserError(str(exc))
+    if not plan:
+        print("Nothing to do: %s." % ("nothing of dw is installed" if args.remove
+                                      else "already set up"))
+        return 0
+    for item in plan:
+        print("%s: %s" % (item["file"], item["description"]))
+        for line in item["preview"]:
+            print("    " + line)
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("Not a terminal: nothing was changed (use --yes to apply).")
+            return 1
+        if not _confirm("Apply? [y/N] "):
+            print("Nothing was changed.")
+            return 1
+    try:
+        for item in plan:
+            for note in item["apply"]():
+                print(note)
+            print("done: %s" % item["description"])
+    except setup.SetupError as exc:
+        raise UserError(str(exc))
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    failed = False
+    for check, level, detail in setup.doctor_levels():
+        print("%s  %s: %s" % (level, check, detail))
+        failed = failed or level == setup.FAIL
+    return 1 if failed else 0
+
+
+def cmd_project_import_legacy(args) -> int:
+    source = args.source or os.path.expanduser(setup.LEGACY_REGISTRY)
+    if args.group is None and not sys.stdin.isatty():
+        print("Nothing imported: this needs your answers. Run `dw project import-legacy` in a "
+              "terminal to be asked for each project's group, or pass --group NAME to give "
+              "every project the same group.")
+        return 0
+
+    def group_for(entry):
+        if args.group is not None:
+            return args.group
+        try:
+            return input("Group for %s (%s), empty to skip: " % (entry["name"], entry.get("path")))
+        except EOFError:
+            return None
+
+    skipped: list = []
+    try:
+        added = setup.import_legacy(Path(source), group_for, skipped)
+    except setup.SetupError as exc:
+        raise UserError(str(exc))
+    for p in added:
+        print("imported %s into group %s" % (p["id"], p["group"]))
+    for name, reason in skipped:
+        print("skipped %s: %s" % (name, reason))
+    if not added and not skipped:
+        print("No projects in %s." % source)
+    return 0
+
+
+def run_guard() -> int:
+    """`dw guard`: the PreToolUse hook. Prints the decision object or nothing; exits 0."""
+    try:
+        decision = guard.run_hook(sys.stdin.read())
+    except BaseException as exc:  # noqa: B902 - run_hook does not raise; this is the last net
+        events.log_error("guard", exc)
+        decision = _guard_deny(_guard_error_reason(exc)) if os.environ.get("DW_RUN_ID") else None
+    if decision:
+        sys.stdout.write(json.dumps(decision) + "\n")
+    return 0
+
+
+def run_hook(argv) -> int:
+    """`dw hook status|session-closed`: called by the terminal app, unattended.
+
+    Always exits 0 and writes nothing to stdout or stderr; errors go to $DW_HOME/dw.log.
+    """
+    action = argv[0] if argv else ""
+    event = "hook %s" % action
+    try:
+        session_id = os.environ.get("AGT_SESSION_ID", "")
+        if action == "status":
+            status_name = os.environ.get("AGT_EVENT_STATUS", "")
+            event = "hook status %s" % status_name
+            if session_id and status_name:
+                events.on_status(session_id, status_name)
+        elif action == "session-closed":
+            if session_id:
+                events.on_session_closed(session_id)
+        else:
+            raise ValueError("unknown hook action: %r" % action)
+    except BaseException as exc:  # noqa: B902 - a hook must never fail
+        events.log_error(event, exc)
+    return 0
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write("dw: %s\n" % message.splitlines()[0])
+        sys.exit(2)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = _Parser(prog="dw")
+    sub = parser.add_subparsers(dest="command", parser_class=_Parser)
+    sub.required = True
+    project = sub.add_parser("project", help="manage the project registry")
+    psub = project.add_subparsers(dest="action", parser_class=_Parser)
+    psub.required = True
+    add = psub.add_parser("add")
+    add.add_argument("--name", required=True)
+    add.add_argument("--path", required=True)
+    add.add_argument("--group", required=True)
+    add.add_argument("--notes", default="")
+    add.set_defaults(func=cmd_project_add)
+    lst = psub.add_parser("list")
+    lst.add_argument("--json", action="store_true")
+    lst.set_defaults(func=cmd_project_list)
+    rm = psub.add_parser("remove")
+    rm.add_argument("id")
+    rm.set_defaults(func=cmd_project_remove)
+    legacy = psub.add_parser("import-legacy", help="import projects from the old registry")
+    legacy.add_argument("--from", dest="source", metavar="PATH")
+    legacy.add_argument("--group", help="give every imported project this group, without asking")
+    legacy.set_defaults(func=cmd_project_import_legacy)
+    run = sub.add_parser("run", help="start a run in an AGTerm session")
+    run.add_argument("project")
+    run.add_argument("command", nargs=argparse.REMAINDER)
+    run.set_defaults(func=cmd_run)
+    queue = sub.add_parser("queue", help="list queued runs")
+    queue.add_argument("--json", action="store_true")
+    queue.set_defaults(func=cmd_queue)
+    cancel = sub.add_parser("cancel", help="cancel a queued or running run")
+    cancel.add_argument("run_id")
+    cancel.set_defaults(func=cmd_cancel)
+    st = sub.add_parser("status", help="merged status of all projects")
+    st.add_argument("project", nargs="?")
+    st.add_argument("--json", action="store_true")
+    st.set_defaults(func=cmd_status)
+    tail = sub.add_parser("tail", help="show the terminal tail of a live run")
+    tail.add_argument("run_id")
+    tail.add_argument("--lines", type=int, default=40)
+    tail.set_defaults(func=cmd_tail)
+    resume = sub.add_parser("resume", help="reopen an interrupted run")
+    resume.add_argument("run_id")
+    resume.set_defaults(func=cmd_resume)
+    dismiss = sub.add_parser("dismiss", help="acknowledge a finished run")
+    dismiss.add_argument("run_id")
+    dismiss.set_defaults(func=cmd_dismiss)
+    approve = sub.add_parser("approve", help="let the pending action of a run through once")
+    approve.add_argument("run_id")
+    approve.set_defaults(func=cmd_approve)
+    deny = sub.add_parser("deny", help="refuse the pending action of a run")
+    deny.add_argument("run_id")
+    deny.set_defaults(func=cmd_deny)
+    setup_p = sub.add_parser("setup", help="install (or remove) the guard and terminal hooks")
+    setup_p.add_argument("--yes", action="store_true", help="apply without asking")
+    setup_p.add_argument("--remove", action="store_true", help="remove what setup installed")
+    setup_p.set_defaults(func=cmd_setup)
+    doctor = sub.add_parser("doctor", help="check the installation")
+    doctor.set_defaults(func=cmd_doctor)
+    return parser
+
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["hook"]:
+        return run_hook(argv[1:])
+    if argv == ["guard"]:
+        return run_guard()
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except UserError as exc:
+        sys.stderr.write("dw: %s\n" % exc)
+        return 2
+    except agterm.AgtermUnavailable as exc:
+        sys.stderr.write("dw: AGTerm is not reachable: %s\n" % exc)
+        return 2
+    except agterm.AgtermError as exc:
+        sys.stderr.write("dw: AGTerm call failed: %s\n" % (str(exc).splitlines() or ["error"])[0])
+        return 2
+    except store.CorruptFile as exc:
+        sys.stderr.write("dw: corrupt file: %s\n" % exc.path)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

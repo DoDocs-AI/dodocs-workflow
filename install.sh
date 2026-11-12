@@ -186,6 +186,7 @@ COMMANDS=(
     "web-design"
     "wiki"
     "spec-bootstrap"
+    "control"
 )
 
 print_info "Installing commands..."
@@ -250,6 +251,90 @@ else
 fi
 print_success "  openspec-conventions.md"
 
+# Install the control point (dw): ~/.dodocs-workflow/{bin,lib,guard-rules.default.json}
+# This only copies files. It never runs `dw setup` and never edits ~/.claude/settings.json
+# or the terminal's hooks file.
+DW_HOME_DIR="${DW_INSTALL_HOME:-$HOME/.dodocs-workflow}"
+CONTROL_FILES=(
+    "dw"
+    "guard-rules.json"
+    "dwlib/__init__.py"
+    "dwlib/agterm.py"
+    "dwlib/events.py"
+    "dwlib/guard.py"
+    "dwlib/guard_git.py"
+    "dwlib/guard_paths.py"
+    "dwlib/guard_shell.py"
+    "dwlib/paths.py"
+    "dwlib/runs.py"
+    "dwlib/setup.py"
+    "dwlib/status.py"
+    "dwlib/store.py"
+)
+
+# Hooks run with a minimal PATH, so the installed dw gets the absolute path of a verified
+# python3 (3.9 or newer) as its shebang.
+find_python() {
+    local cand
+    if [ -n "${DW_INSTALL_PYTHON:-}" ]; then
+        set -- "$DW_INSTALL_PYTHON"
+    else
+        set -- /usr/bin/python3 "$(command -v python3 2>/dev/null || true)"
+    fi
+    for cand in "$@"; do
+        [ -n "$cand" ] && [ -x "$cand" ] || continue
+        case "$cand" in *[[:space:]]*) continue ;; esac
+        if "$cand" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+fetch_control_file() {  # fetch_control_file <item> <destination>
+    if [ "$SOURCE" = "local" ]; then
+        cp "$SCRIPT_DIR/control/$1" "$2"
+    else
+        curl -fsSL "$REPO_URL/control/$1" -o "$2"
+    fi
+}
+
+CONTROL_INSTALLED=false
+print_info "Installing control point (dw)..."
+if DW_PYTHON=$(find_python); then
+    mkdir -p "$DW_HOME_DIR/bin" "$DW_HOME_DIR/lib/dwlib"
+    for item in "${CONTROL_FILES[@]}"; do
+        case "$item" in
+            dw)
+                fetch_control_file "$item" "$DW_HOME_DIR/bin/dw.tmp"
+                { echo "#!$DW_PYTHON"; tail -n +2 "$DW_HOME_DIR/bin/dw.tmp"; } > "$DW_HOME_DIR/bin/dw"
+                rm -f "$DW_HOME_DIR/bin/dw.tmp"
+                chmod 755 "$DW_HOME_DIR/bin/dw"
+                ;;
+            guard-rules.json)
+                fetch_control_file "$item" "$DW_HOME_DIR/guard-rules.default.json"
+                ;;
+            *)
+                fetch_control_file "$item" "$DW_HOME_DIR/lib/$item"
+                ;;
+        esac
+    done
+    CONTROL_INSTALLED=true
+    print_success "  dw ($DW_PYTHON)"
+    if [ -d "$HOME/.local/bin" ]; then
+        if [ -L "$HOME/.local/bin/dw" ] || [ ! -e "$HOME/.local/bin/dw" ]; then
+            ln -sf "$DW_HOME_DIR/bin/dw" "$HOME/.local/bin/dw"
+            print_success "  ~/.local/bin/dw -> $DW_HOME_DIR/bin/dw"
+        else
+            print_warn "~/.local/bin/dw already exists and is not a symlink; left alone"
+        fi
+    fi
+else
+    print_warn "No python3 3.9 or newer found: the control point (dw) was NOT installed."
+    print_warn "Install python3 and run this installer again to get /control working."
+fi
+
 # Write version
 if [ "$SOURCE" = "local" ]; then
     VERSION=$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')
@@ -272,12 +357,24 @@ echo "Installed to: $CLAUDE_DIR"
 echo ""
 echo "Files:"
 echo "  ~/.claude/agents/          - 89 agent definitions"
-echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + fix-and-ship + rebase + brainstorm + change-request + gtm-team + supervisor + ship + web-design + wiki + spec-bootstrap commands"
+echo "  ~/.claude/commands/        - scrum-team + product-launch + product-lifecycle + batch-features + prepare-feature + prepare-features + prepare-for-production + dodocs-workflow + container-team + fix-the-issue + fix-and-ship + rebase + brainstorm + change-request + gtm-team + supervisor + ship + web-design + wiki + spec-bootstrap + control commands"
 echo "  ~/.claude/docker/          - container-team Docker files (agent-env.Dockerfile, agent-entrypoint.sh)"
 echo "  ~/.claude/statusline-dodocs-workflow.sh"
 echo "  ~/.claude/scrum-team-config.template.md"
 echo "  ~/.claude/openspec-conventions.md"
+if [ "$CONTROL_INSTALLED" = true ]; then
+    echo "  $DW_HOME_DIR/  - control point: bin/dw, lib/dwlib, guard-rules.default.json"
+fi
 echo ""
+
+if [ "$CONTROL_INSTALLED" = true ]; then
+    echo -e "${YELLOW}Control point:${NC}"
+    echo "  Run 'dw setup' to enable approvals and status events."
+    echo "  Runs cannot start until 'dw setup' has been run; this installer never runs it."
+    echo "  The old /workspace command is superseded by /control (left in place, untouched)."
+    echo "  Use $DW_HOME_DIR/bin/dw if 'dw' is not on your PATH."
+    echo ""
+fi
 
 if [ "$UPGRADE" = false ]; then
     echo -e "${YELLOW}Next steps:${NC}"

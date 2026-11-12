@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Fake agtermctl for the dw test suite. Plain Python, runs on 3.9.
+
+State lives in $DW_HOME/fake-agterm/:
+  calls.jsonl   one JSON line per invocation: {"argv": [...]} (without the binary)
+  sessions.json {session id: {name, cwd, command, workspace, context, restore,
+                              status, statusChangedAt, text}} - tests may edit it
+  ask-answer    button id that `ask` answers with (missing file = timeout, exit 124;
+                "@already-pending" = AGTerm's refusal of a second ask on a session).
+                For `ask open --no-block` + `ask result`: "<id>" answers at the first
+                poll, "<id>@N" at poll N, a missing file never answers, "@cancelled"
+                reports the dialog cancelled (the owner pressed escape).
+  asks.json     questions opened with --no-block: {id: {state, polls}}
+closed-window  when this file exists, `window list` also reports a closed window W2
+FAKE_AGTERM_DOWN=1 makes every call exit 1 with a connection error.
+FAKE_AGTERM_DELAY=<seconds> delays every call (to exercise the guard's time limit).
+A second `ask open` on a session whose earlier question is still pending is refused with
+"ask already pending", as AGTerm does.
+Text AGTerm refuses is refused here too: a control character (C0, DEL, C1, U+2028/U+2029) in an
+`ask` title, `--message` or button label, a `notify` body or `--title`, or a `session context`
+exits 1 with AGTerm's error object.
+"""
+import json
+import os
+import sys
+import uuid
+
+BOOL_FLAGS = {"--no-select", "--create-workspace", "--json", "--none", "--clear",
+              "--wait", "--follow", "--no-block", "--blink", "--all", "--multiple"}
+
+
+def state_dir():
+    base = os.environ.get("DW_HOME") or os.path.join(os.path.expanduser("~"), ".dodocs-workflow")
+    path = os.path.join(base, "fake-agterm")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def load_sessions():
+    try:
+        with open(os.path.join(state_dir(), "sessions.json")) as fh:
+            return json.load(fh)
+    except (IOError, OSError, ValueError):
+        return {}
+
+
+def save_sessions(sessions):
+    path = os.path.join(state_dir(), "sessions.json")
+    tmp = path + ".tmp%d" % os.getpid()
+    with open(tmp, "w") as fh:
+        json.dump(sessions, fh)
+    os.replace(tmp, path)
+
+
+def parse(args):
+    opts, pos = {}, []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--"):
+            if a in BOOL_FLAGS:
+                opts[a] = True
+            else:
+                i += 1
+                value = args[i] if i < len(args) else ""
+                if a in ("--button", "--choice"):
+                    opts.setdefault(a, []).append(value)
+                else:
+                    opts[a] = value
+        else:
+            pos.append(a)
+        i += 1
+    return opts, pos
+
+
+def out(obj, opts, plain):
+    if opts.get("--json"):
+        print(json.dumps({"ok": True, "result": obj}))
+    else:
+        print(plain)
+
+
+def fail(message, code=1):
+    sys.stderr.write("agtermctl: %s\n" % message)
+    sys.exit(code)
+
+
+def has_control(text):
+    return any(ord(ch) < 0x20 or 0x7f <= ord(ch) <= 0x9f or ch in "\u2028\u2029"
+               for ch in str(text))
+
+
+def refused_text(cmd, pos, opts):
+    """AGTerm's error for free text it rejects, or None."""
+    if cmd == "ask" and pos[:1] not in (["result"], ["cancel"]):
+        title = pos[1:] if pos[:1] == ["open"] else pos
+        labels = [b.partition("=")[2] or b for b in opts.get("--button", [])]
+        texts = list(title) + [opts.get("--message", "")] + labels
+        if any(has_control(t) for t in texts):
+            return "ask text must not contain control characters"
+    if cmd == "notify" and any(has_control(t) for t in pos + [opts.get("--title", "")]):
+        return "ask text must not contain control characters"
+    if cmd == "session" and pos[:1] == ["context"] and any(has_control(t) for t in pos[1:]):
+        return "context must not contain control characters"
+    return None
+
+
+def main(argv):
+    with open(os.path.join(state_dir(), "calls.jsonl"), "a") as fh:
+        fh.write(json.dumps({"argv": argv}) + "\n")
+    if os.environ.get("FAKE_AGTERM_DELAY"):
+        import time
+        time.sleep(float(os.environ["FAKE_AGTERM_DELAY"]))
+    if os.environ.get("FAKE_AGTERM_DOWN") == "1":
+        fail("cannot connect to socket: connection refused")
+    if not argv:
+        fail("missing command", 2)
+    # Scripted failure: $DW_HOME/fake-agterm/fail-next holds a command prefix such as
+    # "session new"; the next matching call (only) exits 1 with a non-connection error.
+    fail_file = os.path.join(state_dir(), "fail-next")
+    if os.path.exists(fail_file):
+        with open(fail_file) as fh:
+            prefix = fh.read().strip().split()
+        if argv[:len(prefix)] == prefix:
+            os.unlink(fail_file)
+            fail("invalid argument: scripted failure")
+    # FAKE_AGTERM_SLEEP=<seconds> delays every `session new` (to exercise timeouts).
+    if os.environ.get("FAKE_AGTERM_SLEEP") and argv[:2] == ["session", "new"]:
+        import time
+        time.sleep(float(os.environ["FAKE_AGTERM_SLEEP"]))
+    cmd = argv[0]
+    rest = argv[1:]
+    opts, pos = parse(rest)
+    refused = refused_text(cmd, pos, opts)
+    if refused:
+        print(json.dumps({"error": refused, "ok": False}))
+        return 1
+
+    if cmd == "window" and pos[:1] == ["list"]:
+        windows = [{"id": "W1", "name": "main", "open": True, "active": True}]
+        if os.path.exists(os.path.join(state_dir(), "closed-window")):
+            windows.append({"id": "W2", "name": "closed", "open": False, "active": False})
+        out({"windows": windows}, opts, "W1 main")
+    elif cmd == "tree":
+        sessions = load_sessions()
+        workspaces = {}
+        for sid, s in sessions.items():
+            node = {"id": sid, "name": s.get("name"), "cwd": s.get("cwd")}
+            if s.get("context"):
+                node["context"] = s["context"]
+            if s.get("status"):
+                node["status"] = s["status"]
+            if s.get("statusChangedAt") is not None:
+                node["statusChangedAt"] = s["statusChangedAt"]
+            workspaces.setdefault(s.get("workspace") or "default", []).append(node)
+        tree = {"workspaces": [{"name": n, "sessions": ss} for n, ss in workspaces.items()]}
+        out({"tree": tree}, opts,
+            "\n".join("%s %s" % (n["id"], n["name"]) for ss in workspaces.values() for n in ss))
+    elif cmd == "session" and pos[:1] == ["new"]:
+        sessions = load_sessions()
+        sid = str(uuid.uuid4()).upper()
+        sessions[sid] = {
+            "name": opts.get("--name"), "cwd": opts.get("--cwd"),
+            "command": opts.get("--command"), "workspace": opts.get("--workspace-name"),
+            "context": None, "restore": None, "status": None, "statusChangedAt": None,
+            "text": "",
+        }
+        save_sessions(sessions)
+        out({"id": sid}, opts, sid)
+    elif cmd == "session" and pos[:1] in (["restore"], ["context"], ["close"], ["text"], ["status"]):
+        sub = pos[0]
+        sessions = load_sessions()
+        sid = opts.get("--target")
+        if sid not in sessions:
+            fail("unknown session: %s" % sid)
+        if sub == "restore":
+            sessions[sid]["restore"] = "" if opts.get("--none") else (pos[1] if len(pos) > 1 else None)
+        elif sub == "context":
+            sessions[sid]["context"] = pos[1] if len(pos) > 1 else None
+        elif sub == "close":
+            del sessions[sid]
+        elif sub == "status":
+            sessions[sid]["status"] = pos[1] if len(pos) > 1 else None
+        elif sub == "text":
+            print(sessions[sid].get("text", ""))
+            return 0
+        save_sessions(sessions)
+        out({}, opts, "ok")
+    elif cmd == "hooks" and pos[:1] == ["reload"]:
+        out({}, opts, "ok")
+    elif cmd == "notify":
+        out({}, opts, "ok")
+    elif cmd == "ask" and pos[:1] in (["open"], ["result"], ["cancel"]):
+        return nonblocking_ask(pos, opts)
+    elif cmd == "ask":
+        path = os.path.join(state_dir(), "ask-answer")
+        try:
+            with open(path) as fh:
+                answer = fh.read().strip()
+        except (IOError, OSError):
+            sys.stderr.write("agtermctl: timed out waiting for an answer\n")
+            return 124
+        if answer == "@already-pending":
+            print(json.dumps({"ok": False, "error": "ask already pending"}))
+            return 1
+        print(json.dumps({"result": "answered", "id": answer, "label": answer, "index": 0}))
+    else:
+        fail("unknown command: %s" % " ".join(argv[:2]), 2)
+    return 0
+
+
+def scripted_answer():
+    try:
+        with open(os.path.join(state_dir(), "ask-answer")) as fh:
+            return fh.read().strip()
+    except (IOError, OSError):
+        return None
+
+
+def nonblocking_ask(pos, opts):
+    path = os.path.join(state_dir(), "asks.json")
+    try:
+        with open(path) as fh:
+            asks = json.load(fh)
+    except (IOError, OSError, ValueError):
+        asks = {}
+
+    def save():
+        with open(path + ".tmp", "w") as fh:
+            json.dump(asks, fh)
+        os.replace(path + ".tmp", path)
+
+    if pos[0] == "open":
+        if scripted_answer() == "@already-pending":
+            print(json.dumps({"ok": False, "error": "ask already pending"}))
+            return 1
+        if not opts.get("--no-block"):
+            fail("this fake only scripts blocking asks without the 'open' word", 2)
+        target = opts.get("--target")
+        if any(a.get("state") == "pending" and a.get("target") == target for a in asks.values()):
+            print(json.dumps({"ok": False, "error": "ask already pending"}))
+            return 1
+        ask_id = str(uuid.uuid4()).upper()
+        asks[ask_id] = {"state": "pending", "polls": 0, "target": target}
+        save()
+        print(json.dumps({"ok": True, "result": {"id": ask_id}}))
+        return 0
+    ask_id = pos[1] if len(pos) > 1 else ""
+    if ask_id not in asks:
+        fail("unknown dialog: %s" % ask_id)
+    entry = asks[ask_id]
+    if pos[0] == "cancel":
+        if entry["state"] == "pending":
+            entry["state"] = "cancelled"
+        save()
+        print(json.dumps({"ok": True, "result": {"result": "cancelled"}}))
+        return 0
+    if entry["state"] == "pending":
+        entry["polls"] += 1
+        answer = scripted_answer()
+        if answer == "@cancelled":
+            entry["state"] = "cancelled"
+        elif answer and not answer.startswith("@"):
+            button, _, after = answer.partition("@")
+            if entry["polls"] >= int(after or 1):
+                entry["state"] = "answered"
+                entry["id"] = button
+        save()
+    if entry["state"] == "answered":
+        print(json.dumps({"result": "answered", "id": entry["id"], "label": entry["id"]}))
+        return 0
+    print(json.dumps({"result": entry["state"]}))
+    return 1 if entry["state"] == "pending" else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

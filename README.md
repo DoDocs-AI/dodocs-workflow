@@ -88,10 +88,24 @@ The key insight is **feature-level testing** in Phase 5: manual testing starts a
 |-------|-----|
 | [Ship your first feature](docs/tutorial-first-feature.md) | Install, configure, and run the pipeline once, start to finish |
 | [How to do the common jobs](docs/howto-common-tasks.md) | Recipes: build, prepare and batch, change, fix, retest, merge, audit, adopt |
-| [Command reference](docs/reference-commands.md) | All 27 commands with arguments, outputs and prerequisites |
+| [Command reference](docs/reference-commands.md) | All 28 commands with arguments, outputs and prerequisites |
+| [The control point](docs/explanation-control-point.md) | `/control` and `dw`: start runs in all your projects from one session, approvals, and what the guard does not protect against |
 | [Why the pipeline is shaped this way](docs/explanation-pipeline-design.md) | The gates, the ownership rules, and what each costs |
 | [The scrum team pipeline, drawn](docs/scrum-team-pipeline.html) | Artifact chain, phases, agents and gates as one diagram |
 | [Feature catalog](docs/FEATURES.md) | Every workflow and the full agent roster |
+
+---
+
+## Control point
+
+`/control` is one session that starts runs in all your registered projects (each as a
+background AGTerm session), answers "what is going on?", and passes your approvals to runs.
+It is a thin prompt over the `dw` command, installed to `~/.dodocs-workflow/` by
+`install.sh`. After installing, run `dw setup` (it asks before editing your Claude Code
+settings and AGTerm hooks), register projects with `dw project add`, then open `/control`.
+Needs AGTerm and a `python3` 3.9 or newer; Claude Code only for now. The approval guard is
+not a sandbox: read [what it does not protect against](docs/explanation-control-point.md#what-the-guard-does-not-protect-against)
+before relying on it.
 
 ---
 
@@ -126,10 +140,11 @@ The installer copies files to `~/.claude/` (Claude Code's global config director
 | Destination | Files | Description |
 |-------------|-------|-------------|
 | `~/.claude/agents/` | 89 `.md` files | Agent role definitions (13 scrum, 10 production audit, 34 PLC, 16 GTM, plus specialists) |
-| `~/.claude/commands/` | 27 `.md` files | Slash commands — see the [command reference](docs/reference-commands.md) |
+| `~/.claude/commands/` | 28 `.md` files | Slash commands — see the [command reference](docs/reference-commands.md) |
 | `~/.claude/docker/` | `agent-env.Dockerfile`, `agent-entrypoint.sh` | Container team Docker runtime files |
 | `~/.claude/` | `scrum-team-config.template.md` | Config template for new projects |
 | `~/.claude/` | `.dodocs-workflow-version` | Installed version tracker |
+| `~/.dodocs-workflow/` | `bin/dw`, `lib/dwlib/`, `guard-rules.default.json` | Control point (`dw`); the installer never runs `dw setup` |
 
 Nothing is installed into your project directories. Project-specific configuration is done separately (see below).
 

@@ -789,3 +789,97 @@ class GuardDeadlineAndSiblingTests(GuardHookBase):
         self.assertEqual(self.dw("deny", rid).returncode, 0)
         out = self.finish_guard(first)
         self.assertEqual(out["permissionDecisionReason"], DENIED_REASON)
+
+
+class GuardApprovalIdentityTests(GuardHookBase):
+    """An approval is about the guarded segment (rule id and its describe text), not about the
+    whole command line around it."""
+
+    COMPOUND = "echo x >> README.md && git commit -qm m && git push origin main"
+    PLAIN = "git push origin main"
+
+    def held(self, path, command):
+        out = self.guard(self.payload(path, command))
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+
+    def test_a_dw_approve_of_a_compound_command_lets_the_plain_retry_through_once(self):
+        path, rid = self.start_run()
+        self.held(path, self.COMPOUND)
+        self.assertIn("git push origin main", self.record(rid)["pending_approval"]["describe"])
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, self.PLAIN)))
+        rec = self.record(rid)
+        self.assertEqual((rec["grants"], rec["pending_approval"], rec["state"]), ([], None, "running"))
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.held(path, self.PLAIN)
+        self.assertEqual(len(self.ask_calls()), asks + 1)
+        self.assertIsNotNone(self.record(rid)["pending_approval"])
+
+    def test_b_a_different_rule_while_push_is_pending_is_denied_without_a_dialog(self):
+        path, rid = self.start_run()
+        self.held(path, self.COMPOUND)
+        asks = len(self.ask_calls())
+        self.script_ask("once")
+        self.held(path, "gh pr merge 3")
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.assertIn("push", self.record(rid)["pending_approval"]["describe"])
+
+    def test_c_the_plain_form_while_the_compound_waits_is_a_sibling_not_a_second_question(self):
+        path, rid = self.start_run()
+        first = self.start_guard(self.payload(path, self.COMPOUND), env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        self.wait_for(lambda: len(self.ask_calls()) >= 1)
+        pending = self.record(rid)["pending_approval"]
+        second = self.start_guard(self.payload(path, self.PLAIN), env={"DW_GUARD_ASK_TIMEOUT": "30"})
+        # The sibling claims the same pending action and tries to ask (AGTerm refuses a second
+        # question on the session); a different action would be refused before any ask.
+        self.wait_for(lambda: len(self.ask_calls()) >= 2)
+        asks = json.loads((self.fake_agterm_dir / "asks.json").read_text())
+        self.assertEqual(len(asks), 1)
+        self.assertEqual(self.record(rid)["pending_approval"], pending)
+        self.script_ask("once")
+        self.assertIsNone(self.finish_guard(first))
+        out = self.finish_guard(second)
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+        self.assertEqual(len(json.loads((self.fake_agterm_dir / "asks.json").read_text())), 1)
+
+    def test_d_a_dw_approve_of_the_plain_command_lets_the_compound_retry_through(self):
+        path, rid = self.start_run()
+        self.held(path, self.PLAIN)
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        asks = len(self.ask_calls())
+        self.assertIsNone(self.guard(self.payload(path, self.COMPOUND)))
+        self.assertEqual(self.record(rid)["grants"], [])
+        self.assertEqual(len(self.ask_calls()), asks)
+
+    def test_a_grant_does_not_cover_a_command_with_another_guarded_segment(self):
+        path, rid = self.start_run()
+        self.held(path, self.PLAIN)
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        self.held(path, "git push origin main && git push origin master")
+        self.assertEqual(len(self.record(rid)["grants"]), 1)
+        pending = self.record(rid)["pending_approval"]
+        self.assertIn("git push origin master", pending["describe"])
+        ask = self.ask_calls()[-1]
+        message = ask[ask.index("--message") + 1]
+        self.assertIn("git push origin main", message)
+        self.assertIn("git push origin master", message)
+
+    def test_the_same_set_of_segments_in_another_order_is_the_same_action(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main && gh pr merge 3")
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        self.assertIsNone(self.guard(self.payload(path, "gh pr merge 3; git push origin main")))
+        self.assertEqual(self.record(rid)["grants"], [])
+
+    def test_an_mcp_grant_covers_only_the_same_arguments(self):
+        path, rid = self.start_run()
+        mcp = "mcp__claude_ai_Gmail__send_message"
+        out = self.guard(self.payload(path, tool=mcp, tool_input={"to": "a@example.com"}))
+        self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        out = self.guard(self.payload(path, tool=mcp, tool_input={"to": "b@example.com"}))
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertEqual(len(self.record(rid)["grants"]), 1)

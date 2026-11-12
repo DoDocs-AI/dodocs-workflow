@@ -1552,22 +1552,27 @@ def _mcp_rule_matches(rule: dict, server: str, tool: str) -> bool:
 
 
 def _combine(matches: list) -> Optional[dict]:
+    """One match for the call. `pairs` keeps every distinct (rule id, describe) the call hit,
+    sorted, before the merge by rule id: it is what an approval is about (see `_fingerprint`)."""
     unique: list = []
     for m in matches:
         if not any(u["id"] == m["id"] for u in unique):
             unique.append(m)
     if not unique:
         return None
+    pairs = sorted({(m["id"], m["describe"]) for m in matches})
     if len(unique) == 1:
-        return dict(unique[0])
+        return {**unique[0], "pairs": [list(p) for p in pairs]}
     unique.sort(key=lambda m: CATEGORIES.index(m["category"]))
     return {"id": "+".join(m["id"] for m in unique), "category": unique[0]["category"],
-            "describe": "; ".join(m["describe"] for m in unique)}
+            "describe": "; ".join(m["describe"] for m in unique),
+            "pairs": [list(p) for p in pairs]}
 
 
 def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
              rules: list) -> Optional[dict]:
-    """The matching rule (`{"id", "category", "describe"}`) or None.
+    """The matching rule (`{"id", "category", "describe"}`, plus `pairs` for shell commands:
+    see `_combine`) or None.
 
     `rules` may contain a `run_context(run_id)` entry; that run's result note is exempt
     from the control rules.
@@ -1706,10 +1711,22 @@ def _inactive_output(run_id: str, state: str) -> dict:
     return _output("deny", INACTIVE_REASON % (run_id, state))
 
 
-def _fingerprint(tool: str, tool_input: dict) -> str:
-    volatile = ("description", "timeout", "run_in_background")
-    body = {k: v for k, v in tool_input.items() if k not in volatile}
-    text = json.dumps([tool, body], sort_keys=True, default=str)
+def _pairs(match: dict) -> list:
+    """The sorted (rule id, describe) pairs a match is about."""
+    pairs = match.get("pairs") or [[match["id"], match["describe"]]]
+    return sorted([str(rule_id), str(describe)] for rule_id, describe in pairs)
+
+
+def _fingerprint(tool: str, tool_input: dict, match: dict) -> str:
+    """The identity of an approval: the guarded segments the call hit (rule id and describe
+    text of each), not the command line around them. It is what `pending_approval.action`,
+    one-shot grants, "one question per run at a time" and sibling waiters compare. An MCP
+    call has no segment text (its describe names only the tool), so its arguments count too."""
+    key: list = [_pairs(match)]
+    if tool.startswith("mcp__"):
+        volatile = ("description", "timeout", "run_in_background")
+        key.append([tool, {k: v for k, v in tool_input.items() if k not in volatile}])
+    text = json.dumps(key, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:20]
 
 
@@ -1728,9 +1745,12 @@ def _action_text(tool: str, tool_input: dict) -> str:
     return json.dumps(tool_input, sort_keys=True, default=str)
 
 
-def _matching_grant(grants: list, rule_id: str, action: str) -> Optional[dict]:
+def _matching_grant(grants: list, action: str) -> Optional[dict]:
+    """The one-shot grant for this action. The action already names its rules (see
+    `_fingerprint`); the combined rule id is not compared, since its order follows the
+    command line."""
     for g in grants:
-        if isinstance(g, dict) and g.get("rule") == rule_id and g.get("action") == action:
+        if isinstance(g, dict) and g.get("action") == action:
             return g
     return None
 
@@ -1775,10 +1795,11 @@ def _bounded(event: str, start: float, fn, *args, **kwargs) -> None:
 def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) -> Optional[dict]:
     started = _CLOCK["start"] or time.monotonic()
     run_id = run["id"]
-    action = _fingerprint(tool, tool_input)
+    action = _fingerprint(tool, tool_input, match)
+    pairs = _pairs(match)
     parts = match["id"].split("+")
     control = match["category"] == "control"
-    describe = match["describe"]
+    describe = "; ".join(d for _, d in pairs)
     now = time.time()
     outcome: dict = {}
 
@@ -1791,7 +1812,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             outcome["kind"] = "approved"
             return r
         grants = list(r.get("grants") or [])
-        grant = _matching_grant(grants, match["id"], action)
+        grant = _matching_grant(grants, action)
         if grant is not None:
             outcome["kind"] = "granted"
             return {**r, "grants": _without(grants, grant)}
@@ -1830,10 +1851,11 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             buttons.append(("run", "Approve for this run"))
         buttons.append(("deny", "Deny"))
         # One line: AGTerm refuses control characters, and agterm sanitises the rest.
-        message = "%s \u2014 %s: %s" % (describe, tool, _action_text(tool, tool_input))
+        count = "%d guarded actions: " % len(pairs) if len(pairs) > 1 else ""
+        message = "%s%s \u2014 %s: %s" % (count, describe, tool, _action_text(tool, tool_input))
         answer, error = _wait_for_owner(
             run_id, sid, "%s: approve %s?" % (name, match["category"]), message, buttons,
-            lambda r: _decided_elsewhere(r, match["id"], parts, action, control), started)
+            lambda r: _decided_elsewhere(r, parts, action, control), started)
     if answer == "run" and control:
         answer = "once"
     if answer not in ("once", "run", "deny"):
@@ -1861,7 +1883,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
                 out = runs._moved(out, time.time(), state="running", reason=None)
             return out
         if not ours:
-            grant = _matching_grant(grants, match["id"], action)
+            grant = _matching_grant(grants, action)
             if grant is not None and answer != "deny":
                 result["out"] = None
                 result["answered"] = True
@@ -1893,7 +1915,7 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             out["approvals"] = list(r.get("approvals") or []) + \
                 [p for p in parts if p not in (r.get("approvals") or [])]
         if answer == "deny":
-            grant = _matching_grant(grants, match["id"], action)
+            grant = _matching_grant(grants, action)
             if grant is not None:
                 out["grants"] = _without(grants, grant)
             result["out"] = _output("deny", DENIED_REASON)
@@ -1915,14 +1937,14 @@ def _poll_interval() -> float:
         return 1.0
 
 
-def _decided_elsewhere(r: dict, rule_id: str, parts: list, action: str, control: bool) -> bool:
+def _decided_elsewhere(r: dict, parts: list, action: str, control: bool) -> bool:
     """Whether the run record already settles a question that is still open: the run ended,
     `dw approve` left a grant, `dw deny` cleared it, or the rule was approved for the run."""
     if r.get("state") not in runs.ACTIVE_STATES:
         return True
     if (r.get("pending_approval") or {}).get("action") != action:
         return True
-    if _matching_grant(list(r.get("grants") or []), rule_id, action) is not None:
+    if _matching_grant(list(r.get("grants") or []), action) is not None:
         return True
     return not control and all(p in (r.get("approvals") or []) for p in parts)
 

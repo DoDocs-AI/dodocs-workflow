@@ -848,8 +848,8 @@ class ReviewFindingsTests(GuardClassifyBase):
             ("for f in a b; do python3 tools/check.py --file \"$f\"; done", None),
             ("python3 -u scripts/x.py \"$(date)\"", None),
             ("bash scripts/x.sh \"don't stop\"", None),
-            ("python3 \"$SCRIPT\"", "unreadable"),
-            ("bash \"$SCRIPT\" a", "unreadable"),
+            ("python3 \"$SCRIPT\"", "control"),
+            ("bash \"$SCRIPT\" a", "control"),
             ("python3 -c \"$CODE\"", "control"),
             ("perl -pe \"$EXPR\" f", "control"),
             ("node --eval=$JS", "control"),
@@ -927,13 +927,13 @@ class ReviewRound2Tests(GuardClassifyBase):
 
     def test_s2_code_loading_options(self):
         self.check_rows([
-            ("perl -M\"$MOD\" -e 'print 1'", "unreadable"),
-            ("node -r \"$HOOK\" scripts/x.js", "unreadable"),
-            ("node --require=$HOOK scripts/x.js", "unreadable"),
-            ("node --import \"$(cat m)\" x.mjs", "unreadable"),
-            ("node --loader $L x.mjs", "unreadable"),
-            ("node --experimental-loader=$L x.mjs", "unreadable"),
-            ("ruby -r\"$LIB\" x.rb", "unreadable"),
+            ("perl -M\"$MOD\" -e 'print 1'", "control"),
+            ("node -r \"$HOOK\" scripts/x.js", "control"),
+            ("node --require=$HOOK scripts/x.js", "control"),
+            ("node --import \"$(cat m)\" x.mjs", "control"),
+            ("node --loader $L x.mjs", "control"),
+            ("node --experimental-loader=$L x.mjs", "control"),
+            ("ruby -r\"$LIB\" x.rb", "control"),
             ("python3 -m \"$MOD\"", "control"),
             ("node -r ~/.dodocs-workflow/x.js app.js", "control"),
             ("node --require ts-node/register scripts/x.ts", None),
@@ -994,11 +994,11 @@ class ReviewRound3Tests(GuardClassifyBase):
 
     def test_b3_loader_options_anywhere(self):
         self.check_rows([
-            ("perl -I lib -M\"$MOD\" x.pl", "unreadable"),
-            ("ruby -I lib -r $LIB x.rb", "unreadable"),
-            ("node app.js -r \"$X\"", "unreadable"),
-            ("node --inspect app.js --require=$X", "unreadable"),
-            ("bun x.ts --import $M", "unreadable"),
+            ("perl -I lib -M\"$MOD\" x.pl", "control"),
+            ("ruby -I lib -r $LIB x.rb", "control"),
+            ("node app.js -r \"$X\"", "control"),
+            ("node --inspect app.js --require=$X", "control"),
+            ("bun x.ts --import $M", "control"),
         ])
 
     def test_must_stay_allowed(self):
@@ -1072,15 +1072,15 @@ class ReviewRound4Tests(GuardClassifyBase):
 
     def test_g3_loader_options_for_every_family(self):
         self.check_rows([
-            ("ruby -I lib --require $X x.rb", "unreadable"),
-            ("ruby -I lib --require=$X x.rb", "unreadable"),
-            ("ruby -rjson --require=$X x.rb", "unreadable"),
-            ("python3 -m$MOD", "unreadable"),
-            ("bun --preload=$X x.ts", "unreadable"),
-            ("bun --preload $X x.ts", "unreadable"),
-            ("tsx -r $X x.ts", "unreadable"),
-            ("ts-node -r $X x.ts", "unreadable"),
-            ("npx tsx --require=$X x.ts", "unreadable"),
+            ("ruby -I lib --require $X x.rb", "control"),
+            ("ruby -I lib --require=$X x.rb", "control"),
+            ("ruby -rjson --require=$X x.rb", "control"),
+            ("python3 -m$MOD", "control"),
+            ("bun --preload=$X x.ts", "control"),
+            ("bun --preload $X x.ts", "control"),
+            ("tsx -r $X x.ts", "control"),
+            ("ts-node -r $X x.ts", "control"),
+            ("npx tsx --require=$X x.ts", "control"),
             ("ruby -I lib -r json x.rb", None),
             ("ruby --require json x.rb", None),
             ("python3 -m pytest -q", None),
@@ -2050,7 +2050,7 @@ class UnreadableCategoryTests(GuardClassifyBase):
     def test_unreadable_is_its_own_category_after_every_other(self):
         self.assertEqual(self.guard.CATEGORIES[-1], "unreadable")
         self.assertIn("control", self.guard.CATEGORIES)
-        for command in ("kubectl $VERB pods", "python3 \"$SCRIPT\"", "gh pr $ACTION 3",
+        for command in ("kubectl $VERB pods", "gh pr $ACTION 3",
                         "helm $VERB a ./c"):
             with self.subTest(command=command):
                 result = self.bash(command)
@@ -2120,7 +2120,7 @@ class UnreadableStateTests(GuardClassifyBase):
             ("git config $KEY x", state),
             ("for f in $(seq 1 200); do echo $f; done", None),
             ("for f in a b; do cp x out/$f; done", None),
-            ("python3 \"$SCRIPT\"", plain),
+            ("python3 \"$SCRIPT\"", ("control-unreadable-state+control-unreadable", "control")),
             ("git push origin \"$B\"", ("git-push-default+control-unreadable", "merge")),
         ])
 
@@ -2243,19 +2243,19 @@ class IdiomTests(KubectlRolloutTests):
 
     def test_b_a_function_not_simple_stays_as_today(self):
         self.check([
-            ("f(){ echo; }; f(){ git push origin main; }; f", "merge"),        # redefined
-            ("f(){ git log | git push origin main; }; f", "merge"),            # a pipe
-            ("g(){ git push origin main; }; f(){ g; }; f", "merge"),           # calls a function
+            ("f(){ echo; }; f(){ git push origin main; }; f", "control"),        # redefined
+            ("f(){ git log | git push origin main; }; f", "control"),            # a pipe
+            ("g(){ git push origin main; }; f(){ g; }; f", "control"),           # calls a function
             ('kc(){ kubectl "$@"; }; kc $VERB pods', "unreadable"),            # run-time deciding word
-            ('kc(){ kubectl $1 pods; }; kc "delete ns"', "unreadable"),        # would split
-            ('kc(){ kubectl "$@"; }; f(){ "$@"; }; f kc delete ns x', "unreadable"),
+            ('kc(){ kubectl $1 pods; }; kc "delete ns"', "control"),        # would split
+            ('kc(){ kubectl "$@"; }; f(){ "$@"; }; f kc delete ns x', "control"),
             ('kc(){ kubectl "$@"; }; time kc delete ns x', "unreadable"),       # not a plain call
             ('kc(){ kubectl "$@"; }; xargs kc delete ns < x', "unreadable"),
-            ('f(){ git push origin "$X"; }; f', "merge"),  # read where it is defined
-            ('f(){ local x=1; git push origin main; }; f', "merge"),
+            ('f(){ git push origin "$X"; }; f', "control"),  # read where it is defined
+            ('f(){ local x=1; git push origin main; }; f', "control"),
         ])
-        # A function that calls itself is never read through; nothing guarded is in it.
-        self.assertIsNone(self.bash("f(){ f; }; f"))
+        # A function that calls itself is never read through: its call runs unread code.
+        self.assertEqual(self.bash("f(){ f; }; f")["id"], "control-unreadable-state")
 
     def test_c_an_inline_script_on_stdin_with_arguments(self):
         self.check([
@@ -2313,10 +2313,9 @@ class IdiomPreconditionTests(KubectlRolloutTests):
             with self.subTest(command=command):
                 self.assertEqual(self.bash(command)["id"].split("+")[0], "control-unreadable-state")
         self.assertEqual(self.category(self.bash('k(){ kubectl "$@"; }; unset -f k; k delete ns prod')),
-                         "destroy")  # read by name, as before
-        # Not resolved: as before change 2, the body is read where it is defined and the call
-        # by its own words (`source ./x.sh` itself is a known gap: file content is not read).
-        self.assertIsNone(self.bash("k(){ ls; }; source ./x.sh; k"))
+                         "control")  # an unresolved call: what runs is unknown
+        # Not resolved: the call runs code that was not read.
+        self.assertEqual(self.category(self.bash("k(){ ls; }; source ./x.sh; k")), "control")
 
     def test_resolved(self):
         self.check([
@@ -2346,6 +2345,56 @@ class ComputedProgramTests(GuardClassifyBase):
                 result = self.bash(command)
                 got = None if result is None else (result["id"], result["category"])
                 self.assertEqual(got, expected, result)
+
+
+class ComputedCodeTests(GuardClassifyBase):
+    """Whatever RUNS is computed (a loader, a script operand, an unresolved same-command
+    function, inline code given as a value): control-unreadable-state, like a computed program
+    word. A known program with a computed argument stays the approvable unreadable."""
+
+    def test_computed_code_is_control(self):
+        for command in ('node -r "$X" a.js', 'python3 -m "$MOD"', "perl -M$X a.pl",
+                        "ruby -r$X a.rb", "node --require=$X a.js", 'python3 "$SCRIPT"',
+                        "bash $S", "node $F", 'python3 -c "$CODE"', 'bash -c "$CMD"',
+                        'eval "$X"', "f(){ a | b; }; f",
+                        "f(){ echo; }; f(){ ls; }; f",
+                        'k(){ kubectl "$@"; }; unset -f k; k get pods',
+                        "k(){ ls; }; source ./x.sh; k"):
+            with self.subTest(command=command):
+                result = self.bash(command)
+                self.assertEqual(result["category"], "control", result)
+                self.assertIn("control-unreadable-state", result["id"].split("+"))
+        self.assertIsNone(self.bash('python3 scripts/x.py "$f"'))
+        self.assertEqual(self.bash("kubectl $VERB pods")["category"], "unreadable")
+
+
+class InlineRolloutTests(GuardClassifyBase):
+    """Every kubectl/oc invocation in inline code is judged on its own."""
+
+    def test_each_invocation_is_judged(self):
+        held = ["kubectl rollout status deploy/a; kubectl rollout restart deploy/a",
+                "kubectl rollout status deploy/a && oc rollout latest dc/a",
+                "kubectl get pods | kubectl rollout undo deploy/a"]
+        allowed = ["kubectl rollout status deploy/a; kubectl get pods",
+                   "kubectl rollout history deploy/a"]
+
+        def forms(code):
+            return ["python3 -c 'import os; os.system(\"%s\")'" % code,
+                    "bash -c '%s'" % code,
+                    "python3 - <<'PY'\nimport os\nos.system(\"%s\")\nPY" % code]
+
+        for code in held:
+            for command in forms(code):
+                with self.subTest(command=command):
+                    self.assertEqual(self.category(self.bash(command)), "deploy")
+        for code in allowed:
+            for command in forms(code):
+                with self.subTest(command=command):
+                    self.assertIn(self.category(self.bash(command)), (None, "unreadable"))
+        self.assertTrue(self.guard._inline_rollout_change(
+            "kubectl rollout status deploy/a; kubectl rollout restart deploy/a"))
+        self.assertFalse(self.guard._inline_rollout_change(
+            "kubectl rollout status deploy/a; kubectl get pods"))
 
 
 class GuardEntryPresentTests(DwTestCase):

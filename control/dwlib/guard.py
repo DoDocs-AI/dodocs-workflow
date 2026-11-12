@@ -18,7 +18,11 @@ checks (dw, the control point's files, agtermctl, other agent CLIs) always apply
 
 `unreadable` is its own category (rule id `control-unreadable`, kept for existing records): the
 owner can approve it once, with `dw approve`, or for the rest of the run, which turns this
-fail-closed reading off for that run. When the same call also matches another category, that
+fail-closed reading off for that run. It means one thing only: a known program with a computed
+ARGUMENT (`kubectl $VERB pods`, `git push origin "$B"`). Anything where the program or the code
+itself is computed (a run-time program word, loader, script operand, `-c`/`eval` value, an
+unresolved same-command function call, unscannable code), or that may change the control point,
+is `control-unreadable-state` (category `control`). When the same call also matches another category, that
 category decides the question, and an unreadable approval never lets it through.
 
 This catches direct and lightly wrapped risky commands from a cooperative agent. It is not
@@ -515,9 +519,10 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
             continue  # the definition of a function read at its calls
         if index in calls:
             if calls[index] is None:
-                matches.append(_unreadable_match())  # a call this guard cannot read
-                continue
-            seg = calls[index]
+                # A function call not read: what runs is unknown (still read by its words).
+                matches.append(_unreadable_state_match())
+            else:
+                seg = calls[index]
         seg = _substituted_segment(seg, ctx.vars)
         # Everything upstream in the same pipeline may put file names on standard input.
         upstream = list(ctx.stdin_commands) if seg["pipe_in"] else []
@@ -610,10 +615,8 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                 else:
                     matches += _string_matches([code], ctx, depth)
             if not codes and operands and _run_time_text(operands[0]) and "-s" not in args:
-                # The script itself is computed: a substitution (process substitution
-                # included) is code nobody can scan; a variable naming a file is a value.
-                matches.append(_unreadable_state_match() if "__dwsub" in operands[0]
-                               else _unreadable_match())
+                # The script itself is computed: what runs is unknown.
+                matches.append(_unreadable_state_match())
             stdin_program = not operands or operands[0] in ("-", "/dev/stdin") or "-s" in args
             if stdin_program and seg["pipe_in"]:
                 matches.append(_unreadable_state_match())
@@ -637,7 +640,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                                stop=_LOADER_LETTERS.get(family, ""))
             for loader in _loader_args(rest, family):
                 if _expand(loader) is None or "__dwsub" in loader:
-                    matches.append(_unreadable_match())  # code loaded from a run-time name
+                    matches.append(_unreadable_state_match())  # code loaded from a run-time name
                 else:
                     matches += _inline_matches(loader, ctx, depth)
             operands = [a for a in rest if not a.startswith("-")]
@@ -650,7 +653,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             if stdin_script and not seg["heredocs"] and not seg["pipe_in"]:
                 matches.append(_unreadable_match())  # the code comes from somewhere unseen
             if not codes and not stdin_script and operands and _run_time_text(operands[0]):
-                matches.append(_unreadable_match())  # the script itself is computed
+                matches.append(_unreadable_state_match())  # the script itself is computed
             for arg in rest:
                 matches += _inline_matches(arg, ctx, depth)
             for body in seg["heredocs"]:
@@ -1042,10 +1045,18 @@ _LITERAL_RE = re.compile(r"'([^'\n]{1,2000})'|\"([^\"\n]{1,2000})\"")
 _URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+")
 
 
+_INLINE_ROLLOUT_CHANGE_RE = re.compile(
+    r"\b(kubectl|oc)\b[^\n'\";&|()]*\brollout\b(\s+-\S+(\s+[^\s\-]\S*)?)*?"
+    r"\s+(restart|undo|pause|resume|latest|cancel|retry)\b")
+
+
 def _inline_rollout_change(text: str) -> bool:
     """Whether inline code runs `kubectl|oc ... rollout` other than `rollout status` or
     `rollout history` (read the same way as on the command line: `_kubectl_words`)."""
-    for m in re.finditer(r"\b(kubectl|oc)\b([^\n'\"]*)", text):
+    if _INLINE_ROLLOUT_CHANGE_RE.search(text):
+        return True
+    # Each occurrence on its own (overlapping), up to a shell separator or closing quote.
+    for m in re.finditer(r"(?=\b(kubectl|oc)\b([^\n'\";&|()]*))", text):
         words = m.group(2).split()
         if "rollout" not in words:
             continue

@@ -148,12 +148,16 @@ change the control point's own settings. Everything it does not recognise is all
      known at run time, or too many words, used as a write target; an arithmetic subscript),
      or a git configuration or environment override (`git -c core.sshCommand=...`,
      `GIT_DIR=...`, `git config $KEY ...`);
-  3. a program word that is itself computed (`$CMD`, `"$TOOL" get x`, `$(echo git) status`,
-     and any run-time word after a wrapper, which the guard cannot tell from the program:
-     `timeout 5 ls $DIR`, `sudo -u x make "$T"`), after the same-command variables and
-     functions are read (see [What the guard reads in full](#what-the-guard-reads-in-full));
-     plain "command cannot be read" is for run-time arguments of a program the guard has
-     identified (`kubectl $VERB pods`, `git push origin "$B"`);
+  3. anything where what runs is itself computed, after the same-command variables and
+     functions are read (see [What the guard reads in full](#what-the-guard-reads-in-full)):
+     a program word (`$CMD`, `"$TOOL" get x`, `$(echo git) status`, and any run-time word
+     after a wrapper, which the guard cannot tell from the program: `timeout 5 ls $DIR`,
+     `sudo -u x make "$T"`), a code loader (`node -r "$X"`, `python3 -m "$MOD"`, `perl -M$X`),
+     a script operand (`python3 "$SCRIPT"`, `bash $S`), inline code given as a value
+     (`python3 -c "$CODE"`, `eval "$X"`), or a call of a function the command defines but the
+     guard could not read. Plain "command cannot be read" means only a known program with a
+     run-time argument (`kubectl $VERB pods`, `git push origin "$B"`; `python3 scripts/x.py "$f"`
+     is not held at all);
   4. shell or interpreter code that could not be scanned at all: a shell or interpreter fed
      from a pipe (`curl ... | sh`), an interactive shell (`su`, `sudo -s`), `bash -c "$CMD"`,
      `python3 -c "$CODE"`, `eval "$(...)"`, `source <(...)`, `bash <(...)`, or a `-c` string
@@ -220,7 +224,8 @@ defined and where it is used or called.
   `"$@"`, `$@`, `"$1"`...`$9` (no pipe, redirect, substitution or other variable, and no call of
   another function the command defines), and every mention of its name is the definition or a
   plain call later in the command (not `time k`, `xargs k`, `bash -c k` ...). Any other
-  function is read as before: its body where it is defined, its calls by their own words.
+  function's body is read where it is defined, and each plain call of it is held as `control`
+  (what it runs was not read).
 - **An inline script on standard input with arguments.** `python3 - "$F" <<'PY' ... PY` (and
   `node -`, `ruby -`, `perl -`, `bash -s -- ...`): the here-document is the code and is scanned
   like other inline code; the words after `-` are data for it, so a run-time value there does
@@ -381,8 +386,8 @@ be approved for the run, unless noted. Those held as "command cannot be read" ar
   (`rm .git/refs/heads/$B`); a segment that may be a protected name with something after it
   (`.*/x`, `a*/x`); `..` after a run-time segment in a path that also names a protected
   directory; a run-time word written directly in your home directory (`echo x > ~/$F`).
-- **Run-time programs and wrappers**: held as `unreadable`: `tsx $SCRIPT`. Held as `control`:
-  `cd $DW_HOME`, `python3 -m $MOD`, a wrapper with a run-time or glob argument
+- **Run-time programs and wrappers**, all held as `control`: `cd $DW_HOME`,
+  `python3 -m $MOD`, `tsx $SCRIPT`, a wrapper with a run-time or glob argument
   (`timeout 5 ls $DIR`, `npx tsx x.ts "$PORT"`: the word may be the program), a loop over more than 64
   literal words, or over words only known at run time (`for f in $(ls)`), whose body writes
   the loop variable.

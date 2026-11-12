@@ -1053,13 +1053,13 @@ def _function_plan(text: str, segments: list, word_lists: Optional[list] = None)
     with the call's words substituted, keeping the call's redirects and pipes; a call whose
     result runs a function the command defines, or whose static argument would split or glob
     where the body leaves it unquoted, is unreadable (None). The definition itself is not
-    classified. Any other function stays as today: its body is classified where it is defined,
-    and its calls by their own words. Nothing in the command may redefine names
+    classified. Any other function's body is classified where it is defined, and each of its
+    plain calls (`name ...` as a command) is unreadable (None) as well as read by its words:
+    what it runs was not read. Nothing in the command may redefine names
     (`_names_may_change`), and the name is a word (quotes removed) only at the definition and
     the calls."""
-    if _names_may_change(word_lists):
-        return {}, set()
-    every = [w for ws in word_lists for w in ws]
+    blocked = _names_may_change(word_lists)
+    every = [w for ws in word_lists for w in ws] if word_lists else []
     attempts: dict = {}  # name -> number of definitions, readable or not
     defined: dict = {}  # name -> (first index, last index, body words)
     depth = 0
@@ -1081,15 +1081,15 @@ def _function_plan(text: str, segments: list, word_lists: Optional[list] = None)
             shape = _function_shape(segments, i, body_at, top)
             if shape is not None and _FUNCTION_NAME_RE.fullmatch(name) and \
                     name not in _KEYWORDS and name not in _COMPOUND_OPEN:
-                body = shape
-                defined[name] = (i, body_at + 1, body)
-                i = body_at + 2
+                body, close = shape
+                defined[name] = (i, close, body)
+                i = close + 1
                 continue
         depth += _compound_balance(words)
         i += 1
     calls: dict = {}
     skip: set = set()
-    for name, (first, last, body) in defined.items():
+    for name, (first, last, body) in ([] if blocked else defined.items()):
         if attempts[name] != 1 or not body or body[0] in attempts or \
                 any(re.search(r"[$`]|__dwsub", w) and not _POSITIONAL_RE.fullmatch(w)
                     and w not in ('"$@"', "$@") for w in body):
@@ -1101,15 +1101,39 @@ def _function_plan(text: str, segments: list, word_lists: Optional[list] = None)
         skip.update(range(first, last + 1))
         for k in sites:
             calls[k] = _call_segment(segments[k], body, attempts)
+    # A call of any other function the command defines runs code that was not read.
+    resolved = {segments[k]["words"][0] for k in calls}
+    for k, seg in enumerate(segments):
+        name = seg["words"][0] if seg["words"] else None
+        if name in attempts and name not in resolved and k not in skip and \
+                not _is_definition(segments, k):
+            calls[k] = None
     return calls, skip
 
 
-def _function_shape(segments: list, at: int, body_at: int, top: bool) -> Optional[list]:
-    """The body words of a definition starting at segment `at` whose `{ body` is at `body_at`,
-    when it has exactly the readable shape; otherwise None."""
+def _is_definition(segments: list, k: int) -> bool:
+    """Whether segment `k` is the name part of a function definition (`name` before `(`)."""
+    words = segments[k]["words"]
+    return (len(words) == 1 and segments[k]["after"] == "(") or words[:1] == ["function"]
+
+
+def _function_shape(segments: list, at: int, body_at: int, top: bool) -> Optional[tuple]:
+    """(body words, index of the closing `}`) of a definition starting at segment `at` whose
+    `{ body` is at `body_at` (or `{` alone on its line, the body on the next), when it has
+    exactly the readable shape; otherwise None."""
     if not top or body_at + 1 >= len(segments):
         return None
-    seg, close = segments[body_at], segments[body_at + 1]
+    seg = segments[body_at]
+    brace_line = body_at != at and seg["words"] == ["{"] and seg["before"] == ")" and \
+        seg["after"] == "\n" and not seg["redirects"] and not seg["heredocs"]
+    if brace_line:
+        if body_at + 2 >= len(segments) or segments[body_at + 1]["before"] != "\n" or \
+                segments[body_at + 1]["depth"] != 0:
+            return None
+        seg = {**segments[body_at + 1], "words": ["{"] + segments[body_at + 1]["words"],
+               "before": ")"}
+        body_at += 1
+    close = segments[body_at + 1]
     words = seg["words"]
     if body_at == at:
         if len(words) < 4 or words[2] != "{":
@@ -1126,7 +1150,7 @@ def _function_shape(segments: list, at: int, body_at: int, top: bool) -> Optiona
             close["after"] not in ("", ";", "\n") or close["redirects"] or close["heredocs"] or \
             close["pipe_out"]:
         return None
-    return body
+    return body, body_at + 1
 
 
 def _call_segment(call: dict, body: list, functions: dict) -> Optional[dict]:

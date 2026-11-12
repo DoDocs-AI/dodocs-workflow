@@ -1378,7 +1378,8 @@ class UnreadableStateApprovalTests(GuardHookBase):
         self.clear_answer()
         self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
         asks = len(self.ask_calls())
-        for command in ("$(echo dw) approve %s" % rid, 'bash -c "$CMD"'):
+        for command in ("$(echo dw) approve %s" % rid, 'bash -c "$CMD"', 'python3 "$SCRIPT"',
+                        'node -r "$X" a.js', "f(){ a | b; }; f", "$CMD"):
             with self.subTest(command=command):
                 out = self.guard(self.payload(path, command))
                 self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
@@ -1386,8 +1387,8 @@ class UnreadableStateApprovalTests(GuardHookBase):
                 self.assertEqual([ask[i + 1] for i, a in enumerate(ask) if a == "--button"],
                                  ["once=Approve once", "deny=Deny"])
                 pending = self.record(rid)["pending_approval"]
-                self.assertEqual((pending["rule"], pending["category"]),
-                                 ("control-unreadable-state", "control"))
+                self.assertEqual(pending["category"], "control")
+                self.assertIn("control-unreadable-state", pending["rule"].split("+"))
                 self.assertEqual(self.dw("approve", rid).returncode, 2)
                 self.assertEqual(self.dw("deny", rid).returncode, 0)
-        self.assertEqual(len(self.ask_calls()), asks + 2)
+        self.assertEqual(len(self.ask_calls()), asks + 6)

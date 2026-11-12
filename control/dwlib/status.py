@@ -139,21 +139,20 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
     }
 
 
-ACTION_ID_CHARS = 8
-
-
-def action_id(action) -> str:
-    """The short id of an approval identity (`guard._fingerprint`): what `dw project
-    auto-approve --from-run RUN --action ID` names."""
-    return str(action or "")[:ACTION_ID_CHARS]
+def action_id(held) -> Optional[str]:
+    """The random id the guard gave a hold when it recorded it (`pending_approval` and
+    `last_held`): what `dw project auto-approve --from-run RUN --action ID` names. None for a
+    hold recorded before holds had one."""
+    value = held.get("action_id") if isinstance(held, dict) else None
+    return value if isinstance(value, str) and value else None
 
 
 def _action_view(held) -> Optional[dict]:
-    """Rule id, text and short action id of a pending approval or a last held action."""
+    """Rule id, text and action id of a pending approval or a last held action."""
     if not isinstance(held, dict):
         return None
     return {"rule": held.get("rule"), "category": held.get("category"),
-            "describe": held.get("describe"), "action": action_id(held.get("action"))}
+            "describe": held.get("describe"), "action": action_id(held)}
 
 
 def project_status(project: dict, runs: list, sessions: Optional[dict], now: float,

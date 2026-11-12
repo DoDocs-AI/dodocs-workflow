@@ -93,15 +93,18 @@ def cmd_project_remove(args) -> int:
     return 0
 
 
+shown = agterm.visible  # what the owner reads of text from an agent's command: marks, not codes
+
+
 def _describe_action(source: dict) -> str:
-    return "action %s, rule %s: %s" % (status.action_id(source.get("action")), source.get("rule"),
-                                       source.get("describe"))
+    return "action %s, rule %s: %s" % (status.action_id(source), shown(source.get("rule")),
+                                       shown(source.get("describe")))
 
 
 def _auto_entries_from_run(project: dict, run_id: str, note: str, action) -> list:
     """Exact entries for the run's pending approval or its most recent held action, whichever
-    has the short action id `action` (as `dw status` shows it). Without `action`, a terminal is
-    asked to confirm the current one; anything else is refused."""
+    has exactly the action id `action` (as `dw status` shows it). Without `action`, a terminal
+    is asked to confirm the current one; anything else is refused."""
     try:
         run = store.load_run(run_id)
     except store.RunNotFound:
@@ -109,50 +112,64 @@ def _auto_entries_from_run(project: dict, run_id: str, note: str, action) -> lis
     if run.get("project_id") != project["id"]:
         raise UserError("run %s belongs to project %s, not %s"
                         % (run_id, run.get("project_id"), project["id"]))
-    candidates = [s for s in (run.get("pending_approval"), run.get("last_held"))
-                  if isinstance(s, dict) and s.get("action")]
-    if not candidates:
+    held = [s for s in (run.get("pending_approval"), run.get("last_held")) if isinstance(s, dict)]
+    if not held:
         raise UserError("run %s has no pending or held action" % run_id)
+    candidates = [s for s in held if status.action_id(s)]
+    if not candidates:
+        raise UserError("run %s's held action was recorded without an action id; it can be "
+                        "named once the run is held again" % run_id)
     if action is None:
         current = candidates[0]
-        details = ["rule: %s" % current.get("rule"), "describe: %s" % current.get("describe")]
-        details += ["segment: %s\ndirectory: %s" % (k[1], k[2]) for k in current.get("keys") or []]
-        details.append("action: %s" % status.action_id(current.get("action")))
+        details = ["rule: %s" % shown(current.get("rule")),
+                   "describe: %s" % shown(current.get("describe"))]
+        details += ["segment: %s\ndirectory: %s" % (shown(k[1]), shown(k[2]))
+                    for k in current.get("keys") or [] if isinstance(k, list) and len(k) == 3]
+        details.append("action: %s" % status.action_id(current))
+        print("\n".join(details))
+        _refuse_unsafe(current)
         if not sys.stdin.isatty():
-            print("\n".join(details))
             raise UserError("not a terminal: name the action you checked, e.g. "
                             "dw project auto-approve %s --from-run %s --action %s"
-                            % (project["id"], run_id, status.action_id(current.get("action"))))
-        print("\n".join(details))
+                            % (project["id"], run_id, status.action_id(current)))
         if not _confirm("Add this automatic approval? [y/N] "):
             raise UserError("nothing was added")
         source = current
     else:
-        source = next((s for s in candidates if action and
-                       status.action_id(s.get("action")) == action[:status.ACTION_ID_CHARS]
-                       and len(action) >= 4), None)
+        source = next((s for s in candidates if status.action_id(s) == action), None)
         if source is None:
             raise UserError("action %s is not the run's current action (%s); check it again"
-                            % (action, "; ".join(_describe_action(s) for s in candidates)))
+                            % (shown(action), "; ".join(_describe_action(s) for s in candidates)))
+    _refuse_unsafe(source)
     note = ("%s " % note if note else "") + "(from run %s action %s)" % (
-        run_id, status.action_id(source.get("action")))
+        run_id, status.action_id(source))
     rules = str(source.get("rule") or "").split("+")
     if source.get("category") == "control" or any(autoapprove.is_control_rule(r) for r in rules):
         raise UserError("%s changes the control point; it is never approved automatically"
-                        % source.get("describe"))
+                        % shown(source.get("describe")))
     keys = source.get("keys")
     if not keys:
         raise UserError("%s is not a shell command this can name; automatic approvals cover "
-                        "shell commands only" % source.get("describe"))
+                        "shell commands only" % shown(source.get("describe")))
     now = time.time()
     out = []
     for rule, segment, directory in keys:
         if not directory or not os.path.isabs(str(directory)):
-            raise UserError("the directory of %s is unknown; use --rule and --match" % segment)
+            raise UserError("the directory of %s is unknown; use --rule and --match"
+                            % shown(segment))
         entry = autoapprove.exact_entry(str(rule), str(segment), str(directory), note, now)
         entry["from_run"] = run_id
         out.append(entry)
     return out
+
+
+def _refuse_unsafe(source: dict) -> None:
+    """No automatic approval for a segment (or its directory) the owner could misread."""
+    for key in source.get("keys") or []:
+        if any(autoapprove.has_unsafe_char(str(part)) for part in key):
+            raise UserError("refused: the segment %s contains %s; an automatic approval must "
+                            "name text that reads as it runs"
+                            % (shown(key[1] if len(key) > 1 else key), autoapprove.UNSAFE_TEXT))
 
 
 def cmd_project_auto_approve(args) -> int:
@@ -160,10 +177,11 @@ def cmd_project_auto_approve(args) -> int:
     if args.list:
         for n, entry in enumerate(project.get("auto_approve") or [], 1):
             if isinstance(entry, dict):
-                print("%d\t%s\t%s\t%s\t%s" % (n, entry.get("rule"), entry.get("match"),
-                                              entry.get("in") or "", entry.get("note") or ""))
+                fields = (entry.get("rule"), entry.get("match"), entry.get("in") or "",
+                          entry.get("note") or "")
+                print("%d\t%s" % (n, "\t".join(shown(f) for f in fields)))
             else:
-                print("%d\t(malformed) %r" % (n, entry))
+                print("%d\t(malformed) %s" % (n, shown(repr(entry))))
         return 0
     if args.remove is not None:
         removed = []
@@ -300,14 +318,14 @@ def _view_lines(project_id, v, finished=False) -> list:
         head += " (%s)" % ", ".join(flags)
     lines = [head, "      " + str(v["command"] or "").replace("\n", " ")[:100]]
     if v["reason"]:
-        lines.append("      reason: %s" % v["reason"])
-    if v.get("pending"):
-        lines.append("      pending approval: %s (rule %s, action %s)"
-                     % (v["pending"]["describe"], v["pending"]["rule"], v["pending"]["action"]))
-    elif finished and v.get("last_held"):
-        lines.append("      last held: %s (rule %s, action %s)"
-                     % (v["last_held"]["describe"], v["last_held"]["rule"],
-                        v["last_held"]["action"]))
+        lines.append("      reason: %s" % shown(v["reason"]))
+    for key, label in (("pending", "pending approval"), ("last_held", "last held")):
+        held = v.get(key)
+        if held and (key == "pending" or (finished and not v.get("pending"))):
+            lines.append("      %s: %s (rule %s, action %s)"
+                         % (label, shown(held["describe"]), shown(held["rule"]),
+                            held["action"] or "none recorded"))
+            break
     if v["progress"]:
         lines += _indent(v["progress"])
     if v["result"]:

@@ -175,6 +175,9 @@ class AutoApproveCliTests(DwTestCase):
                      ["--rule", "git-push-default", "--match", "git push ("],
                      ["--rule", "git-push-default", "--match", "(a+)+"],
                      ["--rule", "git-push-default"],
+                     ["--rule", "git-push-default", "--match", "git push origin main\x1b[2K"],
+                     ["--rule", "git-push-default", "--match", "git push\u202e origin main"],
+                     ["--rule", "git-push-default", "--match", "git push\norigin main"],
                      ["--from-run", "r-nope"], ["--from-run", "r-nope", "--action", "abcd1234"]):
             with self.subTest(argv=argv):
                 r = self.dw("project", "auto-approve", "alpha", *argv)

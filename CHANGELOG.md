@@ -27,11 +27,15 @@ feat(control): guard usability
   even when named like a program), and an inline script on stdin with data arguments
   (`python3 - "$F" <<'PY'`). Anything not simple and static stays unreadable.
 - Per-project automatic approvals: `dw project auto-approve PROJECT --from-run RUN_ID
-  --action ID` (exact: rule, segment, directory; ID is the action id `dw status` shows, a stale
-  one is refused), `--rule R --match REGEX [--in DIR]`, `--list`,
-  `--remove N`. Never for `control`, never in an ended run's session; unreadable entries must be
-  specific; malformed entries are ignored and reported by `dw doctor`. `dw status` shows the
-  rule id of a pending approval; run records remember `last_held`.
+  --action ID` (exact: rule, segment, directory; ID is the action id `dw status` shows, a
+  random id given to each hold, `pending_approval.action_id` and `last_held.action_id`; it must
+  match in full and an earlier hold's id is refused), `--rule R --match REGEX [--in DIR]`,
+  `--list`, `--remove N`. Never for `control`, never in an ended run's session, never for a
+  segment or pattern with a control or format character; unreadable entries must be specific;
+  malformed entries are ignored and reported by `dw doctor`. `dw status` shows the rule id of a
+  pending approval; run records remember `last_held`. What `dw` prints from the agent's command
+  (the `--from-run` confirmation, `--list`, the pending action in `dw status`) shows control and
+  format characters as `?` and line breaks as `⏎`; the stored entry keeps the exact text.
 - A run that finishes as done has its AGTerm session closed (best effort, logged on failure);
   `dw run --keep-open` or registry `"close_done_sessions": false` keeps it. `dw dismiss` closes
   a finished run's session that is still open; `dw status` marks it `session still open`.

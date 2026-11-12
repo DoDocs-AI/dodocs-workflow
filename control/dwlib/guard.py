@@ -37,6 +37,7 @@ import json
 import os
 import posixpath
 import re
+import secrets
 import shlex
 import time
 from pathlib import Path
@@ -2352,6 +2353,9 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         [p for p in parts if p != UNREADABLE_ID]
     describe = "; ".join(d for _, d in pairs)
     now = time.time()
+    # The id the owner names (`dw status`, `--from-run --action`): random, new for each hold,
+    # so it says "the action I checked", never just "a command that looks like it".
+    new_action_id = secrets.token_hex(8)
     outcome: dict = {}
 
     def claim(r):
@@ -2374,12 +2378,16 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         outcome["kind"] = "ask"
         if not pending:
             pending = {"rule": match["id"], "category": match["category"], "describe": describe,
-                       "tool": tool, "action": action, "since": now}
+                       "tool": tool, "action": action, "action_id": new_action_id, "since": now}
             if match.get("keys"):
                 pending["keys"] = match["keys"]
-        # What `dw project auto-approve --from-run` names when nothing is pending any more.
+        elif not pending.get("action_id"):
+            pending = {**pending, "action_id": new_action_id}
+        # What `dw project auto-approve --from-run` names when nothing is pending any more:
+        # the same hold as the pending one, so the same action id.
         held = {"rule": match["id"], "category": match["category"], "describe": describe,
-                "tool": tool, "keys": match.get("keys") or [], "action": action, "at": now}
+                "tool": tool, "keys": match.get("keys") or [], "action": action,
+                "action_id": pending["action_id"], "at": now}
         return runs._moved(r, now, state="blocked", reason="awaiting approval: " + describe,
                            pending_approval=pending, last_held=held)
 

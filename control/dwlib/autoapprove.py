@@ -7,14 +7,16 @@ regex fully matches the match's full segment text (the text the approval identit
 with `in`, the directory the guard tracks for that segment is that directory or inside it.
 
 Entries come from the registry, a plain file: the guard treats them as untrusted. A malformed
-entry, a regex that does not compile, one longer than MAX_PATTERN, or one with a nested
-quantifier (catastrophic backtracking) is ignored; an entry for `control-unreadable` must not
-match the empty string or everything. A `control` rule is never auto-approved.
+entry, a regex that does not compile, one longer than MAX_PATTERN, one with a nested
+quantifier (catastrophic backtracking), or one holding a control or format character is
+ignored; an entry for `control-unreadable` must not match the empty string or everything. A
+`control` rule is never auto-approved.
 """
 from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from typing import Optional
 
 UNREADABLE_ID = "control-unreadable"
@@ -28,8 +30,20 @@ _NESTED_QUANTIFIER_RE = re.compile(r"\((?:[^()\\]|\\.)*(?:[+*]|\{\d*,?\d*\})(?:[
 _PROBES = ("x", "rm -rf /", "git push origin main", "a b\nc", "0", "é", "~/.claude")
 
 
+_CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+UNSAFE_TEXT = ("a control character or a Unicode format character (line break, tab, escape, "
+               "bidirectional or zero-width mark)")
+
+
 class EntryError(ValueError):
     pass
+
+
+def has_unsafe_char(text: str) -> bool:
+    """Whether text holds a control character (line breaks and tabs included) or a format
+    character (category Cf: bidirectional overrides, zero-width marks...): text the owner
+    could read differently from what it is, so never part of an automatic approval."""
+    return bool(_CONTROL_RE.search(text)) or any(unicodedata.category(ch) == "Cf" for ch in text)
 
 
 def is_control_rule(rule: str) -> bool:
@@ -51,6 +65,10 @@ def check_entry(entry) -> "re.Pattern":
         raise EntryError("match is longer than %d characters" % MAX_PATTERN)
     if where is not None and (not isinstance(where, str) or not os.path.isabs(where)):
         raise EntryError("in is not an absolute directory")
+    if has_unsafe_char(pattern):
+        raise EntryError("match contains " + UNSAFE_TEXT)
+    if where is not None and has_unsafe_char(where):
+        raise EntryError("in contains " + UNSAFE_TEXT)
     if not isinstance(entry.get("note", ""), str):
         raise EntryError("note is not text")
     if entry.get("added_at") is not None and not isinstance(entry.get("added_at"), (int, float)):

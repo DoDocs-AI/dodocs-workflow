@@ -1500,7 +1500,8 @@ class AutoApproveTests(GuardHookBase):
         path, rid = self.start_run()
         self.held(path, "git push origin main")
         action = self.action_id(rid)
-        self.assertEqual(len(action), 8)
+        self.assertEqual(action, self.record(rid)["pending_approval"]["action_id"])
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{16}", action), action)
         r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--note", "ok")
         self.assertEqual(r.returncode, 2)  # no --action, no terminal: refused
         self.assertIn("--action %s" % action, r.stdout + r.stderr)
@@ -1551,8 +1552,116 @@ class AutoApproveTests(GuardHookBase):
         self.held(path, "git push origin main")
         r = self.dw("status")
         self.assertIn("git-push-default", r.stdout)
-        self.assertIn(self.record(rid)["pending_approval"]["action"][:8], r.stdout)
+        self.assertIn("action %s)" % self.record(rid)["pending_approval"]["action_id"], r.stdout)
         self.assertIn("push to the default branch", r.stdout)
         data = json.loads(self.dw("status", "--json").stdout)
         pending = [v for v in data["needs_owner"] if v["id"] == rid][0]["pending"]
         self.assertEqual(pending["rule"], "git-push-default")
+
+    def test_each_hold_gets_a_new_random_action_id(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        first = self.action_id(rid)
+        rec = self.record(rid)
+        self.assertEqual(rec["last_held"]["action_id"], first)
+        # The fingerprint is unchanged and is not what the owner names.
+        self.assertNotEqual(rec["pending_approval"]["action"][:len(first)], first)
+        # A second agent call on the same pending action is the same hold: same id.
+        self.held(path, "git push origin main")
+        self.assertEqual(self.record(rid)["last_held"]["action_id"], first)
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        # The identical command held again later is a new hold with a new id.
+        self.held(path, "git push origin main")
+        second = self.action_id(rid)
+        self.assertNotEqual(second, first)
+        self.assertEqual(self.record(rid)["last_held"]["action_id"], second)
+        before = json.loads(self.dw("project", "list", "--json").stdout)[0].get("auto_approve")
+        for stale in (first, second[:8], second[:-1], second.upper(), second + "0"):
+            with self.subTest(action=stale):
+                r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                            "--action", stale)
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn(second, r.stderr)
+        self.assertEqual(
+            json.loads(self.dw("project", "list", "--json").stdout)[0].get("auto_approve"), before)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid, "--action", second)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_hold_recorded_without_an_action_id_cannot_be_named(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        from dwlib import store
+        store.update_run(rid, lambda r: {
+            **r, "pending_approval": {k: v for k, v in r["pending_approval"].items()
+                                      if k != "action_id"},
+            "last_held": {k: v for k, v in r["last_held"].items() if k != "action_id"}})
+        fingerprint = self.record(rid)["pending_approval"]["action"]
+        for action in (fingerprint, fingerprint[:8], ""):
+            with self.subTest(action=action):
+                r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                            "--action", action)
+                self.assertEqual(r.returncode, 2, r.stdout)
+
+    def crafted_hold(self, path, rid, segment, describe="push to the default branch"):
+        from dwlib import store
+        held = {"rule": "git-push-default", "category": "merge", "describe": describe,
+                "tool": "Bash", "keys": [["git-push-default", segment, os.path.realpath(str(path))]],
+                "action": "f" * 20, "action_id": "0123456789abcdef", "at": 1, "since": 1}
+        store.update_run(rid, lambda r: {**r, "state": "blocked", "pending_approval": held,
+                                         "last_held": held, "reason": "awaiting approval: " + describe})
+
+    def test_what_dw_prints_from_the_agents_command_is_shown_with_visible_marks(self):
+        path, rid = self.start_run()
+        segment = "git push origin main\x1b[2K\u202e#x\nrm -rf ~"
+        self.crafted_hold(path, rid, segment, describe="push\x1b]0;t\x07 to\u2066 main\nnow")
+        out = self.dw("status").stdout
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("\u202e", out)
+        self.assertNotIn("\u2066", out)
+        self.assertIn("push?]0;t? to? main\u23cenow (rule git-push-default, action 0123456789abcdef)",
+                      out)
+        # The JSON keeps the exact text.
+        data = json.loads(self.dw("status", "--json").stdout)
+        view = [v for v in data["needs_owner"] if v["id"] == rid][0]
+        self.assertEqual(view["pending"]["describe"], "push\x1b]0;t\x07 to\u2066 main\nnow")
+        # The confirmation details (printed before the terminal check) are marked too, and an
+        # automatic approval for such a segment is refused outright.
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid)
+        self.assertEqual(r.returncode, 2)
+        printed = r.stdout + r.stderr
+        for raw in ("\x1b", "\u202e", "\x07", "\u2066"):
+            self.assertNotIn(raw, printed)
+        self.assertIn("segment: git push origin main?[2K?#x\u23cerm -rf ~", printed)
+        r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                    "--action", "0123456789abcdef")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("control character", r.stderr)
+        self.assertNotIn("\x1b", r.stderr)
+        self.assertIsNone(json.loads(self.dw("project", "list", "--json").stdout)[0]
+                          .get("auto_approve"))
+
+    def test_segments_with_a_tab_line_break_or_format_character_are_refused(self):
+        path, rid = self.start_run()
+        for segment in ("git push origin main\t", "git push\norigin main",
+                        "git push origin\u200b main", "git push origin main\x7f"):
+            with self.subTest(segment=segment):
+                self.crafted_hold(path, rid, segment)
+                r = self.dw("project", "auto-approve", "slotme", "--from-run", rid,
+                            "--action", "0123456789abcdef")
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn("control character", r.stderr)
+        self.assertIsNone(json.loads(self.dw("project", "list", "--json").stdout)[0]
+                          .get("auto_approve"))
+
+    def test_the_list_shows_entries_with_visible_marks(self):
+        self.start_run()
+        self.set_entries("slotme", [self.entry("git-push-default", "git push\x1b[2K origin\nmain",
+                                               "/w/\u202eapp")])
+        r = self.dw("project", "auto-approve", "slotme", "--list")
+        self.assertEqual(r.returncode, 0)
+        for raw in ("\x1b", "\u202e", "\n" + "main"):
+            self.assertNotIn(raw, r.stdout)
+        self.assertIn("git push?[2K origin\u23cemain", r.stdout)
+        self.assertIn("/w/?app", r.stdout)
+        stored = json.loads(self.dw("project", "list", "--json").stdout)[0]["auto_approve"][0]
+        self.assertEqual(stored["match"], "git push\x1b[2K origin\nmain")

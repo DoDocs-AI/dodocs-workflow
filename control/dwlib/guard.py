@@ -679,26 +679,43 @@ _CURRENT_SHELL_WRAPPERS = ("builtin", "command", "time", "repeat")
 _DIR_CHANGERS = ("cd", "pushd", "popd", "chdir")
 
 
-def _wrapped_dir_change(name: str, tokens: list, ctx: _Ctx) -> None:
-    """A directory change run through a current-shell wrapper moves the current shell, so it
-    is followed as an unwrapped `cd`/`pushd` would be: the wrapped command after the
-    wrapper's own options (for `repeat`, after its count word, or right after `repeat` when
-    that word is already the command). Any other directory change through it (`popd`...)
-    makes the tracked directory unknown, as an unwrapped `cd -` does."""
-    if not any(os.path.basename(t) in _DIR_CHANGERS for t in tokens[1:]):
-        return
+def _wrapped_cd(name: str, tokens: list) -> Optional[list]:
+    """The `cd`/`pushd` words a current-shell wrapper runs, peeling nested current-shell
+    prefixes (`repeat 1 builtin cd x`, `command builtin cd x`, `repeat 1 noglob cd x`), or
+    None. For `repeat` both readings count: the word after the count, or the word right
+    after `repeat` when that is already the command."""
     if name == "repeat":
         readings = [tokens[2:], tokens[1:]]
     else:
         inner = list(tokens[1:])
         while inner and inner[0].startswith("-"):
-            inner = inner[1:]
+            inner = inner[1:]  # the wrapper's own options
         readings = [inner]
     for inner in readings:
-        if inner and inner[0] in ("cd", "pushd"):
-            _change_dir(inner, ctx)
-            return
-    ctx.cwd = None
+        inner = _strip_prefix(list(inner))  # noglob, nocorrect, -, keywords, assignments
+        if not inner:
+            continue
+        head = inner[0]
+        if head in ("cd", "pushd"):
+            return inner
+        if head in _CURRENT_SHELL_WRAPPERS:
+            found = _wrapped_cd(head, inner)
+            if found is not None:
+                return found
+    return None
+
+
+def _wrapped_dir_change(name: str, tokens: list, ctx: _Ctx) -> None:
+    """A directory change run through a current-shell wrapper moves the current shell, so it
+    is followed as an unwrapped `cd`/`pushd` would be (see `_wrapped_cd`). Any other directory
+    change through it (`popd`...) makes the tracked directory unknown, as `cd -` does."""
+    if not any(os.path.basename(t) in _DIR_CHANGERS for t in tokens[1:]):
+        return
+    found = _wrapped_cd(name, tokens)
+    if found is not None:
+        _change_dir(found, ctx)
+    else:
+        ctx.cwd = None
 
 
 _GH_COMMANDS = set("""

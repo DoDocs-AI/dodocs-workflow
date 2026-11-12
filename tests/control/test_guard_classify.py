@@ -1888,7 +1888,15 @@ class ZshPrecommandTests(GuardClassifyBase):
                         "command -p cd .git; echo x > config"):
             with self.subTest(command=command):
                 self.assertEqual(self.category(self.bash(command)), "control")
-        for command in ("repeat 2 ls", "builtin cd src && ls", "builtin cd src && echo x > a.txt"):
+        for command in ("command builtin cd .git; echo x > config",
+                        "repeat 1 builtin cd .git; echo x > config",
+                        "time builtin cd .git; echo x > config",
+                        "repeat 1 repeat 1 cd .git; echo x > config",
+                        "repeat 1 noglob cd .git; echo x > config"):
+            with self.subTest(command=command):
+                self.assertEqual(self.category(self.bash(command)), "control")
+        for command in ("repeat 2 ls", "builtin cd src && ls", "builtin cd src && echo x > a.txt",
+                        "builtin command cd src && ls"):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command))
 

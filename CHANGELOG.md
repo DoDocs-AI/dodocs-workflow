@@ -2,64 +2,6 @@
 
 All notable changes to dodocs-workflow will be documented in this file.
 
-## [Unreleased]
-
-feat(control): guard usability
-
-- "Command cannot be read" is its own approval category, `unreadable` (rule id
-  `control-unreadable` unchanged), no longer `control`: it can be approved once, with
-  `dw approve`, or for the rest of the run ("Approve unreadable commands for this run"), which
-  turns the guard's fail-closed reading off for that run. When the same command also matches
-  another category, that category decides the question, and an unreadable approval never lets
-  it through.
-- An unreadable command stays `control` (rule `control-unreadable-state`, not approvable for
-  the run or with `dw approve`) when its text names the control point, when what cannot be read
-  is a write target or a git override, or when it is shell or interpreter code that could not
-  be scanned (`curl ... | sh`, `bash -c "$CMD"`, `eval "$(...)"`), or when what runs is
-  itself computed (a program word, a run-time word after a wrapper, a code loader, a script
-  operand, inline code given as a value, a call of a same-command function not read).
-  Plain `unreadable` means only a known program with a run-time argument.
-- `dw` refuses every state-changing subcommand when it is called from inside a run
-  (`DW_RUN_ID` set), independently of the guard.
-- Three idioms are read instead of being held as unreadable: a static variable set earlier in
-  the same command (`K="kubectl -n x"; $K get pods`, `D=build; echo x > $D/a`), a small function
-  defined in the same command (`k(){ kubectl -n x "$@"; }; k get pods`, read through its body,
-  even when named like a program), and an inline script on stdin with data arguments
-  (`python3 - "$F" <<'PY'`). Anything not simple and static stays unreadable.
-- Per-project automatic approvals: `dw project auto-approve PROJECT --from-run RUN_ID
-  --action ID` (exact: rule, segment, directory; ID is the action id `dw status` shows, a
-  random id given to each hold, `pending_approval.action_id` and `last_held.action_id`; it must
-  match in full and an earlier hold's id is refused), `--rule R --match REGEX [--in DIR]`,
-  `--list`, `--remove N`. Never for `control`, never in an ended run's session, never for a
-  segment or pattern with a control or format character; unreadable entries must be specific;
-  malformed entries are ignored and reported by `dw doctor`. `dw status` shows the rule id of a
-  pending approval; run records remember `last_held`. What `dw` prints from the agent's command
-  (the `--from-run` confirmation, `--list`, the pending action in `dw status`) shows control and
-  format characters as `?` and line breaks as `⏎`; the stored entry keeps the exact text.
-- A run that finishes as done has its AGTerm session closed (best effort, logged on failure);
-  `dw run --keep-open` or registry `"close_done_sessions": false` keeps it. `dw dismiss` closes
-  a finished run's session that is still open; `dw status` marks it `session still open`.
-- `kubectl rollout status` and `kubectl rollout history` are reads and no longer held; any
-  other `rollout` action (or one that cannot be read) still is.
-- Inline interpreter code that visibly starts a process (`subprocess`, `os.system`,
-  `child_process`, Perl/Ruby `system`, ...) is never plain `unreadable`: with a guarded program
-  name, a remote address or a quoted rule program name (`['npm','publish']`) in sight, or with
-  a computed argument after `-` or after the code (`python3 - "$(cat f)" <<'PY'` running
-  `sys.argv[1]`), it is held as `control-unreadable-state` (approve once or deny; a run-wide
-  approval of unreadable commands does not cover it). Inline code with no process start is
-  unchanged.
-- Interpreter code given as a double-quoted `-c`/`-e` value with a run-time expansion in it
-  is computed code, held as `control-unreadable-state`, when it also starts a process or runs
-  code (`python3 -c "import os; os.system('$X')"`); without that it is handled as before.
-- Automatic approvals are checked by what their pattern matches: one that matches every one of
-  a fixed set of unrelated commands is refused for any rule, an unreadable entry may match at
-  most one of them, and any quantifier but `?` on a group (`(a|a)*b`, `(a|a){1,99}b`) is refused; the guard
-  ignores such entries and `dw doctor` reports them. An entry with `--in` no longer applies
-  when the command changes into a directory that does not exist yet or runs `ln`, `mv`,
-  `rename` or `mount` before the guarded part.
-- `close_done_sessions` must be a boolean: any other value (such as the string `"false"`)
-  keeps sessions open, and `dw doctor` reports it.
-
 ## [v2.1.0] - 2026-11-12
 
 feat(control): control point — `/control` and the `dw` command

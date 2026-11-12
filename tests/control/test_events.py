@@ -93,6 +93,29 @@ class StatusEventTests(EventBase):
         self.status_event(sid, "completed")  # next turn end: no second notification
         self.assertEqual(len(self.notify_calls()), 1)
 
+    def test_run_pre_creates_an_empty_private_note(self):
+        import stat
+        from dwlib import paths
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        note = paths.result_note_path(rid)
+        info = os.lstat(str(note))
+        self.assertTrue(stat.S_ISREG(info.st_mode))
+        self.assertEqual((info.st_size, stat.S_IMODE(info.st_mode), info.st_nlink), (0, 0o600, 1))
+
+    def test_an_empty_or_blank_note_counts_as_no_note(self):
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        for text in ("", "  \n\t\n"):
+            with self.subTest(text=text):
+                self.note(rid, text)
+                self.status_event(sid, "completed")
+                self.assertEqual(self.record(rid)["state"], "running")
+        self.closed_event(sid)
+        rec = self.record(rid)
+        self.assertEqual((rec["state"], rec["reason"]),
+                         ("interrupted", "session closed before the work finished"))
+
     def test_blocked_note_is_handled_once(self):
         from dwlib import paths
         self.add_project("alpha")
@@ -100,7 +123,7 @@ class StatusEventTests(EventBase):
         self.note(rid, "BLOCKED\nneed the API key\n")
         self.status_event(sid, "completed")
         self.assertEqual(self.record(rid)["state"], "blocked")
-        self.assertFalse(paths.result_note_path(rid).exists())
+        self.assertEqual(paths.result_note_path(rid).read_text(), "")  # an empty note again
         moved = list(paths.runs_dir().glob(rid + ".result.blocked-*.md"))
         self.assertEqual(len(moved), 1)
         self.assertIn("need the API key", moved[0].read_text())
@@ -120,7 +143,7 @@ class StatusEventTests(EventBase):
         self.note(rid, "BLOCKED\nwhy\n")
         self.closed_event(sid)
         self.assertEqual(self.record(rid)["state"], "interrupted")
-        self.assertFalse(paths.result_note_path(rid).exists())
+        self.assertEqual(paths.result_note_path(rid).read_text(), "")  # an empty note again
         self.assertEqual(len(list(paths.runs_dir().glob(rid + ".result.blocked-*.md"))), 1)
 
     def test_failed_move_is_logged_and_state_change_stands(self):
@@ -394,9 +417,24 @@ class ResumeTests(EventBase):
         self.assertTrue(text.startswith(
             "You were interrupted. Continue the task from where it stopped and finish it.\n\n"), text)
         self.assertIn("write a short result note to %s." % note, text)
-        self.assertIn("the directory already exists.", text)
+        self.assertIn("the file already exists.", text)
         self.assertNotIn("You were interrupted", inner)
         self.assertNotIn("result note", inner)
+
+    def test_resume_sets_aside_a_leftover_note_and_starts_with_an_empty_one(self):
+        from dwlib import paths
+        self.add_project("alpha")
+        rid, sid = self.start("alpha")
+        self.closed_event(sid)
+        self.assertEqual(self.record(rid)["state"], "interrupted")
+        self.note(rid, "DONE\nwritten after the session closed\n")
+        self.assertEqual(self.dw("resume", rid).returncode, 0)
+        self.assertEqual(paths.result_note_path(rid).read_text(), "")
+        moved = list(paths.runs_dir().glob(rid + ".result.blocked-*.md"))
+        self.assertEqual(len(moved), 1)
+        self.assertIn("written after the session closed", moved[0].read_text())
+        self.status_event(self.record(rid)["agterm_session"], "completed")
+        self.assertEqual(self.record(rid)["state"], "running")
 
     def test_resume_only_for_interrupted(self):
         self.add_project("alpha")

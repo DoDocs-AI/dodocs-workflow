@@ -64,10 +64,12 @@ def _result_note(run_id: str) -> Optional[str]:
     for candidate in candidates:
         try:
             with open(str(candidate), encoding="utf-8", errors="replace") as fh:
-                lines = fh.read().splitlines()
-            break
+                text = fh.read()
         except OSError:
             continue
+        if text.strip():  # an empty note (pre-created at launch) is no note yet
+            lines = text.splitlines()
+            break
     if lines is None:
         return None
     text = "\n".join(lines[:RESULT_LINES]).rstrip()

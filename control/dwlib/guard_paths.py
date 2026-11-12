@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+import stat
 from pathlib import Path
 from typing import Optional
 
@@ -146,20 +147,25 @@ class _Protected:
         self.note_path = os.path.join(os.path.realpath(os.path.dirname(note)),
                                       os.path.basename(note)) if note else None
         self.note = self.note_path.lower() if note else None
-        # Set when the command being read makes a link at the note path: then no write to the
-        # note is spared in that command.
-        self.note_linked = False
+        # Whether a write to the note may be spared in the call being read: classify sets it
+        # (the Write or Edit tool, or a plain Bash write: see guard._plain_note_write).
+        self.note_spared = False
         self.markers = [".dodocs-workflow", "agterm/hooks.conf"] + self.dirs + sorted(self.files)
 
     def note_exempt(self, path: str) -> bool:
         """Whether a write to `path` (a real path) is the run's own result note and spared: the
-        note is not a symlink and, when it exists, a regular file; and the command does not
-        also make a link at the note path."""
-        if not self.note or path.lower() != self.note or self.note_linked:
+        word being judged is one the guard spares (`note_spared`), and the note exists as a
+        regular file with one link, with no symlink at it or between it and DW_HOME."""
+        if not self.note or path.lower() != self.note or not self.note_spared:
             return False
-        if not os.path.lexists(self.note_path):
-            return True
-        return os.path.isfile(self.note_path) and not os.path.islink(self.note_path)
+        runs = os.path.join(self.dw_home, "runs")
+        try:
+            if os.path.islink(runs) or os.path.realpath(runs) != os.path.dirname(self.note_path):
+                return False  # a symlink below the state directory
+            info = os.lstat(self.note_path)
+        except OSError:
+            return False  # missing: dw creates it empty at launch
+        return stat.S_ISREG(info.st_mode) and info.st_nlink == 1
 
     def names_note(self, word: str, cwd: Optional[str], bodies=(), marks=()) -> bool:
         """Whether a word may name the note path itself (its last component not followed). A

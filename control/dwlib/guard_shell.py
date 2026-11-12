@@ -112,9 +112,9 @@ class _Lexer:
         self.subs: list = []
         self.seg = _new_segment(False)
         self.pending: list = []
-        # False once the text uses anything but simple commands joined by &&, ||, ; or
-        # newlines: a pipe, a background `&`, a subshell or group parenthesis (a function
-        # definition `name()` included) or a process substitution.
+        # False once the text uses anything but simple commands joined by &&, ||, ;, newlines
+        # or pipes (which the segments record): a background `&`, a subshell or group
+        # parenthesis (a function definition `name()` included) or a process substitution.
         self.flat = True
 
     def run(self) -> "_Lexer":
@@ -143,8 +143,6 @@ class _Lexer:
                 self.end()
                 self.i += 1
             elif c == "|":
-                if nxt != "|":
-                    self.flat = False
                 if nxt == "|":
                     self.end()
                     self.i += 2

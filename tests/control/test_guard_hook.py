@@ -1092,8 +1092,7 @@ class GuardResultNoteTests(NoteFixture):
 
     def test_the_note_stays_writable_every_usual_way(self):
         for command in ("echo DONE > %s" % self.note, "printf 'DONE\\n' > %s" % self.note,
-                        "echo DONE | tee %s" % self.note, "cp /tmp/x %s" % self.note,
-                        "mv /tmp/x %s" % self.note):
+                        "echo DONE | tee %s" % self.note):
             with self.subTest(command=command):
                 self.allowed(command)
         for tool in ("Write", "Edit"):
@@ -1170,43 +1169,68 @@ class GuardApprovalDirectoryTests(GuardHookBase):
         self.assertTrue(message.endswith("full command in dw.log)"), message)
 
 class GuardResultNoteLinkTests(NoteFixture):
-    """A link at the note path must not turn the note exemption into a write elsewhere."""
+    """The note is spared only for the Write or Edit tool, or for a straight-line command that
+    names it only as a redirect target or the one file of tee; anything else naming it is
+    held, and so is any write while the note is a symlink or not a regular file."""
 
-    def test_creating_a_link_at_the_note_is_held(self):
-        registry = "%s/registry.json" % self.home
-        for command in ("ln -s ../registry.json %s && echo pwned > %s" % (self.note, self.note),
-                        "ln -sf /tmp/x %s" % self.note, "ln -s ../registry.json %s" % self.note,
-                        "ln %s %s" % (registry, self.note), "link %s %s" % (registry, self.note),
-                        "cp -s %s %s" % (registry, self.note), "cp -l %s %s" % (registry, self.note),
-                        "install %s %s" % (registry, self.note),
-                        "echo DONE > %s; ln -sf ../registry.json %s" % (self.note, self.note)):
+    def test_plain_note_writes_are_allowed(self):
+        for command in ("echo DONE > %s" % self.note, "printf 'DONE\\nall good\\n' > %s" % self.note,
+                        "cat > %s <<'EOF'\nDONE\nEOF" % self.note,
+                        "mkdir -p %s && cat > %s <<'EOF'\nDONE\nEOF" % (self.runs, self.note),
+                        "git log --oneline -1 | tee %s" % self.note,
+                        "echo more >> %s" % self.note, "echo DONE | tee -a %s" % self.note):
+            with self.subTest(command=command):
+                self.allowed(command)
+        for tool in ("Write", "Edit"):
+            with self.subTest(tool=tool):
+                self.assertIsNone(self.guard(self.payload(
+                    self.path, tool=tool, tool_input={"file_path": self.note, "content": "DONE"})))
+
+    def test_anything_else_naming_the_note_is_held(self):
+        for command in ("ln -s ../registry.json %s && echo x > %s" % (self.note, self.note),
+                        "ln -sf /tmp/x %s" % self.note, "cp /tmp/n %s" % self.note,
+                        "mv /tmp/n %s" % self.note, "busybox ln -s x %s" % self.note,
+                        "cp --sym /tmp/x %s" % self.note,
+                        "python3 -c 'open(\"%s\",\"w\")'" % self.note,
+                        "for f in %s; do echo x > $f; done" % self.note,
+                        "echo x > %s; rm %s" % (self.note, self.note),
+                        "echo x | tee %s /tmp/other" % self.note,
+                        "echo x > %s &" % self.note, "(echo x > %s)" % self.note,
+                        "sudo tee %s" % self.note,
+                        "echo $(rm %s) > %s" % (self.note, self.note),
+                        "git log > %s" % self.note, "bash -c 'echo x > %s'" % self.note):
             with self.subTest(command=command):
                 self.held_as_control(command)
-        self.assertFalse(os.path.lexists(self.note))
 
-    def test_moving_or_copying_a_symlink_onto_the_note_is_held(self):
-        link = self.tmp / "link"
-        link.symlink_to(self.dw_home / "registry.json")
-        for command in ("mv %s %s" % (link, self.note), "cp -P %s %s" % (link, self.note),
-                        "cp -a %s %s" % (link, self.note)):
-            with self.subTest(command=command):
-                self.held_as_control(command)
+    def test_a_missing_or_hard_linked_note_is_not_exempt(self):
+        other = str(self.tmp / "hard")
+        os.link(self.note, other)
+        self.held_as_control("echo x > %s" % self.note)
+        os.unlink(other)
+        self.allowed("echo x > %s" % self.note)
+        os.unlink(self.note)
+        self.held_as_control("echo x > %s" % self.note)
+        out = self.guard(self.payload(self.path, tool="Write",
+                                      tool_input={"file_path": self.note, "content": "x"}))
+        self.assertEqual(out["permissionDecision"], "deny")
 
-    def test_a_note_that_is_already_a_symlink_is_not_exempt(self):
+    def test_a_note_that_is_a_symlink_or_a_directory_is_not_exempt(self):
+        os.unlink(self.note)
         os.symlink(str(self.dw_home / "registry.json"), self.note)
         self.held_as_control("echo x > %s" % self.note)
         out = self.guard(self.payload(self.path, tool="Write",
                                       tool_input={"file_path": self.note, "content": "x"}))
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertEqual(self.record(self.rid)["pending_approval"]["category"], "control")
+        self.assertEqual(self.dw("deny", self.rid).returncode, 0)
+        os.unlink(self.note)
+        os.mkdir(self.note)
+        self.held_as_control("echo x > %s/inner" % self.note)
+        out = self.guard(self.payload(self.path, tool="Write",
+                                      tool_input={"file_path": self.note, "content": "x"}))
+        self.assertEqual(out["permissionDecision"], "deny")
 
-    def test_plain_writes_of_a_regular_note_stay_allowed(self):
-        plain = self.tmp / "n"
-        plain.write_text("DONE\n")
-        for command in ("echo DONE > %s" % self.note, "cat > %s <<'EOF'\nDONE\nEOF" % self.note,
-                        "echo DONE | tee %s" % self.note, "cp %s %s" % (plain, self.note)):
-            with self.subTest(command=command):
-                self.allowed(command)
+    def test_an_existing_regular_note_stays_writable(self):
         with open(self.note, "w") as fh:
             fh.write("DONE\n")
         self.allowed("echo DONE >> %s" % self.note)

@@ -22,7 +22,8 @@ RESULT_NOTE_SUFFIX = (
     "When this work is finished, or you cannot continue, write a short result note to %s. "
     "First line: exactly DONE, BLOCKED or FAILED. Then: what was done, the pull request URL "
     "if any, and what is left. Write this file even if the work failed. Write it with your "
-    "file-writing tool or a single redirect to exactly that path; the directory already exists."
+    "file-writing tool, or with a single `cat > <path> <<'EOF' ... EOF` or `printf ... > <path>` "
+    "to exactly that path; the file already exists."
 )
 
 
@@ -186,6 +187,42 @@ def _write_prompt(run_id: str, command: str, resume: bool = False) -> None:
     path.write_bytes(text.encode("utf-8"))
 
 
+def create_empty_note(run_id: str) -> None:
+    """The run's result note as an empty regular file (mode 0600) when there is none: an empty
+    note means no note yet, and the guard spares writes only to a note that exists."""
+    path = str(paths.result_note_path(run_id))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    os.close(fd)
+
+
+def set_aside_note(run_id: str) -> None:
+    """Move the run's result note out of the way (runs/<id>.result.blocked-<stamp>.md), so it
+    is acted on only once; then an empty note takes its place."""
+    source = paths.result_note_path(run_id)
+    stamp = int(time.time())
+    while True:
+        target = paths.runs_dir() / ("%s.result.blocked-%d.md" % (run_id, stamp))
+        if not target.exists():
+            break
+        stamp += 1
+        if stamp > time.time() + 10:
+            raise OSError("no free name for the moved-aside note")
+    os.rename(str(source), str(target))
+    create_empty_note(run_id)
+
+
+def _note_written(run_id: str) -> bool:
+    try:
+        with open(str(paths.result_note_path(run_id)), encoding="utf-8", errors="replace") as fh:
+            return bool(fh.read().strip())
+    except OSError:
+        return False
+
+
 def _session_name(project: dict, command: str) -> str:
     return "%s: %s" % (project["name"], re.sub(r"\s+", " ", command).strip()[:40])
 
@@ -308,6 +345,7 @@ def request_run(project: dict, command: str) -> dict:
         "ended_at": None, "approvals": [], "pending_approval": None, "grants": [],
     }
     store.create_run(record)
+    create_empty_note(record["id"])
     start_eligible()
     return store.load_run(record["id"])
 
@@ -399,6 +437,9 @@ def resume_run(run_id: str) -> dict:
                                int(limits.get("per_project", 1)), int(limits.get("total", 3)))
         if reason:
             raise RunRefused("cannot resume %s now: %s" % (run_id, reason))
+        if _note_written(run_id):
+            set_aside_note(run_id)  # a note from before the interruption must not end the run
+        create_empty_note(run_id)
         _write_prompt(run_id, run["command"], resume=True)
         sid = agterm.new_session(
             cwd=project["path"], workspace_name=project["group"],

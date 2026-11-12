@@ -206,6 +206,9 @@ class _Ctx:
         self.loop_words: dict = {}  # loop variable -> the words it runs over
         self.stdin_commands: list = []  # the commands piped into the one being read, as words
         self.budget = {"left": ANALYSIS_BUDGET}  # shared by every fork of this context
+        # Whether this Bash command may write the run's result note at all (classify sets it:
+        # see _plain_note_write); which words are spared is decided in _control_matches.
+        self.note_plain = False
 
     def fork(self) -> "_Ctx":
         other = _Ctx.__new__(_Ctx)
@@ -648,7 +651,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     if tokens and os.path.basename(tokens[0]) == "find":
         matches += _find_exec_matches(tokens, ctx, depth)
         matches += _find_write_matches(tokens, ctx)
-    matches += _control_matches(original, tokens, redirects, ctx, wrapped)
+    matches += _control_matches(original, tokens, redirects, ctx, wrapped, depth)
     if tokens and os.path.basename(tokens[0]) == "git":
         matches += _git_control_matches(tokens, ctx)
     if tokens and os.path.basename(tokens[0]) == "gh":
@@ -1174,42 +1177,33 @@ def _loop_variants(word: str, ctx: _Ctx) -> Optional[list]:
     return out
 
 
-_LINK_PROGRAMS = ("ln", "link", "install", "rsync")
-_CP_LINK_RE = re.compile(r"-[A-Za-z]*[slPRrad][A-Za-z]*|--(symbolic-link|link|no-dereference|"
-                         r"archive|recursive|preserve.*)")
+# Programs whose output redirected to the run's result note is spared (top level only).
+_NOTE_WRITERS = ("echo", "printf", "cat", ":", "true")
 
 
-def _makes_link_at_note(tokens: list, ctx: _Ctx) -> bool:
-    """Whether this command may put a link at the run's result note path: ln, link, install
-    or rsync naming it; cp with a link-making or link-copying option, or cp or mv of a
-    symlink, onto it."""
-    if not ctx.protected.note:
-        return False
-    name = os.path.basename(tokens[0])
-    if name not in _LINK_PROGRAMS + ("cp", "mv"):
-        return False
-    operands = [t for t in tokens[1:] if not _is_option(t)]
-    names = [ctx.protected.names_note(t, ctx.cwd, ctx.sub_bodies, ctx.marks) for t in operands]
-    if not any(names):
-        return False
-    if name in _LINK_PROGRAMS:
-        return True
-    if name == "cp" and any(_CP_LINK_RE.fullmatch(t) for t in tokens[1:] if _is_option(t)):
-        return True
-    for t in operands[:-1]:
-        if ctx.cwd is None and not t.startswith("/"):
-            return True  # a source nobody can look at
-        if os.path.islink(os.path.join(ctx.cwd or "/", t)):
-            return True
-    return False
+def _spared_note_words(original: list, tokens: list, redirects: list, ctx: _Ctx,
+                       wrapped: bool, depth: int) -> set:
+    """Indexes into `original + redirects` of the words whose naming of the run's result note
+    is spared: on a top-level simple command (not reached through a wrapper, `-c` text, inline
+    code or a here-document read as shell) of a command allowed to write the note at all, the
+    output-redirect targets of echo, printf, cat, : or true, or the one file of tee / tee -a."""
+    if not ctx.note_plain or depth != 0 or wrapped or not tokens or original[-len(tokens):] != tokens:
+        return set()
+    name = tokens[0]
+    if name in _NOTE_WRITERS:
+        return set(range(len(original), len(original) + len(redirects)))
+    if name == "tee":
+        options = [t for t in tokens[1:] if _is_option(t)]
+        operands = [i for i, t in enumerate(tokens) if i and not _is_option(t)]
+        if len(operands) == 1 and all(t in ("-a", "--append") for t in options):
+            return {len(original) - len(tokens) + operands[0]}
+    return set()
 
 
 def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
-                     wrapped: bool = False) -> list:
+                     wrapped: bool = False, depth: int = 0) -> list:
     out = []
     skip = None
-    if tokens and _makes_link_at_note(tokens, ctx):
-        ctx.protected.note_linked = True  # classify reads the command again without the exemption
     if not tokens:  # a wrapper: its suffixes were classified; spare a read-only dw program
         for i, t in enumerate(original):
             if os.path.basename(t) == "dw" and \
@@ -1250,14 +1244,26 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
         checked = list(range(len(original)))
     if tokens and os.path.basename(tokens[0]) == "rg" and any(re.match(r"--pre(-glob)?(=|$)", t) for t in tokens[1:]):
         out.append(_unreadable_match())  # rg runs the --pre command on every file it reads
-    words = [original[i] for i in checked if i != skip] + list(redirects)
-    variants = [_loop_variants(w, ctx) for w in words]
-    if None in variants:  # a write position uses a loop variable whose list was too long to read
-        out.append(_unreadable_match())
-    words = [variant for found in variants for variant in found or ()]
-    if any(ctx.protected.token_hit(w, ctx.cwd, ctx.sub_bodies, ctx.marks) for w in words):
+    spared = _spared_note_words(original, tokens, redirects, ctx, wrapped, depth)
+    indexes = [i for i in checked if i != skip] + \
+        list(range(len(original), len(original) + len(redirects)))
+    every = list(original) + list(redirects)
+    variants = [(i, _loop_variants(every[i], ctx)) for i in indexes]
+    if any(found is None for _, found in variants):
+        out.append(_unreadable_match())  # a write position uses a loop variable too long to read
+    if any(_word_hits(w, ctx, i in spared) for i, found in variants for w in found or ()):
         out.append(_state_match(" ".join(original)))
     return out
+
+
+def _word_hits(word: str, ctx: _Ctx, spare_note: bool) -> bool:
+    """token_hit for one write-position word; the run's result note is spared only for a
+    word _spared_note_words chose (and only while the note is a plain file: guard_paths)."""
+    ctx.protected.note_spared = spare_note
+    try:
+        return ctx.protected.token_hit(word, ctx.cwd, ctx.sub_bodies, ctx.marks)
+    finally:
+        ctx.protected.note_spared = False
 
 
 def _state_match(detail: str) -> dict:
@@ -1276,6 +1282,70 @@ def _segment_text(tokens: list) -> str:
 _FLOW_WORDS = _KEYWORDS | {"for", "select", "case", "esac", "repeat", "foreach", "end", "function",
                            "eval", "source", ".", "exec", "trap", "alias", "coproc", "time",
                            "builtin", "command", "[[", "]]"}
+
+
+def _names_state_target(word: str, ctx: _Ctx) -> bool:
+    """Whether a word may name the run's result note, the runs directory or DW_HOME."""
+    protected = ctx.protected
+    if protected.names_note(word, ctx.cwd, ctx.sub_bodies, ctx.marks):
+        return True
+    home = protected.dw_home.lower()
+    for skel in protected._skeletons(word, list(ctx.sub_bodies or []), ctx.marks):
+        if not skel or _wild(skel) or (not os.path.isabs(skel) and ctx.cwd is None):
+            continue
+        real = os.path.realpath(os.path.join(ctx.cwd or "/", skel)).lower()
+        if real in (home, os.path.join(home, "runs")):
+            return True
+    return False
+
+
+def _plain_note_write(command: str, ctx: _Ctx, depth: int = 0) -> bool:
+    """Whether writes to the run's result note in this Bash command may be spared: the command
+    is straight-line (simple commands joined by &&, ||, ;, newlines or pipes; no loop,
+    wrapper, shell, interpreter, group, background job or process substitution), and the note
+    appears only as the target of an output redirection or as the one file of `tee` (`-a`
+    allowed). No other word in a write position names the note, the runs directory or DW_HOME
+    (the spared `mkdir -p` of the state directories and read-only uses have none). Bodies of
+    command substitutions follow the same rule. Whether the note is a regular file is checked
+    for each write (see guard_paths)."""
+    if depth > 4:
+        return False
+    try:
+        lexed = _Lexer(command).run()
+    except _Unreadable:
+        return False
+    if not lexed.flat:
+        return False
+    sub = ctx.fork()
+    sub.sub_bodies = lexed.subs
+    for seg in lexed.segments:
+        try:
+            words = _tokens(seg["words"])
+        except _Unreadable:
+            return False
+        while words and _ASSIGNMENT_RE.match(words[0]):
+            words = words[1:]
+        if not words:
+            continue
+        prog = words[0]
+        name = os.path.basename(prog)
+        if prog in _FLOW_WORDS or prog.endswith("()") or _dynamic(prog) or "__dwsub" in prog \
+                or name in WRAPPERS or name in SHELLS or name in _RUNNERS \
+                or _INTERPRETER_RE.match(name):
+            return False
+        positions = _write_positions(words, sub)
+        if name == "tee":
+            operands = [w for w in words[1:] if not _is_option(w)]
+            if any(_names_state_target(w, sub) for w in operands):
+                if len(operands) != 1 or not all(w in ("-a", "--append") for w in words[1:]
+                                                 if _is_option(w)):
+                    return False
+                positions = []  # the one file of tee: spared like a redirect target
+        if any(_names_state_target(words[i], sub) for i in positions):
+            return False
+        if name in ("cd", "pushd"):
+            _change_dir(words, sub)
+    return all(_plain_note_write(body, ctx, depth + 1) for body in lexed.subs)
 
 
 def _straight_line_segments(command: str) -> Optional[set]:
@@ -1803,14 +1873,8 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
     if tool_name == "Bash" or (shell_like and tool_name not in WRITE_TOOLS):
         command = str(tool_input.get("command") or "")
         ctx.full_text = command
+        ctx.note_plain = _plain_note_write(command, ctx)
         matches = [dict(m) for m in _shell_matches(command, ctx)]
-        if ctx.protected.note_linked:
-            # A link is made at the note path somewhere in this command: read it all again
-            # with no write to the note spared, whatever order the parts run in.
-            ctx = _Ctx(cwd, project_path, rules, run_id)
-            ctx.full_text = command
-            ctx.protected.note_linked = True
-            matches = [dict(m) for m in _shell_matches(command, ctx)]
         # Segment-level identity only for a command positively known to be straight-line,
         # every match of which is about one of its own top-level simple commands. Otherwise
         # (a loop in any dialect, a pipe, a wrapper, inline code, a match about the whole line
@@ -1827,7 +1891,7 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
         return _combine(matches)
     if tool_name in WRITE_TOOLS:
         target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-        if target and ctx.protected.token_hit(str(target), ctx.cwd):
+        if target and _word_hits(str(target), ctx, tool_name in ("Write", "Edit")):
             return _state_match(str(target))
         return None
     if tool_name.startswith("mcp__"):

@@ -61,18 +61,10 @@ def read_result_note(run_id: str) -> Optional[tuple]:
 
 
 def _set_aside(run_id: str, event: str) -> None:
-    """Move a handled BLOCKED note out of the way so it is acted on only once."""
+    """Move a handled BLOCKED note out of the way so it is acted on only once; an empty note
+    takes its place."""
     try:
-        source = paths.result_note_path(run_id)
-        stamp = int(time.time())
-        while True:
-            target = paths.runs_dir() / ("%s.result.blocked-%d.md" % (run_id, stamp))
-            if not target.exists():
-                break
-            stamp += 1
-            if stamp > time.time() + 10:
-                raise OSError("no free name for the moved-aside note")
-        os.rename(str(source), str(target))
+        runs.set_aside_note(run_id)
     except Exception as exc:
         log_error(event + " move note", exc)
 

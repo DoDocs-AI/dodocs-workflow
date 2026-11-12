@@ -26,6 +26,9 @@ class GuardClassifyBase(DwTestCase):
         self.paths = paths
         self.run_id = "r-1"
         self.rules = guard.load_rules({"guard_rules": []}) + [guard.run_context(self.run_id)]
+        # As `dw run` does: the run's result note exists, empty (writes are spared only then).
+        from dwlib import runs
+        runs.create_empty_note(self.run_id)
 
     def make_repo(self, name="repo", branch="main"):
         repo = self.tmp / name
@@ -1906,6 +1909,8 @@ class StateDirectoryMkdirTests(GuardClassifyBase):
         runs = os.path.realpath(os.path.join(str(self.paths.home()), "runs"))
         outside = self.guard.load_rules({"guard_rules": []})
         command = "mkdir -p %s" % runs
+        import shutil
+        shutil.rmtree(runs)
         # A directory that does not exist yet would be created: not spared.
         self.assertEqual(self.category(self.bash(command)), "control")
         os.makedirs(runs)

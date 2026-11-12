@@ -2146,13 +2146,23 @@ class KubectlRolloutTests(GuardClassifyBase):
             ("kubectl rollout undo deploy/a", "deploy"),
             ("kubectl -n x rollout pause deploy/a", "deploy"),
             ("kubectl rollout resume deploy/a", "deploy"),
+            ("kubectl rollout -n x status deploy/a", None),
+            ("kubectl --context=c --namespace x rollout history deploy/a -o yaml", None),
+            ("kubectl rollout -n x restart deploy/a", "deploy"),
+            ("kubectl rollout latest dc/a", "deploy"),
+            ("kubectl rollout cancel dc/a", "deploy"),
+            ("oc rollout retry dc/a", "deploy"),
+            ("kubectl rollout", "deploy"),
+            ("kubectl --weird x rollout status deploy/a", "deploy"),  # unknown flag arity
+            ("python3 -c 'import os; os.system(\"kubectl rollout -n x restart deploy/a\")'", "deploy"),
+            ("python3 -c 'import os; os.system(\"kubectl rollout latest dc/a\")'", "deploy"),
             # inline code that runs a guarded program the scanner has no pattern for is
             # unreadable (approvable), no longer a deploy
             ("python3 -c 'import os; os.system(\"kubectl rollout status deploy/a\")'", "unreadable"),
             ("python3 -c 'import os; os.system(\"kubectl rollout restart deploy/a\")'", "deploy"),
         ])
-        result = self.bash("kubectl rollout $ACTION deploy/a")
-        self.assertIn(self.category(result), ("unreadable", "deploy"))
+        for command in ("kubectl rollout $ACTION deploy/a", "kubectl rollout $A deploy/a"):
+            self.assertIn(self.category(self.bash(command)), ("unreadable", "deploy"))
 
     def check(self, rows, cwd="/p"):
         for command, expected in rows:
@@ -2211,8 +2221,8 @@ class IdiomTests(KubectlRolloutTests):
         # bash -c starts a new shell: the outer variable is not there.
         self.assertIn(self.category(self.bash("K=git; bash -c '$K push origin main'")),
                       ("unreadable", "control"))
-        # eval of a static value is the value written out.
-        self.assertEqual(self.category(self.bash('K="git push origin main"; eval "$K"')), "merge")
+        # eval could change any name: nothing is resolved, and eval of a variable is unscanned.
+        self.assertEqual(self.category(self.bash('K="git push origin main"; eval "$K"')), "control")
 
     def test_b_a_small_function_is_read_as_its_body(self):
         self.check([
@@ -2282,6 +2292,39 @@ class IdiomTests(KubectlRolloutTests):
             ("D=/p/docs/feat; printf 'ready\\n' > $D/STATUS; python3 - $D/PROGRESS.md <<'PY'\n"
              "import sys\np=sys.argv[1]; s=open(p).read()\nopen(p,\"w\").write(s.replace(\"a\",\"b\"))\n"
              "PY\ncat $D/STATUS; grep -n x $D/PROGRESS.md; ls -R /p/x", None),
+        ])
+
+
+class IdiomPreconditionTests(KubectlRolloutTests):
+    """A same-command variable or function is resolved only when nothing in the command can
+    change what the name means."""
+
+    def test_rollout_status_and_history_are_reads(self):
+        pass
+
+    def test_not_resolved(self):
+        for command in ('K="kubectl -n x"; IFS=x; $K get pods', 'IFS=: K="rm:-rf:x"; $K',
+                        "K=ls; eval 'K=rm'; $K -rf x", "K=ls; declare K=rm; $K x",
+                        "K=ls; read K < f; $K", "K=ls; printf -v K rm; $K x",
+                        "K=ls; 'K'=rm; $K x", "K=ls; echo K; $K x",
+                        "K=ls; for K in rm; do $K x; done",
+                        "K=ls; command export K=rm; $K x", "K=-rf; rm $K x; $K",
+                        "K=ls; source ./x.sh; $K x"):
+            with self.subTest(command=command):
+                self.assertEqual(self.bash(command)["id"].split("+")[0], "control-unreadable-state")
+        self.assertEqual(self.category(self.bash('k(){ kubectl "$@"; }; unset -f k; k delete ns prod')),
+                         "destroy")  # read by name, as before
+        # Not resolved: as before change 2, the body is read where it is defined and the call
+        # by its own words (`source ./x.sh` itself is a known gap: file content is not read).
+        self.assertIsNone(self.bash("k(){ ls; }; source ./x.sh; k"))
+
+    def test_resolved(self):
+        self.check([
+            ('K="kubectl -n x"; $K get pods', None),
+            ('K="kubectl -n x"; for i in 1 2 3; do $K get deploy -o name | grep fe && break; '
+             "sleep 10; done", None),
+            ('k(){ kubectl -n x "$@"; }; k rollout status deploy/a --timeout=300s; k get pods', None),
+            ("D=build; git add . && echo x > $D/a.txt", None),  # `.` as an argument is not source
         ])
 
 

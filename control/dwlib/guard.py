@@ -67,6 +67,7 @@ from .guard_shell import (  # noqa: F401
     _expand,
     _flags_values,
     _function_plan,
+    _shell_word_lists,
     _home,
     _inside,
     _new_segment,
@@ -1002,9 +1003,8 @@ _INLINE_PATTERNS = [
     (re.compile(r"\bgit\s+push\b"), "inline-git-push", "merge", "push from inline code"),
     (re.compile(r"\b(gh\s+pr|glab\s+mr)\s+merge\b"), "inline-pr-merge", "merge",
      "merge a pull request from inline code"),
-    (re.compile(r"\b(kubectl|oc)\b[^\n'\"]*\b(apply|create|replace|patch|delete|"
-                r"rollout\s+(restart|undo|pause|resume)|scale|set|edit|drain)\b"), "inline-kubectl",
-     "deploy", "change a cluster from inline code"),
+    (re.compile(r"\b(kubectl|oc)\b[^\n'\"]*\b(apply|create|replace|patch|delete|scale|set|edit|"
+                r"drain)\b"), "inline-kubectl", "deploy", "change a cluster from inline code"),
     (re.compile(r"\bhelm\s+(install|upgrade|uninstall|delete|rollback|push)\b"), "inline-helm",
      "deploy", "change a Helm release from inline code"),
     (re.compile(r"\b(docker|podman)\s+((image|manifest|compose)\s+)?push\b"), "inline-docker-push",
@@ -1042,6 +1042,20 @@ _LITERAL_RE = re.compile(r"'([^'\n]{1,2000})'|\"([^\"\n]{1,2000})\"")
 _URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+")
 
 
+def _inline_rollout_change(text: str) -> bool:
+    """Whether inline code runs `kubectl|oc ... rollout` other than `rollout status` or
+    `rollout history` (read the same way as on the command line: `_kubectl_words`)."""
+    for m in re.finditer(r"\b(kubectl|oc)\b([^\n'\"]*)", text):
+        words = m.group(2).split()
+        if "rollout" not in words:
+            continue
+        positional = _kubectl_words([m.group(1)] + words)
+        if positional is None or positional[:1] != ["rollout"] or \
+                positional[1:2] not in (["status"], ["history"]):
+            return True
+    return False
+
+
 def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> list:
     """Matches for code given inline to an interpreter (python -c, node -e, a here-document...)."""
     out: list = []
@@ -1054,7 +1068,8 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
                     if not _is_unreadable(x)]
     found = {x["category"] for x in out}
     for rx, rid, category, describe in _INLINE_PATTERNS:
-        if category not in found and rx.search(text):
+        if category not in found and (rx.search(text) or
+                                      (rid == "inline-kubectl" and _inline_rollout_change(text))):
             out.append({"id": rid, "category": category, "describe": "%s: %s" % (describe, _short(text)),
                         "segment": text})
             found.add(category)
@@ -1804,6 +1819,53 @@ def _check_osascript_beyond_notification(tokens, seg, ctx) -> bool:
                         r'(\s+subtitle\s+"[^"\\]*")?\s*$', code)
 
 
+# kubectl's own options that take a separate value, and those that take none. An option in
+# neither list (and not --name=value or a short option with its value attached) has an
+# unknown arity: the command is then read as a change.
+_KUBECTL_VALUE_OPTIONS = {
+    "-n", "--namespace", "--context", "--kubeconfig", "-o", "--output", "--cluster", "--user",
+    "-l", "--selector", "-f", "--filename", "-c", "--container", "-s", "--server", "--token",
+    "--as", "--as-group", "--as-uid", "--request-timeout", "--cache-dir",
+    "--certificate-authority", "--client-certificate", "--client-key", "--tls-server-name",
+    "--field-selector", "--timeout", "--revision", "-L", "--label-columns", "--template",
+    "--username", "--password", "-v", "--v"}
+_KUBECTL_FLAG_OPTIONS = {"-A", "--all-namespaces", "-w", "--watch", "--insecure-skip-tls-verify",
+                         "-R", "--recursive", "--no-headers", "--show-labels", "--all"}
+
+
+def _kubectl_words(tokens: list) -> Optional[list]:
+    """The non-option words of a kubectl command, options and their values skipped wherever
+    they are; None when an option's arity is unknown."""
+    out: list = []
+    i = 1
+    while i < len(tokens):
+        t = tokens[i]
+        if t == "--":
+            return out + tokens[i + 1:]
+        if t.startswith("-") and len(t) > 1:
+            if t.startswith("--") and "=" in t:
+                i += 1
+            elif t in _KUBECTL_VALUE_OPTIONS:
+                i += 2
+            elif t in _KUBECTL_FLAG_OPTIONS or re.fullmatch(r"-[nocsflLv]=?\S+", t):
+                i += 1
+            else:
+                return None
+            continue
+        out.append(t)
+        i += 1
+    return out
+
+
+def _check_kubectl_change(tokens, seg, ctx) -> bool:
+    """The kubectl-change rule matched a subcommand: a change, unless it is exactly
+    `rollout status` or `rollout history` (deny by default)."""
+    words = _kubectl_words(tokens)
+    if words is None or words[:1] != ["rollout"]:
+        return True
+    return words[1:2] not in (["status"], ["history"])
+
+
 def _check_open_mail_app(tokens, seg, ctx) -> bool:
     apps = ("mail", "messages", "microsoft outlook", "outlook", "slack", "telegram", "whatsapp")
     for i, t in enumerate(tokens[1:], 1):
@@ -1818,6 +1880,7 @@ def _check_open_mail_app(tokens, seg, ctx) -> bool:
 
 _CHECKS = {
     "open_mail_app": _check_open_mail_app,
+    "kubectl_change": _check_kubectl_change,
     "osascript_beyond_notification": _check_osascript_beyond_notification,
     "git_push_default_branch": _check_git_push_default_branch,
     "git_push_tags": _check_git_push_tags,
@@ -1978,11 +2041,12 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
         command = str(tool_input.get("command") or "")
         ctx.full_text = command
         try:
-            segments = _Lexer(command).run().segments
+            lexed = _Lexer(command).run()
+            segments, word_lists = lexed.segments, _shell_word_lists(lexed)
         except _Unreadable:
-            segments = []
-        ctx.vars = _static_variables(command, segments)
-        calls, skip = _function_plan(command, segments)
+            segments, word_lists = [], None
+        ctx.vars = _static_variables(command, segments, word_lists)
+        calls, skip = _function_plan(command, segments, word_lists)
         ctx.plan = (command, calls, skip)
         ctx.note_plain = _plain_note_write(command, ctx)
         matches = [dict(m) for m in _shell_matches(command, ctx)]

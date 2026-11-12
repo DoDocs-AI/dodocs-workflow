@@ -192,11 +192,19 @@ change the control point's own settings. Everything it does not recognise is all
 Three everyday forms are read as if they had been written out, and the result is judged by the
 same rules. Anything not positively simple and static stays "command cannot be read".
 
+The first two are read only when nothing in the command could change what a name means: no
+`eval`, `source` (or `.` as a command), `declare`, `typeset`, `local`, `readonly`, `export`,
+`unset`, `read`, `mapfile`, `readarray`, `getopts`, `let`, `set`, `setopt`, `unsetopt`, `shopt`,
+`emulate`, `alias`, `unalias`, `trap`, `enable` or `builtin` anywhere in it, no `printf -v`, and
+no `IFS` at all; and the name itself appears (quotes removed) only where it is assigned or
+defined and where it is used or called.
+
 - **A variable that stands for a command or a path, set in the same command.**
   `K="kubectl -n app"; $K get pods` is read as `kubectl -n app get pods` (also `${K}`, also
   inside `$( ... )`, loops and pipelines of that command); `D=.git; echo x > $D/config` is a
-  write to `.git/config`. Only when the value is one literal (quotes allowed; no `$`, backquote,
-  glob, brace, tilde or backslash), assigned once at the top level of the command (not in a
+  write to `.git/config`. Only when the value is one literal (quotes allowed; letters, digits,
+  `_./:@%+,=-` and single spaces only; used as the program, its first word must be a plain
+  program name), assigned once at the top level of the command (not in a
   subshell, a pipeline, the background, under `&&`/`||`, an `if` or a loop, and not with
   `export`, `local` or as a prefix of another command) before it is used, and the name is never
   reassigned, unset, `read`, appended to or used in any other way (`${!K}`, `${K[@]}`,

@@ -24,8 +24,8 @@ feat(control): guard usability
   defined in the same command (`k(){ kubectl -n x "$@"; }; k get pods`, read through its body,
   even when named like a program), and an inline script on stdin with data arguments
   (`python3 - "$F" <<'PY'`). Anything not simple and static stays unreadable.
-- `kubectl rollout status` and `kubectl rollout history` are reads and no longer held;
-  `rollout restart`, `undo`, `pause` and `resume` still are.
+- `kubectl rollout status` and `kubectl rollout history` are reads and no longer held; any
+  other `rollout` action (or one that cannot be read) still is.
 
 ## [v2.1.0] - 2026-11-12
 

@@ -809,7 +809,59 @@ def _word_dynamic(word: str) -> bool:
 
 # A value that means the same written out as substituted: no quote, expansion, glob, brace,
 # tilde, or shell syntax; spaces only split words.
-_STATIC_VALUE_RE = re.compile(r"[A-Za-z0-9_./:@%+,=\- ]+")
+_STATIC_VALUE_RE = re.compile(r"[A-Za-z0-9_./:@%+,=-]+( [A-Za-z0-9_./:@%+,=-]+)*")
+# What a value's first word must look like when the variable is used as the program.
+_PROGRAM_NAME_RE = re.compile(r"[A-Za-z0-9_./][A-Za-z0-9_./+-]*")
+# Words that can change what a name means (or how a value splits) somewhere in a command; any
+# of them anywhere in it (`.` only as a command) and no name is resolved.
+_REDEFINING_WORDS = {"eval", "source", "declare", "typeset", "local", "readonly", "export",
+                     "unset", "read", "mapfile", "readarray", "getopts", "let", "set", "setopt",
+                     "unsetopt", "shopt", "emulate", "alias", "unalias", "trap", "enable",
+                     "builtin"}
+
+
+def _shell_word_lists(lexed: "_Lexer", depth: int = 0) -> Optional[list]:
+    """The words (quotes removed) of every simple command of a lexed text and of every
+    substitution body in it, one list per command; None when a part cannot be read."""
+    out: list = []
+    try:
+        for seg in lexed.segments:
+            out.append(_tokens(seg["words"]))
+    except _Unreadable:
+        return None
+    for body in list(lexed.subs) + list(lexed.alt_subs):
+        if depth > 6:
+            return None
+        try:
+            inner = _Lexer(body).run()
+        except _Unreadable:
+            if body in lexed.alt_subs:
+                continue  # read as arithmetic only
+            return None
+        words = _shell_word_lists(inner, depth + 1)
+        if words is None:
+            return None
+        out += words
+    return out
+
+
+def _names_may_change(word_lists: Optional[list]) -> bool:
+    """Whether anything in the command could change what a variable or function name means:
+    a redefining builtin (`eval`, `declare`, `read`, `unset`, `source`, `.` as a command ...),
+    `printf -v`, or IFS anywhere. Unknown (None) counts as yes."""
+    if word_lists is None:
+        return True
+    for words in word_lists:
+        if any(w in _REDEFINING_WORDS or "IFS" in w for w in words):
+            return True
+        rest = [w for w in words if not _ASSIGNMENT_RE.match(w)]
+        while rest and rest[0] in _KEYWORDS | {"then", "do", "else", "elif"}:
+            rest = rest[1:]
+        if rest[:1] == ["."]:
+            return True
+        if rest[:1] == ["printf"] and any(w.startswith("-v") for w in rest[1:]):
+            return True
+    return False
 _NAME = r"[A-Za-z_][A-Za-z0-9_]*"
 _FUNCTION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 _COMPOUND_OPEN = {"if", "while", "until", "for", "select", "case", "{"}
@@ -849,12 +901,16 @@ def _static_value(raw: str) -> Optional[str]:
     return parts[0]
 
 
-def _static_variables(text: str, segments: list) -> dict:
+def _static_variables(text: str, segments: list, word_lists: Optional[list] = None) -> dict:
     """{name: value} for the variables the command assigns once, at top level, to a literal,
     before any use, and does nothing else with: every other mention of the name in the whole
     text is `$NAME` (not followed by `[`) or `${NAME}`, after the assignment. A top-level
     assignment is a segment of assignments only, outside any parenthesis or compound command,
-    starting a statement (after nothing, `;` or a newline), not piped, not in the background."""
+    starting a statement (after nothing, `;` or a newline), not piped, not in the background.
+    Read on the words with quotes removed too (`word_lists`): nothing may redefine names
+    (`_names_may_change`), the name is never a word of its own, and exactly one word assigns it."""
+    if _names_may_change(word_lists):
+        return {}
     found: dict = {}
     depth = 0
     for seg in segments:
@@ -876,6 +932,10 @@ def _static_variables(text: str, segments: list) -> dict:
         mentions = list(re.finditer(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % name, text))
         assigned = [m for m in mentions if text.startswith("=", m.end())]
         if len(assigned) != 1:
+            continue
+        words = [w for ws in word_lists for w in ws]
+        if name in words or \
+                sum(1 for w in words if re.match(r"^%s\+?=" % name, w)) != 1:
             continue
         at = assigned[0].start()
         ok = True
@@ -963,12 +1023,17 @@ def _substituted_segment(seg: dict, variables: dict) -> dict:
     words and redirect targets are not split."""
     if not variables:
         return seg
+    lead = next((w for w in seg["words"] if not _ASSIGNMENT_RE.match(w)), None)
     words: list = []
     for w in seg["words"]:
         if _ASSIGNMENT_RE.match(w):
             words.append(_substitute_word(w, variables, False))
         else:
             words += _split_unquoted(_substitute_word(w, variables, True))
+    program = next((w for w in words if not _ASSIGNMENT_RE.match(w)), None)
+    if lead is not None and lead != program and \
+            not (program and _PROGRAM_NAME_RE.fullmatch(re.sub(r"[\"']", "", program))):
+        return seg  # a value in the program position that is no ordinary program name
     return {**seg, "words": words,
             "redirects": [_substitute_word(w, variables, False) for w in seg["redirects"]],
             "reads": [_substitute_word(w, variables, False) for w in seg["reads"]]}
@@ -977,7 +1042,7 @@ def _substituted_segment(seg: dict, variables: dict) -> dict:
 _POSITIONAL_RE = re.compile(r'"\$([1-9])"|\$([1-9])|"\$\{([1-9])\}"|\$\{([1-9])\}')
 
 
-def _function_plan(text: str, segments: list) -> tuple:
+def _function_plan(text: str, segments: list, word_lists: Optional[list] = None) -> tuple:
     """For small functions defined and called in the same command: ({segment index: segment
     to classify in its place}, {segment indexes not to classify}). A function counts when it is
     defined once, at top level (`name(){ ...; }`, `name() { ...; }`, `function name { ...; }`,
@@ -989,7 +1054,12 @@ def _function_plan(text: str, segments: list) -> tuple:
     result runs a function the command defines, or whose static argument would split or glob
     where the body leaves it unquoted, is unreadable (None). The definition itself is not
     classified. Any other function stays as today: its body is classified where it is defined,
-    and its calls by their own words."""
+    and its calls by their own words. Nothing in the command may redefine names
+    (`_names_may_change`), and the name is a word (quotes removed) only at the definition and
+    the calls."""
+    if _names_may_change(word_lists):
+        return {}, set()
+    every = [w for ws in word_lists for w in ws]
     attempts: dict = {}  # name -> number of definitions, readable or not
     defined: dict = {}  # name -> (first index, last index, body words)
     depth = 0
@@ -1026,7 +1096,7 @@ def _function_plan(text: str, segments: list) -> tuple:
             continue
         sites = [k for k in range(last + 1, len(segments)) if segments[k]["words"][:1] == [name]]
         mentions = re.findall(r"(?<![\w.-])%s(?![\w.-])" % re.escape(name), text)
-        if len(mentions) != 1 + len(sites):
+        if len(mentions) != 1 + len(sites) or every.count(name) != 1 + len(sites):
             continue
         skip.update(range(first, last + 1))
         for k in sites:

@@ -549,6 +549,45 @@ class AgtermAdapterTests(RunTestBase):
         self.assertIn("yes=Yes", call)
         self.assertIn("no=No", call)
 
+    def test_sanitise_makes_one_safe_line(self):
+        from dwlib import agterm
+        self.assertEqual(agterm.sanitise("a\n\nb\tc\r\x1b[31md\x00e\x7ff\x85g h  i ", 80),
+                         "a b c [31md e f g h i")
+        self.assertEqual(agterm.sanitise("  plain  ", 80), "plain")
+        self.assertEqual(agterm.sanitise("", 80), "")
+        self.assertEqual(agterm.sanitise("x" * 80, 80), "x" * 80)
+        long = agterm.sanitise("y" * 81, 80)
+        self.assertEqual((len(long), long[-1]), (80, "…"))
+        self.assertEqual(agterm.sanitise("ab\ncd", 4), "ab …")
+        self.assertEqual((agterm.TITLE_MAX, agterm.MESSAGE_MAX, agterm.NAME_MAX), (120, 240, 80))
+
+    def test_free_text_reaching_agtermctl_is_sanitised(self):
+        from dwlib import agterm
+        bad = "line one\nline\ttwo\x1b"
+        sid = agterm.new_session(str(self.tmp), "grp", bad + "n" * 100, "c", "ctx\n1")
+        agterm.notify(sid, bad + "t" * 200, bad + "b" * 300)
+        ask_id = agterm.ask_open(sid, bad + "q" * 200, bad + "m" * 300,
+                                 [("yes", "Yes\nplease")], default="yes")
+        self.assertTrue(ask_id)
+        agterm.ask_cancel(ask_id)
+        self.assertIsNone(agterm.ask(sid, bad, bad, [("no", "No\tthanks")], 1))
+        texts = []
+        for call in self.agterm_calls():
+            if call[0] == "notify" or call[:2] in (["session", "new"], ["session", "context"]) \
+                    or (call[0] == "ask" and call[1:2] not in (["result"], ["cancel"])):
+                texts += [a for a in call if a != "--command"]
+        self.assertTrue(texts)
+        for text in texts:
+            self.assertFalse(any(ord(ch) < 0x20 or 0x7f <= ord(ch) <= 0x9f for ch in text), text)
+        new = [c for c in self.agterm_calls() if c[:2] == ["session", "new"]][0]
+        self.assertEqual(len(opt(new, "--name")), 80)
+        notify = [c for c in self.agterm_calls() if c[0] == "notify"][0]
+        self.assertEqual((len(notify[1]), len(opt(notify, "--title"))), (240, 120))
+        opened = [c for c in self.agterm_calls() if c[:2] == ["ask", "open"]][0]
+        self.assertEqual((len(opened[2]), len(opt(opened, "--message"))), (120, 240))
+        self.assertTrue(opened[2].startswith("line one line two"))
+        self.assertIn("yes=Yes please", opened)
+
     def test_notify_and_session_tail(self):
         from dwlib import agterm
         sid = agterm.new_session(str(self.tmp), "grp", "n", "c", "x")

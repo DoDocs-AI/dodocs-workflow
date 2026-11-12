@@ -18,6 +18,27 @@ class AgtermUnavailable(AgtermError):
 
 _CONNECT_RE = re.compile(r"connect|socket|refused|no such file|not running", re.I)
 
+# AGTerm refuses free text that carries a control character (newline included) and caps its
+# length; every free-text argument goes through `sanitise` with one of these limits.
+TITLE_MAX = 120
+MESSAGE_MAX = 240
+NAME_MAX = 80
+_CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def sanitise(text, limit: int) -> str:
+    """One line AGTerm accepts: control characters become spaces, runs of whitespace
+    collapse, the ends are trimmed, and text over `limit` characters ends in an ellipsis."""
+    line = " ".join(_CONTROL_RE.sub(" ", str(text)).split())
+    return line if len(line) <= limit else line[:limit - 1] + "\u2026"
+
+
+def _buttons(buttons: list) -> list:
+    options: list = []
+    for button_id, label in buttons:
+        options += ["--button", "%s=%s" % (button_id, sanitise(label, NAME_MAX))]
+    return options
+
 
 def _binary() -> str:
     return os.environ.get("DW_AGTERMCTL") or "agtermctl"
@@ -92,8 +113,9 @@ def hooks_reload() -> None:
 def new_session(cwd: str, workspace_name: str, name: str, command: str, context: str) -> str:
     """Start a background session running `command`; returns its session id."""
     proc = _run(["session", "new"], [
-        "--no-select", "--workspace-name", workspace_name, "--create-workspace",
-        "--cwd", cwd, "--name", name, "--command", command, "--json"], timeout=_timeout(30))
+        "--no-select", "--workspace-name", sanitise(workspace_name, NAME_MAX), "--create-workspace",
+        "--cwd", cwd, "--name", sanitise(name, NAME_MAX), "--command", command, "--json"],
+        timeout=_timeout(30))
     sid = None
     try:
         sid = _result(proc).get("id")
@@ -104,7 +126,8 @@ def new_session(cwd: str, workspace_name: str, name: str, command: str, context:
     try:
         # A restored session must not re-run the harness; pin the restore to a plain shell.
         _run(["session", "restore"], ["--none", "--target", sid], timeout=_timeout(15))
-        _run(["session", "context", context], ["--target", sid], timeout=_timeout(15))
+        _run(["session", "context", sanitise(context, NAME_MAX)], ["--target", sid],
+             timeout=_timeout(15))
     except AgtermError:
         try:
             close_session(sid)
@@ -152,7 +175,8 @@ def set_status(session_id: str, status: str, timeout: Optional[float] = None) ->
 
 
 def notify(session_id: str, title: str, body: str, timeout: Optional[float] = None) -> None:
-    _run(["notify", body], ["--title", title, "--target", session_id],
+    _run(["notify", sanitise(body, MESSAGE_MAX)],
+         ["--title", sanitise(title, TITLE_MAX), "--target", session_id],
          timeout=_call_timeout(timeout))
 
 
@@ -160,13 +184,12 @@ def ask(session_id: str, title: str, message: str, buttons: list, timeout: int,
         default: Optional[str] = None) -> Optional[str]:
     """Ask the owner; returns the chosen button id, None on escape, cancel or timeout.
     `default` is the button highlighted at first (what a bare Enter picks)."""
-    options = ["--message", message, "--target", session_id]
+    options = ["--message", sanitise(message, MESSAGE_MAX), "--target", session_id]
     if default:
         options += ["--default", default]
-    for button_id, label in buttons:
-        options += ["--button", "%s=%s" % (button_id, label)]
+    options += _buttons(buttons)
     try:
-        proc = _run(["ask", title], options + ["--json"], timeout=timeout,
+        proc = _run(["ask", sanitise(title, TITLE_MAX)], options + ["--json"], timeout=timeout,
                     ok_codes=(0, 2, 3, 124), raise_timeout=True)
     except subprocess.TimeoutExpired:
         return None
@@ -187,12 +210,13 @@ def ask_open(session_id: str, title: str, message: str, buttons: list,
              default: Optional[str] = None, timeout: Optional[float] = None) -> str:
     """Open a question without waiting; returns its dialog id. AGTerm refuses a second
     question on a session with an AgtermError whose text says "ask already pending"."""
-    options = ["--message", message, "--target", session_id, "--no-block", "--json"]
+    options = ["--message", sanitise(message, MESSAGE_MAX), "--target", session_id,
+               "--no-block", "--json"]
     if default:
         options += ["--default", default]
-    for button_id, label in buttons:
-        options += ["--button", "%s=%s" % (button_id, label)]
-    result = _result(_run(["ask", "open", title], options, timeout=_call_timeout(timeout)))
+    options += _buttons(buttons)
+    result = _result(_run(["ask", "open", sanitise(title, TITLE_MAX)], options,
+                          timeout=_call_timeout(timeout)))
     ask_id = result.get("id")
     if not ask_id:
         raise AgtermError("agtermctl did not return a dialog id")

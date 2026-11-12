@@ -1829,7 +1829,8 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         if not control:
             buttons.append(("run", "Approve for this run"))
         buttons.append(("deny", "Deny"))
-        message = "%s\n\n%s: %s" % (describe, tool, _short(_action_text(tool, tool_input), 600))
+        # One line: AGTerm refuses control characters, and agterm sanitises the rest.
+        message = "%s \u2014 %s: %s" % (describe, tool, _action_text(tool, tool_input))
         answer, error = _wait_for_owner(
             run_id, sid, "%s: approve %s?" % (name, match["category"]), message, buttons,
             lambda r: _decided_elsewhere(r, match["id"], parts, action, control), started)
@@ -1873,7 +1874,11 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
             result["out"] = _output("deny", DENIED_REASON if denied else PENDING_REASON)
             return r
         if answer is None:
-            if error is not None:
+            # The terminal's own error text is never relayed to the agent (it is in dw.log);
+            # only an unreachable AGTerm or a guard failure is reported as a guard error.
+            relayable = error is not None and (isinstance(error, agterm.AgtermUnavailable) or
+                                               not isinstance(error, agterm.AgtermError))
+            if relayable:
                 result["out"] = _output("deny", "Guard error: %s" % _short(str(error) or
                                                                           error.__class__.__name__))
             else:

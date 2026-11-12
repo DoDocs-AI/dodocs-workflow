@@ -268,6 +268,32 @@ class GuardHookTests(GuardHookBase):
         self.assertIn("slotme", text)
         self.assertIn("git push origin main", text)
 
+    def test_held_command_with_newline_and_tab_still_opens_a_dialog(self):
+        path, rid = self.start_run()
+        self.script_ask("once")
+        command = "echo 'st\x1b[0mart'\n\tgit push origin main"
+        self.assertIsNone(self.guard(self.payload(path, command)))
+        asks = json.loads((self.fake_agterm_dir / "asks.json").read_text())
+        self.assertEqual([a["state"] for a in asks.values()], ["answered"])
+        ask = self.ask_calls()[0]
+        notify = [c for c in self.agterm_calls() if c[0] == "notify"][0]
+        for text in ask + notify:
+            self.assertFalse(any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in text), text)
+        message = ask[ask.index("--message") + 1]
+        self.assertEqual(message, "push to the default branch: git push origin main"
+                                  " \u2014 Bash: echo 'st [0mart' git push origin main")
+        self.assertEqual(self.record(rid)["pending_approval"], None)
+
+    def test_ask_open_failure_text_is_not_relayed_to_the_agent(self):
+        path, rid = self.start_run()
+        self.fake_agterm_dir.mkdir(parents=True, exist_ok=True)
+        (self.fake_agterm_dir / "fail-next").write_text("ask open")
+        out = self.guard(self.payload(path, "git push origin main"))
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+        self.assertIn("scripted failure", (self.dw_home / "dw.log").read_text())
+        self.assertIsNotNone(self.record(rid)["pending_approval"])
+
     def test_status_and_notify_failures_do_not_skip_the_hold(self):
         path, rid = self.start_run()
         (self.fake_agterm_dir / "fail-next").write_text("session status")

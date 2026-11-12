@@ -16,6 +16,9 @@ FAKE_AGTERM_DOWN=1 makes every call exit 1 with a connection error.
 FAKE_AGTERM_DELAY=<seconds> delays every call (to exercise the guard's time limit).
 A second `ask open` on a session whose earlier question is still pending is refused with
 "ask already pending", as AGTerm does.
+Text AGTerm refuses is refused here too: a control character (C0, DEL, C1, U+2028/U+2029) in an
+`ask` title, `--message` or button label, a `notify` body or `--title`, or a `session context`
+exits 1 with AGTerm's error object.
 """
 import json
 import os
@@ -82,6 +85,26 @@ def fail(message, code=1):
     sys.exit(code)
 
 
+def has_control(text):
+    return any(ord(ch) < 0x20 or 0x7f <= ord(ch) <= 0x9f or ch in "\u2028\u2029"
+               for ch in str(text))
+
+
+def refused_text(cmd, pos, opts):
+    """AGTerm's error for free text it rejects, or None."""
+    if cmd == "ask" and pos[:1] not in (["result"], ["cancel"]):
+        title = pos[1:] if pos[:1] == ["open"] else pos
+        labels = [b.partition("=")[2] or b for b in opts.get("--button", [])]
+        texts = list(title) + [opts.get("--message", "")] + labels
+        if any(has_control(t) for t in texts):
+            return "ask text must not contain control characters"
+    if cmd == "notify" and any(has_control(t) for t in pos + [opts.get("--title", "")]):
+        return "ask text must not contain control characters"
+    if cmd == "session" and pos[:1] == ["context"] and any(has_control(t) for t in pos[1:]):
+        return "context must not contain control characters"
+    return None
+
+
 def main(argv):
     with open(os.path.join(state_dir(), "calls.jsonl"), "a") as fh:
         fh.write(json.dumps({"argv": argv}) + "\n")
@@ -108,6 +131,10 @@ def main(argv):
     cmd = argv[0]
     rest = argv[1:]
     opts, pos = parse(rest)
+    refused = refused_text(cmd, pos, opts)
+    if refused:
+        print(json.dumps({"error": refused, "ok": False}))
+        return 1
 
     if cmd == "window" and pos[:1] == ["list"]:
         windows = [{"id": "W1", "name": "main", "open": True, "active": True}]

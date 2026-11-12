@@ -588,7 +588,10 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             break
         prog = tokens[0]
         if _dynamic(prog):
-            matches.append(_unreadable_match())
+            # A computed program word may be anything, the control point included: never
+            # approvable for the run (variables and functions of the same command are
+            # already read by now).
+            matches.append(_unreadable_state_match())
             tokens = []
             break
         name = os.path.basename(prog)
@@ -1943,7 +1946,7 @@ def _combine(matches: list) -> Optional[dict]:
 
 
 _CONTROL_TEXT_RE = re.compile(
-    r"(?<![\w.-])(?:[\w.~-]*/)*dw(?![\w.-])|\.dodocs-workflow|dw_home|\.claude/settings|"
+    r"(?<![\w.-])(?:[\w.~-]*/)*dw(?![\w.-])|\.dodocs-workflow|dw_home|dw_run_id|\.claude/settings|"
     r"settings\.local\.json|hooks\.conf|agtermctl|\.git/config|\.git/hooks|"
     r"\.git/info/attributes|git_dir|core\.hookspath|node_options|perl5opt|rubyopt|"
     r"pythonstartup|bash_env|ld_preload|dyld_insert_libraries|lessopen|lessclose")

@@ -649,15 +649,18 @@ class GuardInstalledTests(GuardHookBase):
         probe = self.write_dw_script(self.tmp / "probe", 'cat > %s/stdin; env > %s/env; echo "$1" > %s/argv'
                                      % (seen, seen, seen))
         env = self.guard_entry(probe)
-        env["DW_RUN_ID"] = "r-outer"
         r = self.dw("run", "slotme", "/scrum-team", "x", env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         payload = json.loads((seen / "stdin").read_text())
         self.assertEqual((payload["hook_event_name"], payload["tool_name"]), ("PreToolUse", "Read"))
         self.assertTrue(payload["tool_input"]["file_path"].startswith(payload["cwd"]))
         self.assertNotIn(str(self.tmp / "checkouts"), payload["cwd"])
-        self.assertNotIn("DW_RUN_ID=", (seen / "env").read_text())
         self.assertEqual((seen / "argv").read_text(), "guard\n")
+        # `dw run` itself refuses inside a run; the probe drops DW_RUN_ID all the same.
+        from dwlib import runs
+        os.environ["DW_RUN_ID"] = "r-outer"
+        self.assertIsNone(runs._guard_entry_problem([str(probe), "guard"]))
+        self.assertNotIn("DW_RUN_ID=", (seen / "env").read_text())
 
 
 class GuardEntryPointTests(GuardHookBase):
@@ -967,7 +970,8 @@ class GuardApprovalSegmentTests(GuardHookBase):
         asks = len(self.ask_calls())
         self.held(path, "$X two")  # a different action while one is pending: no dialog
         self.assertEqual(len(self.ask_calls()), asks)
-        self.assertEqual(self.record(rid)["pending_approval"]["describe"], "command cannot be read")
+        self.assertEqual(self.record(rid)["pending_approval"]["describe"],
+                         "command cannot be read and may change the control point")
         self.script_ask("once")
         self.assertIsNone(self.guard(self.payload(path, "$X one")))  # the same action: asked
         self.assertEqual(len(self.ask_calls()), asks + 1)
@@ -1291,7 +1295,7 @@ class UnreadableApprovalTests(GuardHookBase):
 
     def test_the_dialog_offers_a_run_wide_approval_named_for_its_scope(self):
         path, rid = self.start_run()
-        self.held(path, "$X one")
+        self.held(path, "kubectl $VERB one")
         ask = self.ask_calls()[-1]
         self.assertEqual(self.buttons(ask), ["once=Approve once",
                                              "run=Approve unreadable commands for this run",
@@ -1303,41 +1307,41 @@ class UnreadableApprovalTests(GuardHookBase):
     def test_approved_for_the_run_later_unreadable_commands_pass_silently(self):
         path, rid = self.start_run()
         self.script_ask("run")
-        self.assertIsNone(self.guard(self.payload(path, "$X one")))
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
         self.assertEqual(self.record(rid)["approvals"], ["control-unreadable"])
         self.clear_answer()
         asks = len(self.ask_calls())
         self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
         self.assertEqual(len(self.ask_calls()), asks)
         # Never another category: a push next to an unreadable command is asked for.
-        self.held(path, "$X one; git push origin main")
+        self.held(path, "kubectl $VERB one; git push origin main")
         self.assertEqual(len(self.ask_calls()), asks + 1)
         self.assertEqual(self.record(rid)["pending_approval"]["category"], "merge")
         self.assertEqual(self.dw("deny", rid).returncode, 0)
-        self.held(path, "$X one; dw approve %s" % rid)
+        self.held(path, "kubectl $VERB one; dw approve %s" % rid)
         self.assertEqual(self.record(rid)["pending_approval"]["category"], "control")
 
     def test_dw_approve_grants_an_unreadable_command_once(self):
         path, rid = self.start_run()
-        self.held(path, "$X one")
+        self.held(path, "kubectl $VERB one")
         r = self.dw("approve", rid)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("command cannot be read", r.stdout)
         asks = len(self.ask_calls())
-        self.assertIsNone(self.guard(self.payload(path, "$X one")))
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
         self.assertEqual(len(self.ask_calls()), asks)
-        self.held(path, "$X one")
+        self.held(path, "kubectl $VERB one")
         self.assertEqual(self.record(rid)["approvals"], [])
 
     def test_dw_approve_of_a_push_next_to_an_unreadable_command(self):
         path, rid = self.start_run()
-        self.held(path, "$X one; git push origin main")
+        self.held(path, "kubectl $VERB one; git push origin main")
         self.assertEqual(self.dw("approve", rid).returncode, 0)
-        self.assertIsNone(self.guard(self.payload(path, "$X one; git push origin main")))
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one; git push origin main")))
 
     def test_control_next_to_unreadable_stays_control(self):
         path, rid = self.start_run()
-        self.held(path, "$X one; dw approve %s" % rid)
+        self.held(path, "kubectl $VERB one; dw approve %s" % rid)
         self.assertEqual(self.buttons(self.ask_calls()[-1]), ["once=Approve once", "deny=Deny"])
         self.assertEqual(self.dw("approve", rid).returncode, 2)
 
@@ -1346,21 +1350,21 @@ class UnreadableApprovalTests(GuardHookBase):
         # remembers the push rule only, never the unreadable class.
         path, rid = self.start_run()
         self.script_ask("run")
-        self.assertIsNone(self.guard(self.payload(path, "$X one; git push origin main")))
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one; git push origin main")))
         self.assertEqual(self.record(rid)["approvals"], ["git-push-default"])
         self.clear_answer()
         asks = len(self.ask_calls())
-        self.held(path, "$X two")
+        self.held(path, "kubectl $VERB two")
         self.assertEqual(len(self.ask_calls()), asks + 1)
 
     def test_an_ended_runs_session_refuses_unreadable_commands(self):
         path, rid = self.start_run()
         self.script_ask("run")
-        self.assertIsNone(self.guard(self.payload(path, "$X one")))  # approved for the run
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))  # approved for the run
         from dwlib import runs
         runs.finish_run(rid, "done", None)
         asks = len(self.ask_calls())
-        out = self.guard(self.payload(path, "$X two"), env={"DW_RUN_ID": rid})
+        out = self.guard(self.payload(path, "kubectl $VERB two"), env={"DW_RUN_ID": rid})
         self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
                          ("deny", INACTIVE_REASON % (rid, "done")))
         self.assertEqual(len(self.ask_calls()), asks)
@@ -1370,7 +1374,7 @@ class UnreadableStateApprovalTests(GuardHookBase):
     def test_a_run_wide_unreadable_approval_does_not_cover_state_unreadable(self):
         path, rid = self.start_run()
         self.script_ask("run")
-        self.assertIsNone(self.guard(self.payload(path, "$X one")))
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB one")))
         self.clear_answer()
         self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
         asks = len(self.ask_calls())

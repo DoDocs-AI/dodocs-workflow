@@ -15,7 +15,10 @@ feat(control): guard usability
 - An unreadable command stays `control` (rule `control-unreadable-state`, not approvable for
   the run or with `dw approve`) when its text names the control point, when what cannot be read
   is a write target or a git override, or when it is shell or interpreter code that could not
-  be scanned (`curl ... | sh`, `bash -c "$CMD"`, `eval "$(...)"`).
+  be scanned (`curl ... | sh`, `bash -c "$CMD"`, `eval "$(...)"`), or when the program word
+  itself is computed (`$CMD`, `"$TOOL" get x`, a run-time word after a wrapper).
+- `dw` refuses every state-changing subcommand when it is called from inside a run
+  (`DW_RUN_ID` set), independently of the guard.
 - Three idioms are read instead of being held as unreadable: a static variable set earlier in
   the same command (`K="kubectl -n x"; $K get pods`, `D=build; echo x > $D/a`), a small function
   defined in the same command (`k(){ kubectl -n x "$@"; }; k get pods`, read through its body,

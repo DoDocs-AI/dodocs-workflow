@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+from pathlib import Path
 
 from helpers import DwTestCase
 
@@ -76,3 +77,66 @@ class ProjectCliTests(DwTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InsideRunRefusalTests(DwTestCase):
+    """`dw` refuses every state-changing subcommand when its environment names a run
+    (DW_RUN_ID), whatever the guard decided; read-only subcommands, `dw hook` and `dw guard`
+    are unaffected."""
+
+    REFUSAL = "dw cannot change the control point from inside a run"
+
+    def snapshot(self):
+        files = {}
+        for root in (self.dw_home, self.claude_settings.parent):
+            for p in sorted(Path(root).rglob("*")):
+                if p.is_file() and ".lock" not in p.name and p.name != "dw.log":
+                    files[str(p)] = p.read_bytes()
+        return files
+
+    def test_state_changing_subcommands_refuse_with_dw_run_id(self):
+        path = self.add_project("alpha")
+        other = self.tmp / "checkouts" / "beta"
+        other.mkdir(parents=True)
+        legacy = self.tmp / "legacy.json"
+        legacy.write_text(json.dumps({"projects": []}))
+        commands = [["approve", "r-1"], ["deny", "r-1"], ["run", "alpha", "/scrum-team", "x"],
+                    ["resume", "r-1"], ["cancel", "r-1"], ["dismiss", "r-1"], ["setup", "--yes"],
+                    ["setup", "--remove", "--yes"],
+                    ["project", "add", "--name", "beta", "--path", str(other), "--group", "g"],
+                    ["project", "remove", "alpha"],
+                    ["project", "import-legacy", "--from", str(legacy), "--group", "g"]]
+        before = self.snapshot()
+        for argv in commands:
+            with self.subTest(argv=argv):
+                r = self.dw(*argv, env={"DW_RUN_ID": "r-1"})
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(r.stderr.strip(), "dw: " + self.REFUSAL)
+                self.assertEqual(r.stdout, "")
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(path.is_dir())
+
+    def test_without_dw_run_id_they_are_not_refused(self):
+        self.add_project("alpha")
+        other = self.tmp / "checkouts" / "beta"
+        other.mkdir(parents=True)
+        for argv in (["project", "add", "--name", "beta", "--path", str(other), "--group", "g"],
+                     ["project", "remove", "beta"], ["approve", "r-1"], ["dismiss", "r-1"]):
+            with self.subTest(argv=argv):
+                r = self.dw(*argv)
+                self.assertNotIn(self.REFUSAL, r.stderr)
+        self.assertEqual(self.dw("project", "list").stdout.split()[0], "alpha")
+
+    def test_read_only_subcommands_work_inside_a_run(self):
+        self.add_project("alpha")
+        for argv in (["status"], ["status", "--json"], ["queue"], ["project", "list"],
+                     ["doctor"], ["tail", "r-1"]):
+            with self.subTest(argv=argv):
+                r = self.dw(*argv, env={"DW_RUN_ID": "r-1"})
+                self.assertNotIn(self.REFUSAL, r.stderr)
+                if argv[0] in ("status", "queue", "project"):
+                    self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.dw("guard", stdin="{}", env={"DW_RUN_ID": "r-1"})
+        self.assertNotIn(self.REFUSAL, r.stdout + r.stderr)
+        r = self.dw("hook", "status", env={"DW_RUN_ID": "r-1"})
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))

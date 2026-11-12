@@ -415,7 +415,9 @@ own `dw` commands are held by the guard.
 
 `install.sh` puts `dw` at `~/.dodocs-workflow/bin/dw` (linked into `~/.local/bin` when that
 directory exists). State lives in `~/.dodocs-workflow/`. (`DW_HOME` moves it for tests only;
-launched sessions and the terminal hooks always use the default directory.)
+launched sessions and the terminal hooks always use the default directory.) Inside a run
+(`DW_RUN_ID` set), every subcommand that changes something exits with status 2 and "dw cannot
+change the control point from inside a run"; reading subcommands work.
 
 | Subcommand | Effect |
 |---|---|

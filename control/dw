@@ -459,6 +459,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Subcommands that change the registry, a run, or the installation. `dw` refuses them when it
+# is called from inside a run (DW_RUN_ID set: the launch line sets it for the run's session and
+# everything it starts), whatever the guard decided. `dw hook` and `dw guard` are how a run's
+# events and tool calls reach `dw`, and stay open.
+STATE_CHANGING = {cmd_approve, cmd_deny, cmd_run, cmd_resume, cmd_cancel, cmd_dismiss, cmd_setup,
+                  cmd_project_add, cmd_project_remove, cmd_project_import_legacy}
+INSIDE_RUN_REFUSAL = "dw cannot change the control point from inside a run"
+
+
+def _changes_state(args) -> bool:
+    return args.func in STATE_CHANGING
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv[:1] == ["hook"]:
@@ -466,6 +479,9 @@ def main(argv=None) -> int:
     if argv == ["guard"]:
         return run_guard()
     args = build_parser().parse_args(argv)
+    if os.environ.get("DW_RUN_ID") and _changes_state(args):
+        sys.stderr.write("dw: %s\n" % INSIDE_RUN_REFUSAL)
+        return 2
     try:
         return args.func(args)
     except UserError as exc:

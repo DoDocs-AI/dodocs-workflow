@@ -1492,13 +1492,15 @@ class AutoApproveTests(GuardHookBase):
                                     self.entry("control-unreadable", "(.+)"),
                                     self.entry("control-unreadable", "(kubectl|gh) .*"),
                                     self.entry("kubectl-change", "\\S.*"),
-                                    self.entry("kubectl-change", "kubectl (apply|a)* -f k8s/")])
+                                    self.entry("kubectl-change", "kubectl (apply|a)* -f k8s/"),
+                                    self.entry("kubectl-change", "kubectl (apply|a){1,99} -f k8s/")])
         for command in ("kubectl $(cat v) ns prod", 'gh pr "$(cat v)" 12', "kubectl apply -f k8s/"):
             with self.subTest(command=command):
                 self.held(path, command)
                 self.dw("deny", rid)
         self.assertIn("must not match", self.log())
-        self.assertIn("unbounded", self.log())
+        self.assertIn("quantifier", self.log())
+        self.assertIn("on a group", self.log())
 
     def test_an_entry_with_in_needs_a_directory_known_for_certain(self):
         path, rid = self.start_run()

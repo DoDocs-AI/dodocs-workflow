@@ -172,17 +172,19 @@ change the control point's own settings. Everything it does not recognise is all
   4. shell or interpreter code that could not be scanned at all: a shell or interpreter fed
      from a pipe (`curl ... | sh`), an interactive shell (`su`, `sudo -s`), `bash -c "$CMD"`,
      `python3 -c "$CODE"`, `eval "$(...)"`, `source <(...)`, `bash <(...)`, interpreter code
-     given as a double-quoted value with a run-time expansion in it
-     (`python3 -c "print('$X')"`, `node -e "f('${X}')"`; single quotes, `$HOME` and a literal
-     variable set earlier in the same command are read), or a `-c` string or here-document
-     the guard cannot parse;
+     given as a double-quoted value with a run-time expansion in it when that code also starts
+     a process or runs code (`python3 -c "import os; os.system('$X')"`,
+     `node -e "require('child_process').execSync('${X}')"`, `perl -e "eval '$X'"`; without a
+     spawn or eval-style call it is handled as any other run-time argument), or a `-c` string
+     or here-document the guard cannot parse;
   5. inline interpreter code (any interpreter; `-c`/`-e` code or a here-document on stdin)
      that visibly starts a process and is not read as anything more precise: a spawning
      primitive (Python `subprocess`, `os.system`, `os.popen`, `os.exec*`, `os.spawn*`, `pty`,
-     `__import__`, `exec`/`eval`, `importlib`; Node `child_process` and the `exec`/`spawn`/
-     `execFile` calls; Perl and Ruby `system`, `exec`, backticks, `qx`, `open` with a pipe; or a
-     quoted string that is the name of a program a guard rule names, such as `'npm'`) together
-     with a guarded program name or a remote address
+     `__import__`, `exec`/`eval`, `importlib`, `from os import`, anything named `subprocess`
+     such as `asyncio.create_subprocess_shell`; Node `child_process` and the `exec`/`spawn`/
+     `execFile` calls; Perl and Ruby `system`, `exec`, backticks, `qx`, `open` with a pipe)
+     together with a guarded program name, a quoted string that is the name of a program a
+     guard rule names (`'npm'`), or a remote address
      (`python3 -c "import subprocess; subprocess.run(['git','push','origin','main'])"`,
      `c='git pu'+'sh origin main'; os.system(c)`), or a spawning primitive while an argument
      after `-` or after the code is computed
@@ -220,8 +222,8 @@ change the control point's own settings. Everything it does not recognise is all
   main`, `rm -rf /`, `npm publish`, `a`, ...) is refused for any rule, and an entry for "command
   cannot be read" must name something specific: an empty pattern, a pattern that matches the
   empty string, and one that matches two or more of those unrelated commands are refused.
-  Entries the guard cannot use (a bad regex, a nested quantifier such as `(a+)+`, an unbounded
-  quantifier `*`, `+` or `{n,}` on a group such as `(a|b)*`, wrong types, a control or format
+  Entries the guard cannot use (a bad regex, a nested quantifier such as `(a+)+`, any
+  quantifier but `?` on a group, such as `(a|b)*` or `(a|b){1,99}`, wrong types, a control or format
   character in the pattern) are ignored and reported by `dw doctor`. An entry with `--in`
   applies only when the directory is known for certain: not when the command first changes
   into a directory that does not exist when the guard reads it, nor when it runs `ln`, `mv`,
@@ -329,6 +331,9 @@ Things that pass although you might expect them to be held.
 - A file written by inline code through a computed argument:
   `python3 - "$(cat f)" <<'PY'` with `open(sys.argv[1], 'w')`, like `echo x > "$(cat f)"`.
   (The `-c` form, `python3 -c '...' "$(cat f)"`, is the same.)
+- After a run-wide approval of unreadable commands, inline code with a variable expanded into
+  it (`python3 -c "print(open('$F').read())"`) passes without a question, unless that code
+  also starts a process or runs code.
 - Inline code that runs its own arguments as a command when they are literal:
   `python3 - kubectl delete ns prod <<'PY'` with `subprocess.run(sys.argv[1:])` (also the
   `-c` form; held only when an argument is computed, or when an argument is itself a whole

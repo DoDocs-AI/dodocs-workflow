@@ -49,12 +49,11 @@ feat(control): guard usability
   approval of unreadable commands does not cover it). Inline code with no process start is
   unchanged.
 - Interpreter code given as a double-quoted `-c`/`-e` value with a run-time expansion in it
-  (`python3 -c "print('$X')"`, `node -e "f('${X}')"`) is computed code: held as
-  `control-unreadable-state`. Single quotes, `$HOME` and same-command literal variables are
-  read as before.
+  is computed code, held as `control-unreadable-state`, when it also starts a process or runs
+  code (`python3 -c "import os; os.system('$X')"`); without that it is handled as before.
 - Automatic approvals are checked by what their pattern matches: one that matches every one of
   a fixed set of unrelated commands is refused for any rule, an unreadable entry may match at
-  most one of them, and an unbounded quantifier on a group (`(a|a)*b`) is refused; the guard
+  most one of them, and any quantifier but `?` on a group (`(a|a)*b`, `(a|a){1,99}b`) is refused; the guard
   ignores such entries and `dw doctor` reports them. An entry with `--in` no longer applies
   when the command changes into a directory that does not exist yet or runs `ln`, `mv`,
   `rename` or `mount` before the guarded part.

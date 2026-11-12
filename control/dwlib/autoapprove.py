@@ -8,7 +8,7 @@ with `in`, the directory the guard tracks for that segment is that directory or 
 
 Entries come from the registry, a plain file: the guard treats them as untrusted. A malformed
 entry, a regex that does not compile, one longer than MAX_PATTERN, one with a nested
-quantifier or an unbounded quantifier on a group (catastrophic backtracking), one holding a
+quantifier or any quantifier but `?` on a group (catastrophic backtracking), one holding a
 control or format character, or one that fully matches every one of a fixed set of unrelated
 commands (`_PROBES`) is ignored; an entry for `control-unreadable` must also not match the
 empty string nor more than one of those commands. A `control` rule is never auto-approved.
@@ -28,7 +28,7 @@ _RULE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 # A group holding a quantifier, itself quantified: (a+)+, (a|b*)*, (x{2,})+ ...
 _NESTED_QUANTIFIER_RE = re.compile(r"\((?:[^()\\]|\\.)*(?:[+*]|\{\d*,?\d*\})(?:[^()\\]|\\.)*\)"
                                    r"\s*(?:[+*]|\{\d*,?\d*\})")
-_UNBOUNDED_RE = re.compile(r"[*+]|\{\d*,\}")
+_REPEAT_RE = re.compile(r"[*+]|\{\d*(,\d*)?\}")
 # Unrelated single-line actions: no pattern for one kind of action matches all of them, and a
 # pattern for unreadable commands matches at most one.
 _PROBES = ("kubectl $(cat v) ns prod", 'gh pr "$(cat v)" 12', "git push origin main", "rm -rf /",
@@ -36,8 +36,9 @@ _PROBES = ("kubectl $(cat v) ns prod", 'gh pr "$(cat v)" 12', "git push origin m
 
 
 def _quantified_group(pattern: str) -> bool:
-    """Whether an unbounded quantifier (`*`, `+`, `{n,}`, lazy or not) applies to a group, read
-    with escapes and character classes respected."""
+    """Whether a repeating quantifier (`*`, `+`, `{...}` of any bounds, lazy or not; anything
+    but `?`) applies to a group, read with escapes and character classes respected: even a
+    bounded repeat of an alternation, `(a|a){1,99}`, backtracks exponentially."""
     i, in_class = 0, False
     while i < len(pattern):
         ch = pattern[i]
@@ -53,7 +54,7 @@ def _quantified_group(pattern: str) -> bool:
                 i += 1
             if pattern[i + 1:i + 2] == "]":
                 i += 1  # a `]` right after `[` or `[^` is a literal
-        elif ch == ")" and _UNBOUNDED_RE.match(pattern, i + 1):
+        elif ch == ")" and _REPEAT_RE.match(pattern, i + 1):
             return True
         i += 1
     return False
@@ -105,7 +106,7 @@ def check_entry(entry) -> "re.Pattern":
     if _NESTED_QUANTIFIER_RE.search(pattern):
         raise EntryError("match has a nested quantifier")
     if _quantified_group(pattern):
-        raise EntryError("match has an unbounded quantifier (*, +, {n,}) on a group")
+        raise EntryError("match has a repeating quantifier (*, +, {...}) on a group; only ? is allowed there")
     try:
         compiled = re.compile(pattern)
     except (re.error, RecursionError, OverflowError, ValueError) as exc:

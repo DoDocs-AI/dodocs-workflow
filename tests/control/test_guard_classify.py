@@ -2497,23 +2497,57 @@ class InlineSpawnTests(GuardClassifyBase):
         # Code that comes from somewhere unseen is still plain unreadable.
         self.assertEqual(self.result('python3 - "$X"'), ("control-unreadable", "unreadable"))
 
-    def test_double_quoted_code_with_a_run_time_expansion_is_computed_code(self):
-        for command in ("python3 -c \"print('$X')\"",
-                        "python3 -c \"import json,sys; print(json.load(sys.stdin)['${KEY}'])\"",
-                        "node -e \"console.log('${X}')\"",
-                        "perl -e \"print '$X'\"",
+    def test_double_quoted_code_that_spawns_with_a_run_time_expansion_is_computed_code(self):
+        for command in ("python3 -c \"import os; os.system('$X')\"",
+                        "python3 -c \"exec('$CODE')\"",
+                        "node -e \"require('child_process').execSync('${X}')\"",
+                        "perl -e \"system '$X'\"",
+                        "perl -e \"eval '$X'\"",
                         "ruby -e \"puts `id`\""):
             with self.subTest(command=command):
                 self.assertIn("control-unreadable-state", self.bash(command)["id"].split("+"))
                 self.assertEqual(self.bash(command)["category"], "control")
-        # Single quotes keep the text literal; a same-command literal variable and $HOME are
-        # resolved: as before.
-        self.assertEqual(self.result("python3 -c 'print(\"$X\")'"),
-                         ("control-unreadable", "unreadable"))
-        for command in ("perl -e 'print $x'", "X=hi; python3 -c \"print('$X')\"",
-                        "node -e \"console.log('a')\""):
+
+    def test_double_quoted_code_with_an_expansion_and_no_spawn_is_as_before(self):
+        # As at 5584406: python is plain unreadable (approvable), node/perl allowed.
+        for command in ("python3 -c \"print('$USER')\"",
+                        "python3 -c \"import json; print(json.load(open('$F'))['version'])\"",
+                        "python3 -c 'print(\"$X\")'"):
+            with self.subTest(command=command):
+                self.assertEqual(self.result(command), ("control-unreadable", "unreadable"))
+        for command in ("node -e \"console.log(require('$PWD/package.json').version)\"",
+                        "perl -e 'print $x'", "perl -e \"print '$X'\"",
+                        "X=hi; python3 -c \"print('$X')\"", "node -e \"console.log('a')\""):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command))
+
+    def test_python_spawn_forms_with_a_computed_argument(self):
+        for command in (
+                "python3 - \"$(cat f)\" <<'PY'\nimport sys\nfrom os import system as q\n"
+                "q(sys.argv[1])\nPY",
+                "python3 - \"$(cat f)\" <<'PY'\nimport sys,asyncio\n"
+                "asyncio.run(asyncio.create_subprocess_shell(sys.argv[1]))\nPY",
+                "python3 - \"$X\" <<'PY'\nimport sys\nfrom subprocess import run as r\n"
+                "r(sys.argv[1], shell=True)\nPY",
+                "node - \"$X\" <<'JS'\nconst {exec} = require('node:child_process');\n"
+                "exec(process.argv[2])\nJS",
+                "node - \"$X\" <<'JS'\nimport { spawn as s } from 'child_process';\n"
+                "s(process.argv[2])\nJS",
+                "ruby - \"$X\" <<'RB'\nrequire 'open3'\nOpen3.capture2(ARGV[0])\nRB",
+                "python3 - \"$X\" <<'PY'\nimport sys,subprocess\nsubprocess.run(['pytest', sys.argv[1]])\nPY"):
+            with self.subTest(command=command):
+                self.assertEqual(self.result(command), self.STATE)
+
+    def test_a_quoted_program_name_alone_is_not_a_spawn(self):
+        for command in (
+                "python3 - \"$F\" <<'PY'\nimport sys,json\nd=json.load(open(sys.argv[1]))\n"
+                "print(d['docker'], d['npm'])\nPY",
+                "node - \"$X\" <<'JS'\nconst d = require(process.argv[2]); console.log(d['git'])\nJS"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+        # With the module in sight, the name still counts.
+        self.assertEqual(self.result(
+            "python3 - <<'PY'\nimport subprocess as s\ns.call(['npm','publish'])\nPY"), self.STATE)
 
 
 class GuardEntryPresentTests(DwTestCase):

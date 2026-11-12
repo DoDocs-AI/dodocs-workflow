@@ -211,18 +211,20 @@ class AutoApproveCliTests(DwTestCase):
                 r = self.dw("project", "auto-approve", "alpha", "--rule", rule, "--match", pattern)
                 self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_unbounded_quantifier_on_a_group_is_refused(self):
+    def test_a_repeat_quantifier_on_a_group_is_refused(self):
         self.add_project("alpha")
         for pattern in ("kubectl (a|a)*b", "kubectl (?:a|b)+ x", "kubectl (ab){2,} x",
-                        "kubectl (a)*?b", "x(y(z))+"):
+                        "kubectl (a)*?b", "x(y(z))+", "kubectl (a|a){1,99}b",
+                        "kubectl (a|b){1,3} x", "kubectl (a){2} x"):
             with self.subTest(pattern=pattern):
                 r = self.dw("project", "auto-approve", "alpha", "--rule", "kubectl-change",
                             "--match", pattern)
                 self.assertEqual(r.returncode, 2, r.stdout)
-                self.assertIn("unbounded", r.stderr)
-        # Escaped parentheses, parentheses in a class, bounded repeats: accepted.
-        for pattern in (r"kubectl \(a\)* x", "kubectl [()]+ x", "kubectl (a|b){1,3} x",
-                        "kubectl (apply|diff)? -f x", r"echo \\(a|b) x"):
+                self.assertIn("quantifier", r.stderr)
+                self.assertIn("on a group", r.stderr)
+        # Escaped parentheses, parentheses in a class, an optional group: accepted.
+        for pattern in (r"kubectl \(a\)* x", "kubectl [()]+ x", "kubectl (apply|diff)? -f x",
+                        r"echo \\(a|b) x", r"kubectl -n app apply -f k8s/\w{1,20}\.yaml"):
             with self.subTest(pattern=pattern):
                 r = self.dw("project", "auto-approve", "alpha", "--rule", "kubectl-change",
                             "--match", pattern)

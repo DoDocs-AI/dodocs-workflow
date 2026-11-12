@@ -26,9 +26,10 @@ is `control-unreadable-state` (category `control`). So is inline interpreter cod
 interpreter; `-c`/`-e` code or a here-document on stdin) that visibly starts a process (a
 spawning primitive of its family: python subprocess, os.system/popen/exec*/spawn*, pty,
 `__import__`, exec/eval, importlib; node child_process and its exec/spawn/execFile calls;
-perl/ruby system, exec, backticks, qx, open with a pipe; or a quoted rule program name) when
-its verdict would otherwise be plain `unreadable`, or when an argument after `-` or after the
-code is computed: plain `unreadable` is only for inline code where no spawn is visible. When
+perl/ruby system, exec, backticks, qx, open with a pipe) when its verdict would otherwise be
+plain `unreadable` (a quoted rule program name counts next to a spawning primitive), when an
+argument after `-` or after the code is computed, or when double-quoted code that spawns or
+evaluates has a run-time expansion: plain `unreadable` is only for inline code where no spawn is visible. When
 the same call also matches another category, that category decides the question, and an
 unreadable approval never lets it through.
 
@@ -660,9 +661,12 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                     matches += _inline_matches(loader, ctx, depth)
             operands = [a for a in rest if not a.startswith("-")]
             for code in codes:
-                if _run_time_text(code) or "__dwsub" in code or \
-                        _double_quoted_run_time(code, seg["words"]):
-                    matches.append(_unreadable_state_match())  # code that cannot be scanned
+                if _run_time_text(code) or "__dwsub" in code or (
+                        _double_quoted_run_time(code, seg["words"]) and
+                        (_code_spawns(code, family) or _EVAL_CALL_RE.search(code))):
+                    # code that cannot be scanned: computed, or a run-time expansion in code
+                    # that starts a process or runs code
+                    matches.append(_unreadable_state_match())
             # `python3 - ARG...`: the program is read from standard input, the words after `-`
             # are data for it. With a here-document the body is the code (scanned below).
             stdin_script = not codes and _script_word(rest) in ("-", "/dev/stdin")
@@ -673,7 +677,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             # Code that visibly starts a process is never plain unreadable: what it runs cannot
             # be read (a computed argument may be the very command it runs).
             code_texts = list(codes) + (list(seg["heredocs"]) if stdin_script else [])
-            inline_spawn = any(_code_spawns(t, family, ctx) for t in code_texts)
+            inline_spawn = any(_code_spawns(t, family) for t in code_texts)
             if inline_spawn and any(_computed_word(a) for a in rest if a not in codes):
                 matches.append(_unreadable_state_match())
             for arg in rest:
@@ -1085,11 +1089,12 @@ _URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+")
 # A process-spawning primitive in inline code, per interpreter family (a family-blind
 # `system(`/`exec(` would also hit `platform.system()` or a JavaScript `re.exec()`).
 _FAMILY_SPAWN_RE = {
-    "python": re.compile(r"\bsubprocess\b|\bos\s*\.\s*(system|popen|exec\w*|spawn\w*|posix_spawn\w*)\b|"
-                         r"\bpty\b|__import__|\bimportlib\b|(?<![.\w])(exec|eval)\s*\("),
+    "python": re.compile(r"subprocess|\bos\s*\.\s*(system|popen|exec\w*|spawn\w*|posix_spawn\w*)\b|"
+                         r"\bfrom\s+os\s+import\b|\bpty\b|__import__|\bimportlib\b|"
+                         r"(?<![.\w])(exec|eval)\s*\("),
     "node": re.compile(r"child_process|(?<![.\w])(exec|execSync|execFile|execFileSync|spawn|spawnSync|"
                        r"fork)\s*\(|\.\s*(execSync|execFile|execFileSync|spawn|spawnSync)\s*\(|"
-                       r"Bun\.spawn|Deno\.(run|Command)"),
+                       r"Bun\.spawn|Deno\.(run|Command)|spawn_sync"),
     "perl": re.compile(r"\b(system|exec)\b|`|\bqx\s*\W|%x\W|\bopen\s*\(?[^;\n]*['\"][^'\"\n]*\|"),
 }
 _FAMILY_SPAWN_RE["pypy"] = _FAMILY_SPAWN_RE["python"]
@@ -1113,16 +1118,19 @@ def _names_rule_program(text: str, ctx: _Ctx) -> bool:
     return False
 
 
-def _code_spawns(text: str, family: Optional[str], ctx: _Ctx) -> bool:
+def _code_spawns(text: str, family: Optional[str]) -> bool:
     """Whether inline code visibly starts a process: a spawning primitive of its interpreter
-    family (any known one when the family is not known), or a quoted program name a guard
-    rule names."""
+    family (any known one when the family is not known). A quoted program name alone is not
+    one (`d['docker']`); it counts only next to a spawning primitive (see _inline_matches)."""
     rx = _FAMILY_SPAWN_RE.get(family or "")
     if rx is not None:
-        found = bool(rx.search(text))
-    else:
-        found = bool(_SPAWN_RE.search(text)) or any(r.search(text) for r in _FAMILY_SPAWN_RE.values())
-    return found or _names_rule_program(text, ctx)
+        return bool(rx.search(text))
+    return bool(_SPAWN_RE.search(text)) or any(r.search(text) for r in _FAMILY_SPAWN_RE.values())
+
+
+# Code that runs other code it is given: exec/eval-style calls in any interpreter family.
+_EVAL_CALL_RE = re.compile(r"(?<![.\w])(exec|eval|compile|Function)\s*\(|\bnew\s+Function\b|"
+                           r"\bvm\s*\.|(?<![.\w$@%])eval\b")
 
 
 _EXPANSION_START_RE = re.compile(r"\$(?:[A-Za-z_0-9@*#?!$-]|\{|\()")

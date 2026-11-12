@@ -96,28 +96,28 @@ def _new_segment(pipe_in: bool) -> dict:
             "pipe_out": False, "keep": False}
 
 
-def _body_substitutions(body: str) -> list:
-    """The command substitutions ($( ) and backticks) of an unquoted here-document body, read
-    as a double-quoted word is (see _Lexer.read_double), except that a double quote is plain
-    text: a backslash escapes the next character, $(( )) is arithmetic as elsewhere."""
+def _scan_body(target: "_Lexer", body: str) -> None:
+    """Add to `target` the command substitutions ($( ) and backticks) of an unquoted
+    here-document body or an arithmetic expansion, read as a double-quoted word is (see
+    _Lexer.read_double) except that a double quote is plain text: a backslash escapes the next
+    character, and $(( is read both ways (see _Lexer.double_paren)."""
     if "$" not in body and "`" not in body:
-        return []
+        return
     lexer = _Lexer(body)
     while lexer.i < lexer.n:
         c = body[lexer.i]
         if c == "\\":
             lexer.i += 2
         elif body.startswith("$((", lexer.i):
-            j = lexer.close_paren(lexer.i + 3, 2)
-            lexer.arithmetic(lexer.i + 3, j)
-            lexer.i = j + 1
+            lexer.i = lexer.double_paren(lexer.i)
         elif body.startswith("$(", lexer.i):
             lexer.substitution(lexer.i + 2)
         elif c == "`":
             lexer.backtick()
         else:
             lexer.i += 1
-    return lexer.subs
+    target.subs += lexer.subs
+    target.alt_subs += lexer.alt_subs
 
 
 class _Lexer:
@@ -134,6 +134,9 @@ class _Lexer:
         self.n = len(text)
         self.segments: list = []
         self.subs: list = []
+        # Bodies that are command substitutions only under one reading of `$((` (a
+        # substitution starting with a subshell); classified as such too (guard._shell_matches).
+        self.alt_subs: list = []
         self.seg = _new_segment(False)
         self.pending: list = []
         # False once the text uses anything but simple commands joined by &&, ||, ;, newlines
@@ -200,27 +203,31 @@ class _Lexer:
             self.segments.append(seg)
         self.seg = _new_segment(pipe)
 
+    def read_heredoc(self, j: int, delim: str, strip: bool, quoted: bool) -> tuple:
+        """(body, index after it) of a here-document whose body starts at `j`. The one reader
+        for every place a body is skipped or kept: `<<-` strips leading tabs, and with an
+        unquoted delimiter each backslash-newline pair is deleted (an odd number of trailing
+        backslashes joins the next line) before the delimiter is looked for."""
+        s, lines = self.s, []
+        while j < self.n:
+            k = s.find("\n", j)
+            line = s[j:] if k < 0 else s[j:k]
+            j = self.n if k < 0 else k + 1
+            while not quoted and j < self.n and (len(line) - len(line.rstrip("\\"))) % 2 == 1:
+                k = s.find("\n", j)
+                line = line[:-1] + (s[j:] if k < 0 else s[j:k])
+                j = self.n if k < 0 else k + 1
+            if (line.lstrip("\t") if strip else line) == delim:
+                break
+            lines.append(line)
+        return "\n".join(lines), j
+
     def heredoc_bodies(self) -> None:
         for delim, strip, seg, quoted in self.pending:
-            lines = []
-            while self.i < self.n:
-                j = self.s.find("\n", self.i)
-                line = self.s[self.i:] if j < 0 else self.s[self.i:j]
-                self.i = self.n if j < 0 else j + 1
-                # Unquoted, the shell deletes each backslash-newline pair while reading the
-                # body: an odd number of trailing backslashes joins the next line.
-                while not quoted and self.i < self.n and \
-                        (len(line) - len(line.rstrip("\\"))) % 2 == 1:
-                    j = self.s.find("\n", self.i)
-                    line = line[:-1] + (self.s[self.i:] if j < 0 else self.s[self.i:j])
-                    self.i = self.n if j < 0 else j + 1
-                if (line.lstrip("\t") if strip else line) == delim:
-                    break
-                lines.append(line)
-            body = "\n".join(lines)
+            body, self.i = self.read_heredoc(self.i, delim, strip, quoted)
             seg["heredocs"].append(body)
             if not quoted:
-                self.subs += _body_substitutions(body)
+                _scan_body(self, body)
         self.pending = []
 
     def redirect(self) -> None:
@@ -278,10 +285,9 @@ class _Lexer:
             elif c == "$" and nxt == "'":
                 out.append(self.ansi_c())
             elif c == "$" and s.startswith("$((", self.i):
-                j = self.close_paren(self.i + 3, 2)
-                self.arithmetic(self.i + 3, j)
-                out.append(s[self.i:j + 1])
-                self.i = j + 1
+                j = self.double_paren(self.i)
+                out.append(s[self.i:j])
+                self.i = j
             elif c == "$" and nxt == "(":
                 out.append(self.substitution(self.i + 2))
             elif c == "$" and nxt == "{":
@@ -310,10 +316,9 @@ class _Lexer:
                 self.i += 1
                 return "".join(out)
             elif c == "$" and s.startswith("$((", self.i):
-                j = self.close_paren(self.i + 3, 2)
-                self.arithmetic(self.i + 3, j)
-                out.append(s[self.i:j + 1])
-                self.i = j + 1
+                j = self.double_paren(self.i)
+                out.append(s[self.i:j])
+                self.i = j
             elif c == "$" and nxt == "(":
                 out.append(self.substitution(self.i + 2))
             elif c == "`":
@@ -350,19 +355,14 @@ class _Lexer:
                 continue
             if c == "\n" and heredocs:
                 j += 1
-                for delim, strip in heredocs:
-                    while j < self.n:
-                        k = s.find("\n", j)
-                        line = s[j:] if k < 0 else s[j:k]
-                        j = self.n if k < 0 else k + 1
-                        if (line.lstrip("\t") if strip else line) == delim:
-                            break
+                for delim, strip, quoted in heredocs:
+                    _body, j = self.read_heredoc(j, delim, strip, quoted)
                 heredocs = []
                 continue
             if c == "<" and s.startswith("<<", j) and not s.startswith("<<<", j):
-                m = re.match(r"<<(-?)[ \t]*(['\"]?)([A-Za-z0-9_.-]+)\2", s[j:])
+                m = re.match(r"<<(-?)[ \t]*(\\?)(['\"]?)([A-Za-z0-9_.-]+)\3", s[j:])
                 if m:
-                    heredocs.append((m.group(3), m.group(1) == "-"))
+                    heredocs.append((m.group(4), m.group(1) == "-", bool(m.group(2) or m.group(3))))
                     j += m.end()
                     continue
             if c == "'":
@@ -431,7 +431,27 @@ class _Lexer:
             return
         if "[" in text:
             raise _Unreadable("a command substitution inside an arithmetic subscript")
-        self.subs += _body_substitutions(text)
+        _scan_body(self, text)
+
+    def double_paren(self, i: int) -> int:
+        """`$((` at `i` is read both ways, as the shell may: as arithmetic (see `arithmetic`)
+        and as a command substitution whose body starts with a subshell (`alt_subs`). Returns
+        the index after it."""
+        try:
+            arith = self.close_paren(i + 3, 2)
+        except _Unreadable:
+            arith = None
+        try:
+            command = self.close_paren(i + 2)
+        except _Unreadable:
+            command = None
+        if arith is None and command is None:
+            raise _Unreadable("unterminated $((")
+        if arith is not None:
+            self.arithmetic(i + 3, arith)
+        if command is not None:
+            self.alt_subs.append(self.s[i + 2:command])
+        return (command if command is not None else arith) + 1
 
     def placeholder(self, body: str) -> str:
         self.subs.append(body)

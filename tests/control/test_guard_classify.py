@@ -1971,6 +1971,26 @@ class UnquotedHereDocumentTests(GuardClassifyBase):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command))
 
+    def test_double_paren_is_read_both_ways(self):
+        home = os.path.realpath(str(self.paths.home()))
+        held = {"echo $((git push origin main); echo x)": "merge",
+                "x=$((gh pr merge 3) 2>&1)": "merge",
+                'echo "$((git push origin main); echo x)"': "merge",
+                "cat <<EOF\n$((rm %s/registry.json); true)\nEOF" % home: "control"}
+        for command, category in held.items():
+            with self.subTest(command=command):
+                self.assertEqual(self.category(self.bash(command)), category)
+        for command in ("echo $((1+2))", "i=$((i+1))", "echo $(( (a+b)*2 ))",
+                        "n=$((n > 3 ? 1 : 0))", "cat <<EOF\ntotal=$((n*2))\nEOF"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
+    def test_a_here_document_inside_a_substitution_is_read_the_same_way(self):
+        command = "echo $(cat <<EOF\nx\\\nEOF\n$(git push origin main)\nEOF\n)"
+        self.assertEqual(self.category(self.bash(command)), "merge")
+        quoted = "echo $(cat <<'EOF'\nplain $(git push origin main) text\nEOF\n)"
+        self.assertIsNone(self.bash(quoted))
+
     def test_a_quoted_body_is_literal_text(self):
         note = os.path.realpath(str(self.paths.result_note_path(self.run_id)))
         for command in ("cat > notes.txt <<'EOF'\n$(rm -rf /)\nEOF",

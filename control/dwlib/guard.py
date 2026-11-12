@@ -489,6 +489,12 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
         matches += _segment_matches(seg, ctx, depth)
     for body in lexed.subs:
         matches += _shell_matches(body, start.fork(), depth + 1)
+    for body in lexed.alt_subs:
+        # `$((` read as a substitution starting with a subshell: what it matches counts, and
+        # an unreadable reading only when it names a guarded program (plain arithmetic such
+        # as `$(( (a+b)*2 ))` does not read as a command).
+        matches += [m for m in _shell_matches(body, start.fork(), depth + 1)
+                    if m["id"] != "control-unreadable" or _GUARDED_NAME_RE.search(body)]
     return matches
 
 
@@ -1360,7 +1366,8 @@ def _plain_note_write(command: str, ctx: _Ctx, depth: int = 0) -> bool:
             return False
         if name in ("cd", "pushd"):
             _change_dir(words, sub)
-    return all(_plain_note_write(body, ctx, depth + 1) for body in lexed.subs)
+    return all(_plain_note_write(body, ctx, depth + 1)
+               for body in list(lexed.subs) + list(lexed.alt_subs))
 
 
 def _straight_line_segments(command: str) -> Optional[set]:

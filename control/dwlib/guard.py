@@ -656,7 +656,10 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     if tokens:
         rule = _first_rule(tokens, seg, ctx)
         if rule is not None:
-            matches.append(_render(rule, " ".join(original), _segment_text(original)))
+            match = _render(rule, " ".join(original), _segment_text(original))
+            if "segment" in match:
+                match["dir"] = ctx.cwd  # where it runs: part of an approval's identity
+            matches.append(match)
     return matches
 
 
@@ -1702,26 +1705,34 @@ def _mcp_rule_matches(rule: dict, server: str, tool: str) -> bool:
 # -- classify ------------------------------------------------------------------
 
 
+_UNKNOWN_DIR = "?unknown"  # never equal to a real (absolute) directory
+
+
 def _combine(matches: list) -> Optional[dict]:
     """One match for the call. Before the merge by rule id, `pairs` keeps every distinct
-    (rule id, describe) the call hit, for the question, and `keys` every distinct (rule id,
-    full segment text), which is what an approval is about (see `_fingerprint`)."""
+    (rule id, describe) the call hit, for the question (with the directory when it is not the
+    call's own), and `keys` every (rule id, full segment text, directory), which is what an
+    approval is about (see `_fingerprint`)."""
     unique: list = []
     for m in matches:
         if not any(u["id"] == m["id"] for u in unique):
             unique.append(m)
     if not unique:
         return None
-    pairs = [list(p) for p in sorted({(m["id"], m["describe"]) for m in matches})]
+    pairs = [list(p) for p in sorted({
+        (m["id"], m["describe"] + (" (in %s)" % m["where"] if m.get("where") else ""))
+        for m in matches})]
     # A list, repeats kept: `X && X` runs X twice and is not the action `X`.
-    keys = sorted([m["id"], m["segment"]] for m in matches if "segment" in m)
+    keys = sorted([m["id"], m["segment"], m.get("dir") or _UNKNOWN_DIR]
+                  for m in matches if "segment" in m)
     if len(unique) == 1:
         out = {**unique[0], "pairs": pairs}
     else:
         unique.sort(key=lambda m: CATEGORIES.index(m["category"]))
         out = {"id": "+".join(m["id"] for m in unique), "category": unique[0]["category"],
                "describe": "; ".join(m["describe"] for m in unique), "pairs": pairs}
-    out.pop("segment", None)
+    for internal in ("segment", "dir", "where"):
+        out.pop(internal, None)
     if all("segment" in m for m in matches):
         out["keys"] = keys
     return out
@@ -1750,9 +1761,13 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
         # or an unreadable one) each match is about the whole command: its exact text.
         flat = _straight_line_segments(command)
         straight = flat is not None and all(m.get("segment") in flat for m in matches)
+        start = os.path.realpath(cwd) if cwd else None
         for m in matches:
             if not straight:
-                m["segment"] = command.strip()
+                m["segment"], m["dir"] = command.strip(), start
+            m.setdefault("dir", start)
+            if m["dir"] != start:  # shown in the question
+                m["where"] = m["dir"] or "an unknown directory"
         return _combine(matches)
     if tool_name in WRITE_TOOLS:
         target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
@@ -1888,13 +1903,15 @@ def _pairs(match: dict) -> list:
 def _fingerprint(tool: str, tool_input: dict, match: dict) -> str:
     """The identity of an approval; what `pending_approval.action`, one-shot grants, "one
     question per run at a time" and sibling waiters compare. For Bash: the sorted list (repeats
-    kept) of (rule id, full segment text) pairs the call hit, so the same guarded segment run
-    once is the same action whatever else is on a straight-line command line; for any command
-    not positively straight-line every match carries the whole command as its segment (see
+    kept) of (rule id, full segment text, directory) the call hit, so the same guarded segment
+    run once in the same directory is the same action whatever else is on a straight-line
+    command line. The directory is the one the guard tracks for the segment (the call's, as
+    moved by an earlier cd; unknown never equals a known one). For any command not positively
+    straight-line every match carries the whole command, in the call's directory (see
     `classify`). For any other tool: the rule ids, the tool and its input."""
     keys = match.get("keys")
     if tool == "Bash" and keys:
-        key: list = ["segments", sorted([str(r), str(t)] for r, t in keys)]
+        key: list = ["segments", sorted([str(part) for part in k] for k in keys)]
     else:
         volatile = ("description", "timeout", "run_in_background")
         key = ["input", sorted(match["id"].split("+")), tool,

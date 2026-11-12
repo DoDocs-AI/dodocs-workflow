@@ -1108,3 +1108,30 @@ class GuardResultNoteTests(GuardHookBase):
                         "mkdir -p %s/." % self.runs):
             with self.subTest(command=command):
                 self.held_as_control(command)
+
+
+class GuardApprovalDirectoryTests(GuardHookBase):
+    """An approval is for the directory the guarded segment runs in."""
+
+    def held(self, path, command):
+        out = self.guard(self.payload(path, command))
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+
+    def test_an_approval_does_not_carry_over_to_another_directory(self):
+        path, rid = self.start_run()
+        other = self.tmp / "other"
+        other.mkdir()
+        self.held(path, "git push origin main")
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        self.held(path, "cd %s && git push origin main" % other)
+        self.assertEqual(len(self.record(rid)["grants"]), 1)
+        ask = self.ask_calls()[-1]
+        message = ask[ask.index("--message") + 1]
+        self.assertIn("(in %s)" % other.resolve(), message)
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        self.held(path, "cd $SOMEWHERE && git push origin main")
+        self.assertEqual(len(self.record(rid)["grants"]), 1)
+        self.assertEqual(self.dw("deny", rid).returncode, 0)
+        self.assertIsNone(self.guard(self.payload(path, "cd . && git push origin main")))
+        self.assertEqual(self.record(rid)["grants"], [])

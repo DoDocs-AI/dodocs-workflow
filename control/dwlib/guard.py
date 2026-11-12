@@ -57,7 +57,10 @@ from .guard_shell import (  # noqa: F401
     _SHELL_STARTERS,
     _UNREADABLE_RULE,
     UNREADABLE_ID,
+    UNREADABLE_STATE_ID,
     _Unreadable,
+    _is_unreadable,
+    _unreadable_state_match,
     _bounded_glob,
     _command_strings,
     _dynamic,
@@ -246,7 +249,7 @@ def _string_matches(texts: list, ctx: _Ctx, depth: int) -> list:
             _Lexer(text).run()
         except _Unreadable as exc:
             if not _prose_with_apostrophe(re.sub(r"__dwsub\w*?__", "", text), exc):
-                out.append(_unreadable_match())
+                out.append(_unreadable_state_match())  # code that could not be scanned
             continue
         out += _shell_matches(text, ctx.fork(), depth + 1)
     return out
@@ -421,14 +424,14 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
                      "describe": "run commands on remote hosts: %s" % _short(" ".join(tokens)),
                      "segment": _segment_text(tokens)}]
         if all(t.startswith("-") or t.startswith(":::") for t in tokens[1:]):
-            return [_unreadable_match()]  # the commands come from standard input
+            return [_unreadable_state_match()]  # the commands come from standard input
     if name in _SHELL_STARTERS:
         for body in seg["heredocs"]:
             out += _shell_matches(body, ctx.fork(), depth + 1)
         if seg["pipe_in"] and not seg["heredocs"]:
-            out.append(_unreadable_match())  # its input comes from another command
+            out.append(_unreadable_state_match())  # its input comes from another command
         elif not seg["heredocs"] and _starts_shell_without_command(name, tokens):
-            out.append(_unreadable_match())  # an interactive shell this guard cannot see
+            out.append(_unreadable_state_match())  # an interactive shell this guard cannot see
     sub = ctx.fork()
     if name in ("env", "sudo", "doas", "su", "runuser", "nsenter", "chroot", "unshare") and \
             any(t in ("-C", "-D", "--chdir", "-w", "--wd") or t.startswith("--chdir=") or
@@ -478,7 +481,11 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
         return [_unreadable_match()]
     try:
         lexed = _Lexer(text).run()
-    except _Unreadable:
+    except _Unreadable as exc:
+        # Nested text (a here-document or string a shell runs) that cannot be scanned, or an
+        # arithmetic subscript the shell evaluates, may do anything: held as control.
+        if depth > 0 or "arithmetic subscript" in str(exc):
+            return [_unreadable_state_match()]
         return [_unreadable_match()]
     matches: list = []
     ctx.sub_bodies = lexed.subs
@@ -502,7 +509,7 @@ def _shell_matches(text: str, ctx: _Ctx, depth: int = 0) -> list:
         # an unreadable reading only when it names a guarded program (plain arithmetic such
         # as `$(( (a+b)*2 ))` does not read as a command).
         matches += [m for m in _shell_matches(body, start.fork(), depth + 1)
-                    if m["id"] != "control-unreadable" or _GUARDED_NAME_RE.search(body)]
+                    if not _is_unreadable(m) or _GUARDED_NAME_RE.search(body)]
     return matches
 
 
@@ -546,7 +553,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     matches: list = []
     tokens = original
     if any(_GIT_ENV_RE.match(t) for t in original):
-        matches.append(_unreadable_match())
+        matches.append(_unreadable_state_match())  # a git environment override
     matches += _loader_env_matches(original, ctx, depth)
     wrapped = False
     for _ in range(16):
@@ -560,7 +567,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             break
         name = os.path.basename(prog)
         if name in _TEST_PROGRAMS and _arithmetic_subscript(tokens):
-            matches.append(_unreadable_match())  # an arithmetic operand runs its substitutions
+            matches.append(_unreadable_state_match())  # an arithmetic operand runs its substitutions
         if name in SHELLS:
             # The -c value (or the first operand, the script file) is the code. A run-time
             # value there cannot be read; later operands are data for the script.
@@ -569,14 +576,17 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             operands = [a for a in args if not a.startswith(("-", "+"))]
             for code in codes:
                 if _run_time_text(code) or "__dwsub" in code:
-                    matches.append(_unreadable_match())
+                    matches.append(_unreadable_state_match())  # code that cannot be scanned
                 else:
                     matches += _string_matches([code], ctx, depth)
             if not codes and operands and _run_time_text(operands[0]):
-                matches.append(_unreadable_match())  # the script itself is computed
+                # The script itself is computed: a substitution (process substitution
+                # included) is code nobody can scan; a variable naming a file is a value.
+                matches.append(_unreadable_state_match() if "__dwsub" in operands[0]
+                               else _unreadable_match())
             stdin_program = not operands or operands[0] in ("-", "/dev/stdin") or "-s" in args
             if stdin_program and seg["pipe_in"]:
-                matches.append(_unreadable_match())
+                matches.append(_unreadable_state_match())
             for body in seg["heredocs"]:
                 matches += _shell_matches(body, ctx.fork(), depth + 1)
             tokens = []
@@ -603,7 +613,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
             operands = [a for a in rest if not a.startswith("-")]
             for code in codes:
                 if _run_time_text(code) or "__dwsub" in code:
-                    matches.append(_unreadable_match())
+                    matches.append(_unreadable_state_match())  # code that cannot be scanned
             if not codes and operands and _run_time_text(operands[0]):
                 matches.append(_unreadable_match())  # the script itself is computed
             for arg in rest:
@@ -620,7 +630,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
                         found.append(_unreadable_match())
                     matches += found
             if seg["pipe_in"] and (not operands or operands[0] in ("-", "/dev/stdin")):
-                matches.append(_unreadable_match())
+                matches.append(_unreadable_state_match())  # code from another command
             if operands and os.path.basename(operands[0]) == "dw":
                 tokens = rest[rest.index(operands[0]):]
                 continue
@@ -638,15 +648,16 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
         if name == "eval":
             body = " ".join(tokens[1:])
             if "$" in body or "`" in body or "__dwsub" in body:
-                matches.append(_unreadable_match())
+                matches.append(_unreadable_state_match())  # text the shell runs, unscanned
             else:
                 matches += _shell_matches(body, ctx.fork(), depth + 1)
             tokens = []
             break
         if name in ("source", "."):
             target = tokens[1] if len(tokens) > 1 else ""
-            if "__dwsub" in target or target in ("-", "/dev/stdin") or \
-                    target.startswith("/dev/fd") or "://" in target or "$" in target:
+            if "__dwsub" in target or target in ("-", "/dev/stdin") or target.startswith("/dev/fd"):
+                matches.append(_unreadable_state_match())  # code from a stream, unscanned
+            elif "://" in target or "$" in target:
                 matches.append(_unreadable_match())
             break
         if name in WRAPPERS:
@@ -1005,7 +1016,7 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
         literal = m.group(1) if m.group(1) is not None else m.group(2)
         if len(literal.split()) >= 2:
             out += [x for x in _shell_matches(literal, ctx.fork(), depth + 1)
-                    if x["id"] != "control-unreadable"]
+                    if not _is_unreadable(x)]
     found = {x["category"] for x in out}
     for rx, rid, category, describe in _INLINE_PATTERNS:
         if category not in found and rx.search(text):
@@ -1163,7 +1174,9 @@ def _loop_words(original: list, ctx: _Ctx) -> bool:
     if words[:1] not in (["for"], ["select"]) or len(words) < 2:
         return False
     values = words[3:] if words[2:3] == ["in"] else []
-    ctx.loop_words[words[1]] = values if len(values) <= MAX_LOOP_WORDS else None  # None: not read
+    readable = len(values) <= MAX_LOOP_WORDS and \
+        not any("__dwsub" in v or "$" in v or "`" in v for v in values)
+    ctx.loop_words[words[1]] = values if readable else None  # None: not read
     return True
 
 
@@ -1279,8 +1292,11 @@ def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,
     every = list(original) + list(redirects)
     variants = [(i, _loop_variants(every[i], ctx)) for i in indexes]
     if any(found is None for _, found in variants):
-        out.append(_unreadable_match())  # a write position uses a loop variable too long to read
-    if any(_word_hits(w, ctx, i in spared) for i, found in variants for w in found or ()):
+        # A write position uses a loop variable whose words cannot be read (too many, or
+        # only known at run time): the target cannot be resolved.
+        out.append(_unreadable_state_match())
+    if any(_word_hits(w, ctx, i in spared) for i, found in variants
+           for w in (found if found is not None else [every[i]])):
         out.append(_state_match(" ".join(original)))
     return out
 
@@ -1887,6 +1903,22 @@ def _combine(matches: list) -> Optional[dict]:
     return out
 
 
+_CONTROL_TEXT_RE = re.compile(
+    r"(?<![\w.-])(?:[\w.~-]*/)*dw(?![\w.-])|\.dodocs-workflow|dw_home|\.claude/settings|"
+    r"settings\.local\.json|hooks\.conf|agtermctl|\.git/config|\.git/hooks|"
+    r"\.git/info/attributes|git_dir|core\.hookspath|node_options|perl5opt|rubyopt|"
+    r"pythonstartup|bash_env|ld_preload|dyld_insert_libraries|lessopen|lessclose")
+
+
+def _names_control_point(text: str) -> bool:
+    """Whether a command's raw text, read loosely (any case; also with quotes and backslashes
+    removed), mentions the control point or a file or variable that protects it."""
+    low = text.lower()
+    loose = re.sub(r"[\\'\"]", "", low)
+    home = os.path.realpath(str(paths.home())).lower()
+    return any(_CONTROL_TEXT_RE.search(t) or home in t for t in (low, loose))
+
+
 def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
              rules: list) -> Optional[dict]:
     """The matching rule (`{"id", "category", "describe"}`, plus `pairs` and `keys` for shell
@@ -1909,6 +1941,9 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
         # every match of which is about one of its own top-level simple commands. Otherwise
         # (a loop in any dialect, a pipe, a wrapper, inline code, a match about the whole line
         # or an unreadable one) each match is about the whole command: its exact text.
+        if any(m["id"] == UNREADABLE_ID for m in matches) and _names_control_point(command):
+            matches = [_unreadable_state_match() if m["id"] == UNREADABLE_ID else m
+                       for m in matches]
         flat = _straight_line_segments(command)
         straight = flat is not None and all(m.get("segment") in flat for m in matches)
         start = os.path.realpath(cwd) if cwd else None

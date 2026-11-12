@@ -136,6 +136,22 @@ change the control point's own settings. Everything it does not recognise is all
   to the control point), that category decides the question, and an approval of unreadable
   commands never lets it through. Answering such a question *for this run* remembers only the
   other rule, not the unreadable class.
+  The run-wide approval does **not** cover three kinds of unreadable command, which stay in
+  the `control` category ("command cannot be read and may change the control point"; approve
+  once from the dialog or deny, never with `dw approve`):
+  1. a command whose text mentions the control point or a file or variable that protects it
+     (`dw`, `.dodocs-workflow`, `DW_HOME`, `.claude/settings`, `settings.local.json`,
+     `hooks.conf`, `agtermctl`, `.git/config`, `.git/hooks`, `.git/info/attributes`,
+     `GIT_DIR`, `core.hooksPath`, `BASH_ENV`, `LD_PRELOAD` and the other loader variables), in
+     any case and through quotes or backslashes;
+  2. a command where what cannot be read is where it writes (a loop variable over words only
+     known at run time, or too many words, used as a write target; an arithmetic subscript),
+     or a git configuration or environment override (`git -c core.sshCommand=...`,
+     `GIT_DIR=...`, `git config $KEY ...`);
+  3. shell or interpreter code that could not be scanned at all: a shell or interpreter fed
+     from a pipe (`curl ... | sh`), an interactive shell (`su`, `sudo -s`), `bash -c "$CMD"`,
+     `python3 -c "$CODE"`, `eval "$(...)"`, `source <(...)`, `bash <(...)`, or a `-c` string
+     or here-document the guard cannot parse.
 - While a run is active in a project, your own Claude sessions in that project see the same
   questions. That is accepted.
 - **After the run ends.** A session that belongs to a run that has finished, failed, been
@@ -311,8 +327,9 @@ be approved for the run, unless noted. Those held as "command cannot be read" ar
   directory; a run-time word written directly in your home directory (`echo x > ~/$F`).
 - **Run-time programs and wrappers**: `cd $DW_HOME` (`control`); held as `unreadable`:
   `python3 -m $MOD`, `tsx $SCRIPT`, a wrapper with a run-time or glob argument
-  (`timeout 5 ls $DIR`, `npx tsx x.ts "$PORT"`), and a loop over more than 64 literal words
-  whose body writes the loop variable.
+  (`timeout 5 ls $DIR`, `npx tsx x.ts "$PORT"`). Held as `control`: a loop over more than 64
+  literal words, or over words only known at run time (`for f in $(ls)`), whose body writes
+  the loop variable.
 - **Environment**: `ENV=value` on a line that also runs a shell (`ENV=prod npm ci && bash build.sh`),
   `BASH_ENV=value` always, `NODE_OPTIONS` with run-time text, loader variables under a wrapper
   even when they belong to the wrapped program (`sudo make LD_PRELOAD=x`).

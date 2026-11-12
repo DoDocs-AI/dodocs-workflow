@@ -630,6 +630,21 @@ def _unreadable_match() -> dict:
     return {"id": UNREADABLE_ID, "category": "unreadable", "describe": UNREADABLE}
 
 
+# What cannot be read, where the control point's own protection may depend on it: the text
+# names the control point, what cannot be read is a write position or a git override, or it
+# is shell or interpreter code that could not be scanned at all. Held as `control`.
+UNREADABLE_STATE_ID = "control-unreadable-state"
+UNREADABLE_STATE = "command cannot be read and may change the control point"
+
+
+def _unreadable_state_match() -> dict:
+    return {"id": UNREADABLE_STATE_ID, "category": "control", "describe": UNREADABLE_STATE}
+
+
+def _is_unreadable(match: dict) -> bool:
+    return match.get("id") in (UNREADABLE_ID, UNREADABLE_STATE_ID)
+
+
 def _dynamic(token: str) -> bool:
     if token in ("[", "[[", "{", "}", "{}"):
         return False

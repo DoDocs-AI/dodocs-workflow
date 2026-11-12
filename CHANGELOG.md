@@ -12,6 +12,10 @@ feat(control): guard usability
   turns the guard's fail-closed reading off for that run. When the same command also matches
   another category, that category decides the question, and an unreadable approval never lets
   it through.
+- An unreadable command stays `control` (rule `control-unreadable-state`, not approvable for
+  the run or with `dw approve`) when its text names the control point, when what cannot be read
+  is a write target or a git override, or when it is shell or interpreter code that could not
+  be scanned (`curl ... | sh`, `bash -c "$CMD"`, `eval "$(...)"`).
 
 ## [v2.1.0] - 2026-11-12
 

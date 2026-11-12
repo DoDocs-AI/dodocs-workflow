@@ -188,6 +188,14 @@ class _Protected:
                 return True
         return False
 
+    def _only_the_note(self, token: str, cwd: Optional[str], bodies: list, marks) -> bool:
+        """Every reading of the word is exactly the run's result note, and it is spared."""
+        skels = self._skeletons(token, bodies, marks)
+        return bool(skels) and all(
+            skel and not _wild(skel) and (os.path.isabs(skel) or cwd is not None)
+            and self.note_exempt(os.path.realpath(os.path.join(cwd or "/", skel)))
+            for skel in skels)
+
     def hit(self, path: str) -> bool:
         """A real path without wildcards."""
         if self.note_exempt(path):
@@ -381,6 +389,8 @@ class _Protected:
     def token_hit(self, token: str, cwd: Optional[str], bodies: Optional[list] = None,
                   marks=()) -> bool:
         """Whether a word in a write position may name one of the control point's files."""
+        if self.note_spared and self._only_the_note(token, cwd, bodies or [], marks):
+            return False
         candidates = [token]
         if "=" in token:
             candidates.append(token.split("=", 1)[1])
@@ -396,7 +406,7 @@ class _Protected:
                 if not _wild(skel) and (os.path.isabs(skel) or cwd is not None):
                     resolved = os.path.realpath(os.path.join(cwd or "/", skel))
                     if self.note_exempt(resolved):
-                        return False
+                        continue  # this reading is the note; the word's other readings count
                     if self.hit(resolved):
                         return True
                 if self.names(skel):

@@ -1191,13 +1191,28 @@ def _spared_note_words(original: list, tokens: list, redirects: list, ctx: _Ctx,
         return set()
     name = tokens[0]
     if name in _NOTE_WRITERS:
-        return set(range(len(original), len(original) + len(redirects)))
+        # One output redirection only: zsh writes every target of several (MULTIOS).
+        if len(redirects) == 1 and _literal_path(redirects[0], ctx):
+            return {len(original)}
+        return set()
     if name == "tee":
         options = [t for t in tokens[1:] if _is_option(t)]
         operands = [i for i, t in enumerate(tokens) if i and not _is_option(t)]
-        if len(operands) == 1 and all(t in ("-a", "--append") for t in options):
+        if len(operands) == 1 and all(t in ("-a", "--append") for t in options) and \
+                not redirects and _literal_path(tokens[operands[0]], ctx):
             return {len(original) - len(tokens) + operands[0]}
     return set()
+
+
+def _literal_path(word: str, ctx: _Ctx) -> bool:
+    """Whether a word (quotes removed) is one literal path: no brace, glob character, tilde
+    (other than a leading ~/), parameter, command or arithmetic expansion or process
+    substitution. The literal $DW_HOME / ${DW_HOME} and a leading ~/ are the expansions
+    allowed, as the words that name the real state directory and home."""
+    text = re.sub(r"^(\$DW_HOME|\$\{DW_HOME\})(?=/|$)", "", word)
+    if text.startswith("~/"):
+        text = text[2:]
+    return bool(text) and not re.search(r"[{}*?\[\]$`~]|__dwsub|[<>]\(", text)
 
 
 def _control_matches(original: list, tokens: list, redirects: list, ctx: _Ctx,

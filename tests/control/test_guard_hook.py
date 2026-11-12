@@ -1236,3 +1236,41 @@ class GuardResultNoteLinkTests(NoteFixture):
         self.allowed("echo DONE >> %s" % self.note)
         self.assertIsNone(self.guard(self.payload(
             self.path, tool="Write", tool_input={"file_path": self.note, "content": "DONE"})))
+
+
+class GuardResultNoteLiteralTargetTests(NoteFixture):
+    """The note is spared only for a redirect target that is one literal path to it."""
+
+    def test_brace_glob_and_expansion_targets_are_held(self):
+        rid = self.rid
+        for command in ("echo x > %s/{%s.result.md,../registry.json}" % (self.runs, rid),
+                        "echo x > %s/{runs/%s.result.md,registry.json}" % (self.home, rid),
+                        "echo x > %s/{%s.result.md,../bin/dw}" % (self.runs, rid),
+                        "cat > %s/{%s.result.md,../registry.json} <<'EOF'\nx\nEOF" % (self.runs, rid),
+                        "printf x > %s/{%s.result.md,../registry.json}" % (self.runs, rid),
+                        "echo x > %s{,.bak}" % self.note,
+                        "echo x > %s/%s.result.m?" % (self.runs, rid),
+                        "echo x > %s > /tmp/y" % self.note):
+            with self.subTest(command=command):
+                self.held_as_control(command)
+        self.assertEqual(open(self.note).read(), "")
+
+    def test_a_run_time_target_gets_no_note_exemption(self):
+        # `echo x > "$X"` is judged by the ordinary check, which does not hold a run-time
+        # redirect target (unchanged); the exemption itself never applies to such a word.
+        from dwlib import guard
+        ctx = guard._Ctx(str(self.path), str(self.path), [], self.rid)
+        ctx.note_plain = True
+        self.assertEqual(guard._spared_note_words(["echo", "x"], ["echo", "x"], ["$X"], ctx,
+                                                  False, 0), set())
+        self.assertEqual(guard._spared_note_words(["echo", "x"], ["echo", "x"], [self.note], ctx,
+                                                  False, 0), {2})
+
+    def test_one_literal_path_to_the_note_is_allowed(self):
+        rid = self.rid
+        for command in ("echo x > %s" % self.note, 'echo x > "%s"' % self.note,
+                        "echo x > '%s'" % self.note, "echo x > $DW_HOME/runs/%s.result.md" % rid,
+                        "echo x > ${DW_HOME}/runs/%s.result.md" % rid,
+                        "cat > %s <<'EOF'\nDONE\nEOF" % self.note):
+            with self.subTest(command=command):
+                self.allowed(command)

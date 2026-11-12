@@ -229,7 +229,7 @@ def cmd_run(args) -> int:
         raise UserError("usage: dw run PROJECT COMMAND...")
     project = _find_project(args.project)
     try:
-        run = runs.request_run(project, " ".join(command))
+        run = runs.request_run(project, " ".join(command), keep_open=args.keep_open)
     except runs.RunRefused as exc:
         raise UserError(str(exc))
     if run["state"] == "failed":
@@ -291,6 +291,8 @@ def _view_lines(project_id, v, finished=False) -> list:
         flags.append("session missing")
     if v.get("session_unknown"):
         flags.append("session not visible: a terminal window is closed")
+    if v.get("session_open"):
+        flags.append("session still open")
     head = "  %s  %s  [%s]" % (v["id"], project_id, v["state"])
     head += " %s%s" % (_age(v["since"]), " ago" if finished else "")
     flags = [f for f in flags if f]
@@ -377,7 +379,10 @@ def cmd_dismiss(args) -> int:
         run = runs.dismiss_run(args.run_id)
     except runs.RunError as exc:
         raise UserError(str(exc))
-    print("%s dismissed" % run["id"])
+    if run.get("session_closed"):
+        print("%s dismissed; its session was closed" % run["id"])
+    else:
+        print("%s dismissed" % run["id"])
     return 0
 
 
@@ -560,6 +565,8 @@ def build_parser() -> argparse.ArgumentParser:
     auto.add_argument("--note", default="")
     auto.set_defaults(func=cmd_project_auto_approve)
     run = sub.add_parser("run", help="start a run in an AGTerm session")
+    run.add_argument("--keep-open", action="store_true",
+                     help="do not close the run's session when it finishes as done")
     run.add_argument("project")
     run.add_argument("command", nargs=argparse.REMAINDER)
     run.set_defaults(func=cmd_run)

@@ -106,7 +106,10 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
     live = None
     session_missing = False
     session_unknown = False
+    session_open = False
     stalled = False
+    if sessions is not None and state in ENDED and run.get("agterm_session"):
+        session_open = run["agterm_session"] in sessions
     if sessions is not None and state in ACTIVE and run.get("agterm_session"):
         session = sessions.get(run["agterm_session"])
         if session is None:
@@ -128,6 +131,7 @@ def _run_view(project: dict, run: dict, sessions: Optional[dict], now: float,
         "stalled": stalled,
         "session_missing": session_missing,
         "session_unknown": session_unknown,
+        "session_open": session_open,
         "progress": find_progress(project["path"], run) if state in ACTIVE else None,
         "result": _result_note(run["id"]) if state in ENDED or state == "blocked" else None,
         "pending": _action_view(run.get("pending_approval")),

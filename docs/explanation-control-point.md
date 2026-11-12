@@ -78,6 +78,15 @@ registry, run records and log in `~/.dodocs-workflow/` are kept.
 - **Claude Code only** for now. Other harnesses are a later part; `dw run` refuses them.
 - **Nothing outside the checkout.** `/container-team` and any `--docker` command are refused,
   because the guard only reaches commands that work in the project directory.
+- **A run that finishes as done has its session closed.** After the state change and the
+  notification, `dw` closes the run's AGTerm session. **Closing a session ends anything still
+  running in it**, such as a preview server a pipeline started, so start a run whose output you
+  want to browse in its session with `dw run --keep-open <project> "<command>"` (kept across
+  `dw resume`), or turn closing off for every run with `"close_done_sessions": false` at the top
+  level of `~/.dodocs-workflow/registry.json` (`--keep-open` wins either way). Sessions of runs
+  that failed, blocked or were interrupted stay open for you to look at; `dw dismiss <run-id>`
+  closes a finished run's session that is still open, and `dw status` marks such a run
+  `session still open`. A failed close is only logged in `dw.log`.
 - A run that is interrupted (AGTerm restarted, session lost) is never re-run automatically.
   `dw resume <run-id>` reopens its Claude conversation and tells the agent to continue the
   task and finish it, with the same instructions for the result note. A finished note left

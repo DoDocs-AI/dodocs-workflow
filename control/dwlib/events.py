@@ -122,7 +122,9 @@ def _unblock(run_id: str) -> None:
     store.update_run(run_id, unblock)
 
 
-def _finish_from_note(run: dict, note: tuple, session_id: str, event: str) -> None:
+def _finish_from_note(run: dict, note: tuple, session_id: str, event: str) -> bool:
+    """Act on the run's result note. True when the run has just finished as done and its
+    session is to be closed (the caller closes it once the next queued run has started)."""
     marker, body = note
     run_id = run["id"]
     if marker == "BLOCKED":
@@ -131,14 +133,26 @@ def _finish_from_note(run: dict, note: tuple, session_id: str, event: str) -> No
         _set_aside(run_id, event)
         if changed:
             _notify(event, session_id, "dw: %s needs you" % run_id, reason)
-        return
+        return False
     if marker == "FAILED":
         state, reason = "failed", _first_line(body, "see result note")
     else:
         state, reason = "done", None
-    _, changed = runs.finish_run_changed(run_id, state, reason)
-    if changed:
-        _notify(event, session_id, "dw: %s %s" % (run_id, state), _first_line(body, state))
+    record, changed = runs.finish_run_changed(run_id, state, reason)
+    if not changed:
+        return False
+    _notify(event, session_id, "dw: %s %s" % (run_id, state), _first_line(body, state))
+    return state == "done" and runs.closes_when_done(record)
+
+
+def _close_session(event: str, session_id: str) -> None:
+    """Close a done run's session; best effort: a failure is logged and changes nothing else.
+    The session-closed event that follows finds no active run and leaves the record alone
+    (and starts nothing: the next queued run was started before the close)."""
+    try:
+        agterm.close_session(session_id)
+    except Exception as exc:
+        log_error(event + " close session", exc)
 
 
 def on_status(session_id: str, status: str) -> None:
@@ -155,10 +169,13 @@ def on_status(session_id: str, status: str) -> None:
         note = read_result_note(run_id)
         if note is None:
             return
+        close = False
         try:
-            _finish_from_note(run, note, session_id, "status completed")
+            close = _finish_from_note(run, note, session_id, "status completed")
         finally:
             runs.start_eligible()
+        if close:
+            _close_session("status completed", session_id)
 
 
 def on_session_closed(session_id: str) -> None:

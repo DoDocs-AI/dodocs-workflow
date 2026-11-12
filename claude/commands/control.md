@@ -39,6 +39,7 @@ Use `dw status --json` (or `dw status <project> --json`). Answer in this order: 
 - For "what is it doing right now", read the terminal tail with `dw tail <run-id>`. It is read-only.
 - A run shown as `session_unknown` means a terminal window is closed and the session cannot be seen. Say that. Do not report it as dead or failed.
 - For a finished run the owner has now seen, use `dw dismiss <run-id>` so it stops asking for attention.
+- Finished runs' sessions are closed automatically; when the owner says "keep it open", start the run with `dw run --keep-open <project> "<command>"`; use `dw dismiss <run-id>` to close the session of a failed or interrupted run the owner has looked at.
 - `dw cancel <run-id>` stops a run and `dw resume <run-id>` reopens an interrupted one and tells it to continue, both only when the owner asks.
 
 ## Approvals

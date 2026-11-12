@@ -236,7 +236,7 @@ class ShellFormTests(GuardClassifyBase):
         for command in ("dw status", "dw queue --json", "dw tail r-1", "dw project list"):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command))
-        for command in ("dw run p /x", "dw deny r-1", "dw project add --name a", "dw cancel r-1",
+        for command in ("dw run p /x", "dw run --keep-open p /x", "dw deny r-1", "dw project add --name a", "dw cancel r-1",
                         "python3 /opt/dw approve r-1"):
             with self.subTest(command=command):
                 self.assertEqual(self.category(self.bash(command)), "control")

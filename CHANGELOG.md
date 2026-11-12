@@ -32,6 +32,9 @@ feat(control): guard usability
   `--remove N`. Never for `control`, never in an ended run's session; unreadable entries must be
   specific; malformed entries are ignored and reported by `dw doctor`. `dw status` shows the
   rule id of a pending approval; run records remember `last_held`.
+- A run that finishes as done has its AGTerm session closed (best effort, logged on failure);
+  `dw run --keep-open` or registry `"close_done_sessions": false` keeps it. `dw dismiss` closes
+  a finished run's session that is still open; `dw status` marks it `session still open`.
 - `kubectl rollout status` and `kubectl rollout history` are reads and no longer held; any
   other `rollout` action (or one that cannot be read) still is.
 

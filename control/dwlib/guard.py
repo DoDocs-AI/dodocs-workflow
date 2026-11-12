@@ -1745,6 +1745,34 @@ def _action_text(tool: str, tool_input: dict) -> str:
     return json.dumps(tool_input, sort_keys=True, default=str)
 
 
+def _question_message(describe: str, tool: str, text: str) -> str:
+    """The one-line question: the matched part first and whole (cut with a mark only when it
+    alone exceeds the limit), then the command with visible marks for line breaks and control
+    characters, cut at the end with a mark that says how much was left out (the full text is
+    in dw.log)."""
+    limit = agterm.MESSAGE_MAX
+    head = agterm.visible(describe)
+    if len(head) > limit:
+        return head[:limit - 1] + "\u2026"
+    head = "%s \u2014 %s: " % (head, tool)
+    shown = agterm.visible(text)
+    if len(head) + len(shown) <= limit:
+        return head + shown
+    cut = len(shown)
+    while True:
+        mark = "\u2026 (+%d chars; full command in dw.log)" % cut
+        keep = max(0, limit - len(head) - len(mark))
+        if len(shown) - keep == cut:
+            break
+        cut = len(shown) - keep
+    message = head + shown[:keep] + mark
+    if len(message) <= limit:
+        return message
+    # No room for any of the command: the matched part alone, whole.
+    short = "%s (command in dw.log)" % agterm.visible(describe)
+    return short if len(short) <= limit else agterm.visible(describe)
+
+
 def _matching_grant(grants: list, action: str) -> Optional[dict]:
     """The one-shot grant for this action. The action already names its rules (see
     `_fingerprint`); the combined rule id is not compared, since its order follows the
@@ -1852,7 +1880,9 @@ def _hold(project: dict, run: dict, match: dict, tool: str, tool_input: dict) ->
         buttons.append(("deny", "Deny"))
         # One line: AGTerm refuses control characters, and agterm sanitises the rest.
         count = "%d guarded actions: " % len(pairs) if len(pairs) > 1 else ""
-        message = "%s%s \u2014 %s: %s" % (count, describe, tool, _action_text(tool, tool_input))
+        text = _action_text(tool, tool_input)
+        events.log_text("guard question run %s %s" % (run_id, tool), text)
+        message = _question_message(count + describe, tool, text)
         answer, error = _wait_for_owner(
             run_id, sid, "%s: approve %s?" % (name, match["category"]), message, buttons,
             lambda r: _decided_elsewhere(r, parts, action, control), started)

@@ -33,6 +33,19 @@ def sanitise(text, limit: int) -> str:
     return line if len(line) <= limit else line[:limit - 1] + "\u2026"
 
 
+_LINE_BREAK_RE = re.compile("\r\n|[\n\r\u2028\u2029]")
+LINE_BREAK_MARK = "\u23ce"  # RETURN SYMBOL
+TAB_MARK = "\u2423"  # OPEN BOX
+CONTROL_MARK = "?"
+
+
+def visible(text) -> str:
+    """Text whose line breaks, tabs and other control characters are shown as printable marks
+    (which AGTerm accepts), so a command keeps its meaning on one line."""
+    line = _LINE_BREAK_RE.sub(LINE_BREAK_MARK, str(text)).replace("\t", TAB_MARK)
+    return _CONTROL_RE.sub(CONTROL_MARK, line)
+
+
 def _buttons(buttons: list) -> list:
     options: list = []
     for button_id, label in buttons:

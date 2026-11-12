@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -281,8 +282,52 @@ class GuardHookTests(GuardHookBase):
             self.assertFalse(any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in text), text)
         message = ask[ask.index("--message") + 1]
         self.assertEqual(message, "push to the default branch: git push origin main"
-                                  " \u2014 Bash: echo 'st [0mart' git push origin main")
+                                  " \u2014 Bash: echo 'st?[0mart'\u23ce\u2423git push origin main")
         self.assertEqual(self.record(rid)["pending_approval"], None)
+
+    def question(self):
+        ask = self.ask_calls()[-1]
+        return ask[ask.index("--message") + 1]
+
+    def test_long_multiline_command_keeps_the_match_whole_and_marks_the_cut(self):
+        path, rid = self.start_run()
+        lines = ["git push origin main"]
+        while len("\n".join(lines)) < 3000:
+            lines.append("echo line %04d of a long script that keeps going" % len(lines))
+        command = "\n".join(lines)[:3000]
+        self.assertEqual(len(command), 3000)
+        self.held_pending(path, command)
+        message = self.question()
+        describe = "push to the default branch: git push origin main"
+        self.assertLessEqual(len(message), 240)
+        self.assertTrue(message.startswith(describe + " \u2014 Bash: git push origin main\u23ce"),
+                        message)
+        self.assertIn("\u23ce", message)
+        cut = re.search(r"\u2026 \(\+(\d+) chars; full command in dw\.log\)$", message)
+        self.assertIsNotNone(cut, message)
+        shown = message[len(describe + " \u2014 Bash: "):cut.start()]
+        self.assertEqual(len(shown) + int(cut.group(1)), 3000)
+        log = (self.dw_home / "dw.log").read_text()
+        self.assertIn(rid, log)
+        self.assertIn(json.dumps(command), log)
+
+    def test_short_single_line_command_is_shown_whole(self):
+        path, rid = self.start_run()
+        self.held_pending(path, "git push origin main")
+        self.assertEqual(self.question(), "push to the default branch: git push origin main"
+                                          " \u2014 Bash: git push origin main")
+
+    def test_a_describe_over_the_limit_is_cut_with_a_marker(self):
+        from dwlib import guard
+        message = guard._question_message("d" * 300, "Bash", "git push origin main")
+        self.assertEqual(len(message), 240)
+        self.assertTrue(message.startswith("d" * 200))
+        self.assertTrue(message.endswith("\u2026"))
+
+    def held_pending(self, path, command):
+        out = self.guard(self.payload(path, command))
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
 
     def test_ask_open_failure_text_is_not_relayed_to_the_agent(self):
         path, rid = self.start_run()

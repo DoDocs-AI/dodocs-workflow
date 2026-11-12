@@ -561,6 +561,15 @@ class AgtermAdapterTests(RunTestBase):
         self.assertEqual(agterm.sanitise("ab\ncd", 4), "ab …")
         self.assertEqual((agterm.TITLE_MAX, agterm.MESSAGE_MAX, agterm.NAME_MAX), (120, 240, 80))
 
+    def test_visible_marks_line_breaks_and_control_characters(self):
+        import unicodedata
+        from dwlib import agterm
+        self.assertEqual(agterm.visible("a\r\nb\nc\rd\u2028e\tf\x1bg\x00h\x7fi\x9bj  k"),
+                         "a\u23ceb\u23cec\u23ced\u23cee\u2423f?g?h?i?j  k")
+        for marker in ("\u23ce", "\u2423", "?", "\u2026", "\u2014"):
+            self.assertNotIn(unicodedata.category(marker), ("Cc", "Cf", "Zl", "Zp"))
+            self.assertEqual(agterm.sanitise(marker, 10), marker)
+
     def test_free_text_reaching_agtermctl_is_sanitised(self):
         from dwlib import agterm
         bad = "line one\nline\ttwo\x1b"

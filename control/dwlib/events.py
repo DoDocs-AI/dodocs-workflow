@@ -1,6 +1,7 @@
 """Run state changes driven by AGTerm events (called from `dw hook ...`)."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -27,6 +28,18 @@ def log_error(event: str, exc: BaseException) -> None:
         with open(str(path), "a") as fh:
             fh.write("%s %s: %s: %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), event,
                                           exc.__class__.__name__, message))
+    except Exception:
+        pass
+
+
+def log_text(event: str, text: str) -> None:
+    """Append one line to $DW_HOME/dw.log carrying `text` in full, JSON-quoted so that line
+    breaks and control characters stay on the line and nothing is lost. Never raises."""
+    try:
+        path = paths.home() / "dw.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(path), "a") as fh:
+            fh.write("%s %s: %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), event, json.dumps(text)))
     except Exception:
         pass
 

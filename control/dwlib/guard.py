@@ -406,7 +406,8 @@ def _wrapper_matches(tokens: list, seg: dict, ctx: _Ctx, depth: int, start: int 
     if name == "parallel":
         if any(_REMOTE_PARALLEL.match(t) for t in tokens[1:]):
             return [{"id": "remote-execution", "category": "deploy",
-                     "describe": "run commands on remote hosts: %s" % _short(" ".join(tokens))}]
+                     "describe": "run commands on remote hosts: %s" % _short(" ".join(tokens)),
+                     "segment": _segment_text(tokens)}]
         if all(t.startswith("-") or t.startswith(":::") for t in tokens[1:]):
             return [_unreadable_match()]  # the commands come from standard input
     if name in _SHELL_STARTERS:
@@ -658,7 +659,7 @@ def _analyze(original: list, redirects: list, seg: dict, ctx: _Ctx, depth: int,
     if tokens:
         rule = _first_rule(tokens, seg, ctx)
         if rule is not None:
-            matches.append(_render(rule, " ".join(original)))
+            matches.append(_render(rule, " ".join(original), _segment_text(original)))
     return matches
 
 
@@ -936,7 +937,8 @@ def _inline_matches(text: str, ctx: _Ctx, depth: int, spawn: bool = False) -> li
     found = {x["category"] for x in out}
     for rx, rid, category, describe in _INLINE_PATTERNS:
         if category not in found and rx.search(text):
-            out.append({"id": rid, "category": category, "describe": "%s: %s" % (describe, _short(text))})
+            out.append({"id": rid, "category": category, "describe": "%s: %s" % (describe, _short(text)),
+                        "segment": text})
             found.add(category)
     if _DW_REF_RE.search(text):
         out.append({"id": "control-dw", "category": "control",
@@ -1124,11 +1126,22 @@ def _state_match(detail: str) -> dict:
             "describe": "change the control point's files: %s" % _short(detail)}
 
 
-def _render(rule: dict, detail: str) -> dict:
+def _segment_text(tokens: list) -> str:
+    """The full text of a matched segment: its words as lexed, one space apart, each quoted
+    where needed so word boundaries survive. Part of an approval's identity (`_fingerprint`)."""
+    return " ".join(shlex.quote(str(t)) for t in tokens)
+
+
+def _render(rule: dict, detail: str, segment: Optional[str] = None) -> dict:
+    """The match for `rule`; `detail` is shown (shortened) in `describe`, `segment` (when
+    the match is about one segment of a command) is that segment's full text."""
     if rule["id"] == "control-unreadable":
         return _unreadable_match()
-    return {"id": rule["id"], "category": rule["category"],
-            "describe": "%s: %s" % (rule["describe"], _short(detail))}
+    out = {"id": rule["id"], "category": rule["category"],
+           "describe": "%s: %s" % (rule["describe"], _short(detail))}
+    if segment is not None:
+        out["segment"] = segment
+    return out
 
 
 _ALWAYS_SENSITIVE = {"git", "gh", "ssh", "scp", "rsync", "curl", "wget", "osascript", "dw",
@@ -1552,27 +1565,33 @@ def _mcp_rule_matches(rule: dict, server: str, tool: str) -> bool:
 
 
 def _combine(matches: list) -> Optional[dict]:
-    """One match for the call. `pairs` keeps every distinct (rule id, describe) the call hit,
-    sorted, before the merge by rule id: it is what an approval is about (see `_fingerprint`)."""
+    """One match for the call. Before the merge by rule id, `pairs` keeps every distinct
+    (rule id, describe) the call hit, for the question, and `keys` every distinct (rule id,
+    full segment text), which is what an approval is about (see `_fingerprint`)."""
     unique: list = []
     for m in matches:
         if not any(u["id"] == m["id"] for u in unique):
             unique.append(m)
     if not unique:
         return None
-    pairs = sorted({(m["id"], m["describe"]) for m in matches})
+    pairs = [list(p) for p in sorted({(m["id"], m["describe"]) for m in matches})]
+    keys = [list(k) for k in sorted({(m["id"], m["segment"]) for m in matches if "segment" in m})]
     if len(unique) == 1:
-        return {**unique[0], "pairs": [list(p) for p in pairs]}
-    unique.sort(key=lambda m: CATEGORIES.index(m["category"]))
-    return {"id": "+".join(m["id"] for m in unique), "category": unique[0]["category"],
-            "describe": "; ".join(m["describe"] for m in unique),
-            "pairs": [list(p) for p in pairs]}
+        out = {**unique[0], "pairs": pairs}
+    else:
+        unique.sort(key=lambda m: CATEGORIES.index(m["category"]))
+        out = {"id": "+".join(m["id"] for m in unique), "category": unique[0]["category"],
+               "describe": "; ".join(m["describe"] for m in unique), "pairs": pairs}
+    out.pop("segment", None)
+    if all("segment" in m for m in matches):
+        out["keys"] = keys
+    return out
 
 
 def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
              rules: list) -> Optional[dict]:
-    """The matching rule (`{"id", "category", "describe"}`, plus `pairs` for shell commands:
-    see `_combine`) or None.
+    """The matching rule (`{"id", "category", "describe"}`, plus `pairs` and `keys` for shell
+    commands: see `_combine`) or None.
 
     `rules` may contain a `run_context(run_id)` entry; that run's result note is exempt
     from the control rules.
@@ -1585,7 +1604,12 @@ def classify(tool_name: str, tool_input: dict, cwd: str, project_path: str,
     if tool_name == "Bash" or (shell_like and tool_name not in WRITE_TOOLS):
         command = str(tool_input.get("command") or "")
         ctx.full_text = command
-        return _combine(_shell_matches(command, ctx))
+        matches = [dict(m) for m in _shell_matches(command, ctx)]
+        for m in matches:
+            # A match not about one segment (an unreadable command, a write found across the
+            # line...) is about the whole command: its exact text is the segment.
+            m.setdefault("segment", command.strip())
+        return _combine(matches)
     if tool_name in WRITE_TOOLS:
         target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         if target and ctx.protected.token_hit(str(target), ctx.cwd):
@@ -1718,14 +1742,18 @@ def _pairs(match: dict) -> list:
 
 
 def _fingerprint(tool: str, tool_input: dict, match: dict) -> str:
-    """The identity of an approval: the guarded segments the call hit (rule id and describe
-    text of each), not the command line around them. It is what `pending_approval.action`,
-    one-shot grants, "one question per run at a time" and sibling waiters compare. An MCP
-    call has no segment text (its describe names only the tool), so its arguments count too."""
-    key: list = [_pairs(match)]
-    if tool.startswith("mcp__"):
+    """The identity of an approval; what `pending_approval.action`, one-shot grants, "one
+    question per run at a time" and sibling waiters compare. For Bash: the sorted (rule id,
+    full segment text) pairs the call hit, so the same guarded segment is the same action
+    whatever else is on the command line (a match about the whole command carries the whole
+    command as its segment). For any other tool: the rule ids, the tool and its input."""
+    keys = match.get("keys")
+    if tool == "Bash" and keys:
+        key: list = ["segments", sorted([str(r), str(t)] for r, t in keys)]
+    else:
         volatile = ("description", "timeout", "run_in_background")
-        key.append([tool, {k: v for k, v in tool_input.items() if k not in volatile}])
+        key = ["input", sorted(match["id"].split("+")), tool,
+               {k: v for k, v in tool_input.items() if k not in volatile}]
     text = json.dumps(key, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:20]
 

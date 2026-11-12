@@ -928,3 +928,71 @@ class GuardApprovalIdentityTests(GuardHookBase):
         out = self.guard(self.payload(path, tool=mcp, tool_input={"to": "b@example.com"}))
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertEqual(len(self.record(rid)["grants"]), 1)
+
+
+class GuardApprovalSegmentTests(GuardHookBase):
+    """The identity of an approval uses the full matched segment (Bash) or the whole tool
+    input (other tools), never the display text."""
+
+    def held(self, path, command=None, **kw):
+        out = self.guard(self.payload(path, command, **kw))
+        self.assertEqual((out["permissionDecision"], out["permissionDecisionReason"]),
+                         ("deny", PENDING_REASON))
+
+    def test_e_an_approved_push_does_not_cover_a_forced_push(self):
+        path, rid = self.start_run()
+        self.held(path, "git push origin main")
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        asks = len(self.ask_calls())
+        self.held(path, "git push origin main --force")
+        self.assertEqual(len(self.ask_calls()), asks + 1)
+        self.assertEqual(len(self.record(rid)["grants"]), 1)
+
+    def test_f_one_unreadable_command_is_not_another(self):
+        path, rid = self.start_run()
+        self.held(path, "$X one")
+        asks = len(self.ask_calls())
+        self.held(path, "$X two")  # a different action while one is pending: no dialog
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.assertEqual(self.record(rid)["pending_approval"]["describe"], "command cannot be read")
+        self.script_ask("once")
+        self.assertIsNone(self.guard(self.payload(path, "$X one")))  # the same action: asked
+        self.assertEqual(len(self.ask_calls()), asks + 1)
+        self.clear_answer()
+        self.held(path, "$X two")
+        self.assertEqual(len(self.ask_calls()), asks + 2)
+
+    def test_g_a_write_of_other_content_to_the_same_protected_file_is_another_action(self):
+        path, rid = self.start_run()
+        target = str(path / ".git" / "hooks" / "pre-push")
+
+        def write(content):
+            return self.payload(path, tool="Write", tool_input={"file_path": target, "content": content})
+
+        self.held(path, tool="Write", tool_input={"file_path": target, "content": "A"})
+        asks = len(self.ask_calls())
+        out = self.guard(write("B"))
+        self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+        self.assertEqual(len(self.ask_calls()), asks)
+        self.script_ask("once")
+        self.assertIsNone(self.guard(write("A")))
+        self.assertEqual(len(self.ask_calls()), asks + 1)
+        self.clear_answer()
+        out = self.guard(write("B"))
+        self.assertEqual(out["permissionDecisionReason"], PENDING_REASON)
+        self.assertEqual(len(self.ask_calls()), asks + 2)
+        self.script_ask("once")
+        self.assertIsNone(self.guard(write("B")))
+
+    def test_h_long_segments_with_the_same_display_text_are_different_actions(self):
+        path, rid = self.start_run()
+        first = "kubectl apply -f " + "a" * 380 + "1.yaml"
+        second = "kubectl apply -f " + "a" * 380 + "2.yaml"
+        self.held(path, first)
+        describe = self.record(rid)["pending_approval"]["describe"]
+        self.assertEqual(self.dw("approve", rid).returncode, 0)
+        self.held(path, second)
+        self.assertEqual(self.record(rid)["pending_approval"]["describe"], describe)
+        self.assertEqual(len(self.record(rid)["grants"]), 1)
+        self.assertIsNone(self.guard(self.payload(path, "true && " + first)))
+        self.assertEqual(self.record(rid)["grants"], [])

@@ -1855,7 +1855,11 @@ class ZshPrecommandTests(GuardClassifyBase):
     def test_zsh_precommand_words_and_loops_do_not_hide_a_command(self):
         held = {
             "repeat 3 git push origin main": "merge",
-            "repeat $N git push origin main": "merge",
+            "repeat $N git push origin main": "control",  # a computed count: the line cannot be read
+            "repeat 1+2 git push origin main": "merge",
+            "repeat \"3\" git push origin main": "merge",
+            "repeat $((2)) git push origin main": "control",  # a computed count: the line cannot be read
+            "repeat x git push origin main": "merge",
             "noglob git push origin main": "merge",
             "nocorrect gh pr merge 3": "merge",
             "builtin command git push origin main": "merge",
@@ -1871,7 +1875,8 @@ class ZshPrecommandTests(GuardClassifyBase):
         for command, category in held.items():
             with self.subTest(command=command):
                 self.assertEqual(self.category(self.bash(command)), category)
-        for command in ("repeat 3 echo hi", "noglob ls *.txt", "exec true", "time npm test"):
+        for command in ("repeat 3 echo hi", "repeat 2 ls", "noglob ls *.txt", "exec true",
+                        "time npm test"):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command))
 

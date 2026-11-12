@@ -593,12 +593,6 @@ def _strip_prefix(tokens: list) -> list:
             return []
         if t in _KEYWORDS or t.endswith("()") or t in _ZSH_PRECOMMANDS:
             tokens = tokens[1:]
-        elif t == "repeat":
-            # zsh `repeat COUNT command`: the count is a number or an expansion. A word that
-            # is neither is taken as the command, so nothing after `repeat` is hidden.
-            count = tokens[1] if len(tokens) > 1 else ""
-            counted = re.match(r"^(\d+|\$.*|__dwsub.*)$", count) is not None
-            tokens = tokens[2:] if counted else tokens[1:]
         elif t == "function":
             tokens = tokens[2:]
         elif _ASSIGNMENT_RE.match(t):
@@ -633,7 +627,10 @@ WRAPPERS = {"env", "sudo", "doas", "command", "builtin", "nohup", "chronic", "un
             "gtimeout", "xargs", "npx", "bunx", "pnpx", "flock", "setsid", "chroot", "script",
             "parallel", "taskset", "cgexec", "systemd-run", "runuser", "su", "nsenter", "unshare",
             "firejail", "proxychains", "proxychains4", "tsocks", "torsocks", "strace", "ltrace",
-            "dtruss", "valgrind", "entr", "nodemon"}
+            "dtruss", "valgrind", "entr", "nodemon",
+            # zsh `repeat COUNT command`: as a wrapper every later word is read as a possible
+            # command start, so an unusual count word (1+2, "3", $((2)), x) hides nothing.
+            "repeat"}
 _RUNNERS = {"pnpm": ("dlx", "exec"), "yarn": ("dlx", "exec"), "npm": ("exec", "x"),
             "uv": ("run", "tool"), "uvx": (), "poetry": ("run",), "pipenv": ("run",),
             "bundle": ("exec",), "op": ("run",), "rye": ("run",), "pdm": ("run",),

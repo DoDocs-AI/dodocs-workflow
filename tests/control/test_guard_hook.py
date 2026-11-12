@@ -1004,6 +1004,7 @@ class GuardApprovalSegmentTests(GuardHookBase):
         "for i in 1 2; do git push origin main; done",
         "echo x | xargs -I{} git push origin main",
         "foreach i (1 2); git push origin main; end",
+        "repeat 3 git push origin main",
         "systemd-run --on-calendar=daily git push origin main",
         "python3 -c 'import os; os.system(\"git push origin main\")'",
         "bash -c 'git push origin main'",

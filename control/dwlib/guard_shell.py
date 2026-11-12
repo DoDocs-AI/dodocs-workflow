@@ -582,13 +582,23 @@ def _flags_values(tokens, value_flags):
     return out
 
 
+# zsh precommand modifiers that run the words after them as the command.
+_ZSH_PRECOMMANDS = {"noglob", "nocorrect", "-"}
+
+
 def _strip_prefix(tokens: list) -> list:
     while tokens:
         t = tokens[0]
         if t in ("for", "case", "select"):
             return []
-        if t in _KEYWORDS or t.endswith("()"):
+        if t in _KEYWORDS or t.endswith("()") or t in _ZSH_PRECOMMANDS:
             tokens = tokens[1:]
+        elif t == "repeat":
+            # zsh `repeat COUNT command`: the count is a number or an expansion. A word that
+            # is neither is taken as the command, so nothing after `repeat` is hidden.
+            count = tokens[1] if len(tokens) > 1 else ""
+            counted = re.match(r"^(\d+|\$.*|__dwsub.*)$", count) is not None
+            tokens = tokens[2:] if counted else tokens[1:]
         elif t == "function":
             tokens = tokens[2:]
         elif _ASSIGNMENT_RE.match(t):

@@ -1849,6 +1849,33 @@ class FollowupTests(GuardClassifyBase):
         ])
 
 
+class ZshPrecommandTests(GuardClassifyBase):
+    """Claude Code runs commands in zsh: words zsh puts in front of a command never hide it."""
+
+    def test_zsh_precommand_words_and_loops_do_not_hide_a_command(self):
+        held = {
+            "repeat 3 git push origin main": "merge",
+            "repeat $N git push origin main": "merge",
+            "noglob git push origin main": "merge",
+            "nocorrect gh pr merge 3": "merge",
+            "builtin command git push origin main": "merge",
+            "command -p git push origin main": "merge",
+            "exec git push origin main": "merge",
+            "exec -a name -cl git push origin main": "merge",
+            "- git push origin main": "merge",
+            "time git push origin main": "merge",
+            "! git push origin main": "merge",
+            "foreach i (1 2); git push origin main; end": "merge",
+            "for i (1 2) git push origin main": "merge",
+        }
+        for command, category in held.items():
+            with self.subTest(command=command):
+                self.assertEqual(self.category(self.bash(command)), category)
+        for command in ("repeat 3 echo hi", "noglob ls *.txt", "exec true", "time npm test"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
+
 class GuardEntryPresentTests(DwTestCase):
     def write(self, data):
         import json

@@ -211,6 +211,17 @@ Things that pass although you might expect them to be held.
   number is read by guess. The relative write is then judged in the wrong directory.
 - A relative write to a bare protected file name after a `cd` the guard cannot resolve: after
   `cd $VAR`, `cd -` or `popd`, `echo x > settings.json` is not held.
+- A redirect whose target is known only at run time: `echo x > "$X"` is not held, whatever
+  `X` holds at run time, including a protected path (the guard never judges the value of a
+  variable). The result-note exemption is never applied to such a target.
+- Arithmetic `$((...))` that is also read as a command substitution whose body starts with a
+  subshell: if that second reading cannot be parsed and names no guarded program, only the
+  arithmetic reading counts, so a program hidden behind a variable passes
+  (`x=git; echo $(($x push origin main); true)`, `echo $(("$G" push origin main); true)`).
+- The zsh clobber-override redirects written with a space before the target pass un-held, for
+  a protected path too: `echo x >! <state dir>/registry.json`, `echo x >! .git/config`,
+  `>>!`, `>&!`, `&>!` and `&>>!` (zsh writes the file; the guard reads `!` as the target).
+  `>|` and `>!file` without the space are held.
 
 **Protected directories named as a whole**
 - `rm -rf .claude`, `rm -rf .git`, `mv .claude c`, `cp -r /tmp/x .claude`,
@@ -306,6 +317,11 @@ be approved for the run, unless noted.
   same with `$DW_HOME` (only the plain, existing path is spared); writing the note with
   `cp`, `mv` or `git log > note` or any other program than `echo`, `printf`, `cat`, `tee` and
   the file-writing tool.
+  Also held: a grouped command writing the note (`{ echo a; echo b; } > note`,
+  `(echo a; echo b) > note`), `cd <state dir>/runs; echo x > <run-id>.result.md`, and any note
+  write whose command line contains an arithmetic expansion (`echo $((1+2)) > note`,
+  `echo "$((1+2))" > note`, a here-document body with `$((...))` written to the note), though
+  the same arithmetic written elsewhere passes.
 - **An approval question for the same words in another directory**: an approval covers one
   directory, so `git push origin main` after `cd /tmp/other` asks again (an ordinary question,
   not a `control` hold).
